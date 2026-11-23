@@ -23,6 +23,7 @@ env var                    meaning                                        defaul
 ``LAYA_HOST``              bind address                                   0.0.0.0
 ``LAYA_PORT``              bind port                                      8000
 ``LAYA_DEVICE``            torch device for every checkpoint              (auto)
+``LAYA_MULTIMODAL_MODEL``  native multimodal model or trained directory   (off)
 ``LAYA_PRELOAD``           build the checkpoints at startup, not lazily   1
 ``LAYA_MODELS``            comma list to preload (english,multilingual,   (all)
                            typed-decisions); empty = every checkpoint
@@ -1303,6 +1304,9 @@ def build_router():
     models_env = os.environ.get("LAYA_MODELS", "").strip()
     preload_names = [m.strip() for m in models_env.split(",") if m.strip()] or None
     options = {"device": device, "auto_task_detection": _env_bool("LAYA_AUTO_TASK", False)}
+    multimodal_model = os.environ.get("LAYA_MULTIMODAL_MODEL", "").strip()
+    if multimodal_model:
+        options["multimodal"] = multimodal_model
     max_loaded = _resolve_max_loaded()
     if max_loaded is not None:
         options["max_loaded"] = max_loaded
@@ -1694,6 +1698,60 @@ def create_app(router: Optional[Any] = None):
             _log.exception("inference failed for model=%s",
                            str(model).replace("\n", "\\n").replace("\r", "\\r"))
             raise HTTPException(status_code=500, detail="inference failed")
+
+    @app.post("/v1/multimodal")
+    async def multimodal(request: Request, authorization: Optional[str] = Header(default=None)):
+        nonlocal gate
+        import base64
+        _check_auth(authorization)
+        async with _admit():
+            body = await _read_json_body(request, body_read_timeout)
+            if not isinstance(body, dict) or not isinstance(body.get("questions"), dict):
+                raise HTTPException(status_code=400, detail="request needs a questions object")
+            allowed = {"state", "questions", "image", "audio", "video", "max_len", "min_confidence"}
+            if set(body) - allowed:
+                raise HTTPException(status_code=422, detail="unsupported multimodal controls: %s" % ", ".join(sorted(set(body) - allowed)))
+            _check_request_limits(body.get("state") or "", body["questions"])
+            if _has_lone_surrogate(body):
+                raise HTTPException(status_code=400, detail=_LONE_SURROGATE_DETAIL)
+            media = {}
+            for kind in ("image", "audio", "video"):
+                if body.get(kind) is None:
+                    continue
+                value = body[kind]
+                if not isinstance(value, dict) or set(value) != {"base64"} or not isinstance(value["base64"], str):
+                    raise HTTPException(status_code=422, detail=kind + " must be an object containing only base64 file bytes")
+                try:
+                    media[kind] = base64.b64decode(value["base64"], validate=True)
+                except ValueError:
+                    raise HTTPException(status_code=422, detail="invalid base64 " + kind) from None
+                if not media[kind]:
+                    raise HTTPException(status_code=422, detail="empty " + kind)
+            if len(media) != 1:
+                raise HTTPException(status_code=422, detail="supply exactly one image, audio or video; video retains its soundtrack")
+            if getattr(router, "_multimodal_spec", None) is None:
+                raise HTTPException(status_code=503, detail="configure LAYA_MULTIMODAL_MODEL to enable native multimodal decisions")
+            kwargs = dict(media)
+            budget = _validate_budget_param(body, "max_len", _resolve_max_token_budget())
+            if budget is not None:
+                kwargs["max_len"] = budget
+            threshold = _validate_min_confidence(body)
+            if threshold is not None:
+                kwargs["min_confidence"] = threshold
+            if gate is None:
+                gate = asyncio.Lock()
+            try:
+                async with gate:
+                    run = partial(router.predict, body.get("state"), body["questions"],
+                                  model="multimodal", **kwargs)
+                    result = await asyncio.get_running_loop().run_in_executor(pool, _run_inference, run)
+                    from fastapi.responses import JSONResponse
+                    return JSONResponse(content=result)
+            except (ValueError, TypeError) as error:
+                raise HTTPException(status_code=422, detail=str(error)) from None
+            except Exception:
+                _log.exception("multimodal inference failed")
+                raise HTTPException(status_code=500, detail="multimodal inference failed") from None
 
     @app.post("/v1/systemone/batch")
     async def systemone_batch(request: Request, authorization: Optional[str] = Header(default=None)):

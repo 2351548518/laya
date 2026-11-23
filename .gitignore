@@ -11,6 +11,9 @@ result-*
 env/
 venv/
 .venv/
+.venv-mm/
+multimodal-data/
+multimodal-runs/
 build/
 develop-eggs/
 dist/
@@ -93,3 +96,21 @@ research/*_benchmark_results.json
 # (fetch them with: python verify/checkpoints.py --fetch)
 models/
 fit-routing/
+
+# Local collection pipelines, experiment outputs, and training compatibility links.
+/_local/
+/research/configs
+/research/results/
+/research/scripts/*.py
+/laya/multimodal_data.py
+/laya/multimodal_corpus.py
+/laya/multimodal_curate.py
+/laya/multimodal_mix.py
+/laya/multimodal_jev.py
+/laya/multimodal_public.py
+/laya/multimodal_quality.py
+/.vscode/
+/.aws/
+/.cache/
+/.codex/
+/.agents/

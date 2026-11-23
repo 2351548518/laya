@@ -58,6 +58,46 @@ For TypeScript / Node.js / browser, see [`laya-ts/`](https://github.com/NandhaKi
   <img src="https://raw.githubusercontent.com/NandhaKishorM/laya/main/assets/long_context_8192.png" alt="laya-multilingual with max_len=8192: 16 to 18 of 20 requests correct with up to about 4,000 tokens of text before them, more variable beyond" width="100%" />
 </p>
 
+## Train a native multimodal decision model
+
+`laya.MultimodalAgent` attaches typed decision readouts to a native multimodal backbone.
+A shared candidate scorer returns `choice`, `noul` and `score` probabilities; a compact single-box
+head returns normalized coordinates. Each question uses one backbone forward pass and generates
+zero text tokens. Gemma 4 supports text, images, audio and video; Qwen3.5 supports text, images
+and video, with explicit visual-only training.
+
+```bash
+pip install -e '.[multimodal]'
+```
+
+```python
+import laya
+
+agent = laya.MultimodalAgent("multimodal-runs/example/final", device="cuda")
+questions = {
+    "next_action": {"type": "choice", "instructions": "Choose the next action.",
+                    "criteria": {"continue": "continue normally", "inspect": "inspect the situation",
+                                 "stop": "stop and request human assistance"}},
+    "needs_review": {"type": "noul", "instructions": "Does this situation need human review?"},
+}
+result = agent.predict("Apply the questions to this scene.", questions, image="scene.jpg")
+```
+
+The path above is a locally trained checkpoint. Fresh candidate and localization heads require
+training. The [multimodal guide](https://github.com/2351548518/laya/blob/main/docs/multimodal.md) covers the JSONL loader, head warmup, LoRA or
+full adaptation, multi-GPU execution, calibration and evaluation. See [grounding](https://github.com/2351548518/laya/blob/main/docs/grounding.md)
+for the single-box contract. Training and inference run locally; dataset-specific collection and
+experiment scripts are kept outside the distributed core.
+
+| Directory | Purpose |
+| --- | --- |
+| `laya/` | Runtime models, data loading, training, calibration and integrations |
+| `scripts/multimodal/` | Standalone native training, calibration and evaluation commands |
+| `configs/multimodal/` | Portable starter training recipes |
+| `tests/`, `docs/` | Core regression contracts and user documentation |
+| `_local/` | Ignored local collection pipelines, experiments, logs and archival records |
+| `models/`, `multimodal-data/`, `multimodal-runs/` | Ignored local weights, datasets and run outputs |
+
 ## Quickstart
 
 One argument puts vegaml's engine under laya's names: a frozen 0.8B reader with a small physics engine on top, so every answer carries a conformal prediction set, an abstain flag, an out-of-distribution flag and a route decided without a threshold you had to guess at. Text, images, speech and 73k-token documents go through the same call. Python 3.10 or newer; details in [vega inside laya](#vega-inside-laya-agentvegamltrue).

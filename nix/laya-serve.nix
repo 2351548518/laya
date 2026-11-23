@@ -314,6 +314,17 @@ in
       '';
     };
 
+    multimodalModel = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "/var/lib/laya/multimodal-checkpoint";
+      description = ''
+        Native multimodal backbone or trained local checkpoint for `/v1/multimodal`
+        (sets `LAYA_MULTIMODAL_MODEL`). The service package needs the multimodal
+        runtime dependencies. null leaves the native lane disabled.
+      '';
+    };
+
     extraModels = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
       default = null;
@@ -417,6 +428,8 @@ in
         LAYA_REVISION = cfg.revision;
       } // lib.optionalAttrs (cfg.extraModels != null) {
         LAYA_EXTRA_MODELS = cfg.extraModels;
+      } // lib.optionalAttrs (cfg.multimodalModel != null) {
+        LAYA_MULTIMODAL_MODEL = cfg.multimodalModel;
       } // lib.optionalAttrs (cfg.defaultModel != null) {
         LAYA_DEFAULT_MODEL = cfg.defaultModel;
       } // {

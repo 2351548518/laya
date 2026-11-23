@@ -88,15 +88,15 @@ if len(od) > 1:
 # Embedding Studio, and as a core dependency it is in the shipped (blocking) audit scope below.
 check_true("pyproject/core parses", len(core) == 7, core)
 check("pyproject/extra tables found", sorted(extras),
-      ["agno", "audio", "crewai", "fast", "langchain", "langgraph", "llamaindex", "mcp", "onnx", "serve",
+      ["agno", "audio", "crewai", "fast", "langchain", "langgraph", "llamaindex", "mcp", "multimodal", "onnx", "serve",
        "structured", "vision"])
 declared = list(core) + [s for names in extras.values() for s in names]
 expected = sorted(set(declared))
 check("pyproject/extras add names the core does not have",
       sorted({re.split(r"[<>=!;\[ ]", s)[0] for s in declared}
              - {re.split(r"[<>=!;\[ ]", s)[0] for s in core}),
-      ["agno", "crewai", "fastapi", "langchain-core", "langgraph", "llama-index-core", "mcp", "onnx",
-       "onnxruntime", "onnxscript", "pillow", "pydantic", "python-multipart", "soundfile", "tilelang",
+      ["accelerate", "agno", "av", "crewai", "fastapi", "langchain-core", "langgraph", "librosa", "llama-index-core", "mcp", "onnx",
+       "onnxruntime", "onnxscript", "peft", "pillow", "pydantic", "python-multipart", "scipy", "soundfile", "tilelang",
        "torchvision", "uvicorn"])
 
 # The two scopes: shipped (blocking) is the core plus [serve]; everything else is advisory.

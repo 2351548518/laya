@@ -44,6 +44,12 @@ dependencies = [
 packages = ["laya", "laya.backends", "laya.mcp", "laya.integrations"]
 
 [project.optional-dependencies]
+# Native media encoders, compact typed decisions, and local training.
+multimodal = [
+    "torch>=2.8", "transformers>=5.5,<6", "accelerate>=1.0", "peft>=0.18",
+    "pillow>=10", "soundfile>=0.12", "scipy>=1.10", "librosa>=0.10",
+    "torchvision>=0.23", "av>=14",
+]
 # `pip install laya[serve]` adds the HTTP server (laya.serve / the laya-serve CLI).
 serve = [
     "fastapi>=0.110.0",
@@ -116,6 +122,7 @@ laya-serve = "laya.serve:main"
 laya-evals = "laya.evals_cli:main"
 laya-mcp-server = "laya.mcp.server:main"
 laya-train = "laya.train_cli:main"
+laya-mm-train = "laya.multimodal_train:main"
 
 [project.urls]
 Homepage = "https://huggingface.co/convaiinnovations/laya"

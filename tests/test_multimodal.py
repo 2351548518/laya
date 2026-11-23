@@ -1,0 +1,464 @@
+"""Multimodal decision contracts, media processing, and real gradient updates without weights."""
+import copy
+import json
+import os
+from pathlib import Path
+import sys
+import threading
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+import torch
+
+pytest.importorskip("PIL", reason="native media tests need the multimodal extra")
+pytest.importorskip("scipy", reason="audio resampling tests need the multimodal extra")
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from laya.multimodal import MultimodalAgent, install_decision_head, read_audio  # noqa: E402
+from laya.multimodal_train import (  # noqa: E402
+    MultimodalTrainConfig, check_splits, collate_multimodal_inputs, finetune_multimodal, load_rows,
+)
+from laya.router import Router  # noqa: E402
+
+Q = {"category": {"type": "choice", "instructions": "Choose the category", "criteria": ["dark", "bright"]},
+     "present": {"type": "noul", "instructions": "Is the event present?"},
+     "level": {"type": "score", "instructions": "Rate the level", "criteria": ["low", "high"]}}
+
+
+class TinyTokenizer:
+    def encode(self, text, **kwargs):
+        return [ord(text)]
+
+
+class TinyProcessor:
+    tokenizer = TinyTokenizer()
+
+    def __init__(self):
+        self.calls = []
+
+    def apply_chat_template(self, messages, **kwargs):
+        self.messages = messages
+        return "A B question"
+
+    def __call__(self, **kwargs):
+        self.calls.append(kwargs)
+        value = 0
+        if kwargs.get("images"):
+            value = int(np.asarray(kwargs["images"][0]).mean() > 100)
+        elif kwargs.get("audio"):
+            value = int(np.abs(kwargs["audio"][0]).mean() > 0.1)
+        return {"input_ids": torch.tensor([[1, value + 2]]), "attention_mask": torch.ones(1, 2, dtype=torch.long)}
+
+
+class TinyBackbone(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.embeddings = torch.nn.Embedding(256, 8)
+        self.lm_head = torch.nn.Linear(8, 256, bias=False)
+        self.config = SimpleNamespace(tie_word_embeddings=True)
+        self.calls = 0
+
+    def get_output_embeddings(self):
+        return self.lm_head
+
+    def set_output_embeddings(self, head):
+        self.lm_head = head
+
+    def forward(self, input_ids, **kwargs):
+        self.calls += 1
+        return SimpleNamespace(logits=self.lm_head(self.embeddings(input_ids)))
+
+    def generate(self, **kwargs):
+        raise AssertionError("decisions must never generate tokens")
+
+
+def tiny_agent():
+    torch.manual_seed(1)
+    agent = MultimodalAgent.__new__(MultimodalAgent)
+    agent.processor = TinyProcessor()
+    agent.tok = agent.processor.tokenizer
+    agent.model = TinyBackbone()
+    agent.symbols = install_decision_head(agent.model, agent.tok)
+    agent.device, agent.dtype = torch.device("cpu"), torch.float32
+    agent.model_type, agent.model_id, agent.revision = "gemma4", "tiny", None
+    agent.max_len, agent.frames, agent.max_audio_seconds = 128, 3, 30.0
+    agent.use_audio_in_video = True
+    agent.temperature, agent.temperature_by_options, agent.calibrated = [1.0] * 3, {}, False
+    agent.hooks, agent._forward_options, agent._lock = [], {}, threading.RLock()
+    agent.cfg = {"max_len": 128}
+    return agent
+
+
+def test_head_replaces_vocabulary_without_changing_input_embeddings():
+    model, tokenizer = TinyBackbone(), TinyTokenizer()
+    original = model.lm_head.weight.detach().clone()
+    embeddings = model.embeddings.weight.detach().clone()
+    symbols = install_decision_head(model, tokenizer)
+    assert model.lm_head.out_features == 62
+    torch.testing.assert_close(model.lm_head.weight[0], original[ord(symbols[0])])
+    torch.testing.assert_close(model.embeddings.weight, embeddings)
+    assert not model.config.tie_word_embeddings
+
+
+def test_native_image_audio_and_text_produce_typed_distributions():
+    agent = tiny_agent()
+    image = np.full((8, 8, 3), 255, np.uint8)
+    result = agent.predict("visual context", Q, image=image, min_confidence=1.0)
+    assert result["usage"]["output_tokens"] == 0 and result["usage"]["forward_passes"] == 3
+    assert result["answers"]["category"]["choice"] in ("dark", "bright")
+    assert sum(result["answers"]["category"]["probabilities"].values()) == pytest.approx(1, abs=1e-4)
+    assert 0 <= result["answers"]["present"]["noul"] <= 1
+    assert 0 <= result["answers"]["level"]["score"] <= 1
+    assert result["answers"]["category"]["abstention"] == "abstained"
+    assert not result["answers"]["category"]["calibrated"]
+    assert agent.processor.calls[-1]["images"][0].size == (8, 8)
+    agent.predict(audio=np.full(1600, 0.5), sampling_rate=16000, questions={"x": Q["present"]})
+    np.testing.assert_allclose(agent.processor.calls[-1]["audio"][0], 0.5)
+    assert "transcript" not in result
+    agent.predict("text", {"x": Q["present"]})
+    assert "audio" not in agent.processor.calls[-1]
+
+
+def test_input_changes_reach_the_decision_head():
+    agent = tiny_agent()
+    questions = {"category": Q["category"]}
+    low = agent.predict(image=np.zeros((4, 4, 3), np.uint8), questions=questions)
+    high = agent.predict(image=np.full((4, 4, 3), 255, np.uint8), questions=questions)
+    assert low["answers"]["category"]["probabilities"] != high["answers"]["category"]["probabilities"]
+
+
+def test_option_permutation_is_restored_and_budget_never_silently_truncates():
+    agent = tiny_agent()
+    q = copy.deepcopy(Q["category"])
+    ordinary = agent.predict("s", {"x": q})["answers"]["x"]["probabilities"]
+    q["option_order"] = [1, 0]
+    permuted = agent.predict("s", {"x": q})["answers"]["x"]["probabilities"]
+    assert ordinary["dark"] == permuted["bright"]
+    with pytest.raises(ValueError, match="exceeds max_len"):
+        agent.predict("s", {"x": q}, max_len=1)
+    with pytest.raises(ValueError, match="encoder-only"):
+        agent.predict("s", Q, head_max_len=20)
+
+
+def test_audio_validation_resampling_and_capability():
+    assert len(read_audio(np.ones(800), 8000)) == 1600
+    for wave in (np.array([]), np.array([np.nan]), np.ones((2, 2, 2))):
+        with pytest.raises(ValueError):
+            read_audio(wave, 16000)
+    with pytest.raises(ValueError, match="sampling_rate"):
+        read_audio(np.ones(100))
+    with pytest.raises(ValueError, match="max_audio_seconds"):
+        read_audio(np.ones(32000), 16000, max_seconds=1)
+    agent = tiny_agent()
+    agent.model_type = "qwen3_5"
+    with pytest.raises(ValueError, match="no native audio"):
+        agent.predict(audio=np.ones(100), sampling_rate=16000, questions=Q)
+
+
+def test_video_preserves_order_and_audio_together(tmp_path, monkeypatch):
+    import laya.video as video
+    from PIL import Image
+    path = tmp_path / "clip.avi"
+    path.write_bytes(b"test")
+    frames = [Image.new("RGB", (4, 4), c) for c in ("red", "green", "blue")]
+    monkeypatch.setattr(video, "probe", lambda p: {"duration_s": 3, "has_audio": True})
+    monkeypatch.setattr(video, "sample_frames", lambda *args: (frames, [0.5, 1.5, 2.5]))
+    monkeypatch.setattr(video, "extract_audio", lambda p: np.ones(1600, np.float32))
+    agent = tiny_agent()
+    agent._video_cache_size = 1
+    result = agent.predict(video=path, questions={"x": Q["category"]})
+    call = agent.processor.calls[-1]
+    assert len(call["images"]) == 3 and len(call["audio"]) == 1
+    assert result["media"]["video"]["frame_times"] == [0.5, 1.5, 2.5]
+    assert call["images"][0].getpixel((0, 0)) == (255, 0, 0)
+    monkeypatch.setattr(video, "sample_frames", lambda *args: pytest.fail("unchanged cached video was decoded again"))
+    agent.predict(video=path, questions={"x": Q["category"]})
+    path.write_bytes(b"changed recording")
+    with pytest.raises(pytest.fail.Exception, match="decoded again"):
+        agent.predict(video=path, questions={"x": Q["category"]})
+
+
+def test_hooks_skip_and_error_lifecycle():
+    agent, events = tiny_agent(), []
+    def start(ctx):
+        events.append("start")
+        ctx.skip([{"answers": {}, "usage": {"input_tokens": 0, "output_tokens": 0}}])
+    agent.predict("s", Q, on_predict_start=start, on_predict_end=lambda ctx: events.append("end"))
+    assert events == ["start", "end"] and agent.model.calls == 0
+    class Observer:
+        def on_error(self, ctx):
+            events.append("error")
+        def on_predict_end(self, ctx):
+            events.append("failed_end" if ctx.error else "end")
+    with pytest.raises(ValueError):
+        agent.predict("s", {"x": {"type": "invalid"}}, hooks=[Observer()])
+    assert events[-2:] == ["error", "failed_end"]
+
+
+def test_video_overrides_and_persistent_cache_preserve_native_evidence(tmp_path, monkeypatch):
+    import laya.video as video
+    from PIL import Image
+    path = tmp_path / "clip.avi"
+    path.write_bytes(b"video")
+    monkeypatch.setattr(video, "probe", lambda p: {"duration_s": 60, "has_audio": True})
+    def frames(path, count, duration):
+        return [Image.new("RGB", (8, 8), "red")] * count, list(range(count))
+    monkeypatch.setattr(video, "sample_frames", frames)
+    monkeypatch.setattr(video, "extract_audio", lambda p: pytest.fail("visual-only labels must not read audio"))
+    agent = tiny_agent()
+    agent._video_cache_dir = str(tmp_path / "cache")
+    state = {"video": str(path), "video_audio": False, "video_frames": 6}
+    before = agent.predict(state, {"x": Q["present"]})
+    assert len(agent.processor.calls[-1]["images"]) == 6
+    assert "audio" not in agent.processor.calls[-1]
+    monkeypatch.setattr(video, "sample_frames", lambda *a: pytest.fail("disk cache was ignored"))
+    restored = tiny_agent()
+    restored._video_cache_dir = agent._video_cache_dir
+    assert restored.predict(state, {"x": Q["present"]})["answers"] == before["answers"]
+    with pytest.raises(ValueError, match="video_audio"):
+        restored.predict(dict(state, video_audio="false"), Q)
+    with pytest.raises(ValueError, match="video_frames"):
+        restored.predict(dict(state, video_frames=0), Q)
+
+
+def test_ordinal_calibration_guard_rejects_worse_calibration_and_keeps_groups_together(monkeypatch):
+    import laya.multimodal_train as training
+    seen = []
+    def fit(values):
+        seen.append(len(values))
+        return {"temperature": [1., 2., 1.], "temperature_by_options": {"score:3-5": 2.}}
+    monkeypatch.setattr(training, "fit_temperature_map", fit)
+    records = [{"qtype": 1, "k": 3, "modality": "image", "group": "group%d" % i,
+                "logits": np.array([2., 0., -1.]), "target": np.array([1., 0., 0.])}
+               for i in range(100)]
+    agent = tiny_agent()
+    calibration = training.calibrate_multimodal(agent, records, ordinal_guard=True)
+    guard = calibration["by_modality"]["image"]["ordinal_guard"]
+    assert guard["fit_n"] + guard["check_n"] == 100
+    assert min(guard["fit_n"], guard["check_n"]) >= 10
+    assert not guard["accepted"] and agent.modality_calibration["image"]["temperature"][1] == 1.
+    assert agent.temperature[1] == 1. and "score:3-5" not in agent.temperature_by_options
+    assert len(seen) == 3
+    # Distinct files by one uploader remain a single unit in calibration's fit/check split.
+    for record in records:
+        record["calibration_group"] = "freesound_uploader:one_author"
+    calibration = training.calibrate_multimodal(agent, records, ordinal_guard=True)
+    guard = calibration["by_modality"]["image"]["ordinal_guard"]
+    assert min(guard["fit_n"], guard["check_n"]) == 0 and not guard["accepted"]
+
+
+def test_router_uses_native_media_lane_and_keeps_text_routing():
+    agent = tiny_agent()
+    router = Router(multimodal=agent, vega=False)
+    assert router.route(None, Q, media="audio").model == "multimodal"
+    assert router.route({"image": "local.png"}, Q).model == "multimodal"
+    assert router.route("Please refund the duplicate charge on my invoice.", Q).model == "english"
+    result = router.predict("context", Q, image=np.zeros((4, 4, 3), np.uint8))
+    assert result["routing"]["model"] == "multimodal"
+    results = router.predict_batch([{"state": {"image": np.zeros((4, 4, 3), np.uint8)}, "questions": Q}])
+    assert len(results) == 1 and results[0]["routing"]["model"] == "multimodal"
+
+
+def test_split_overlap_and_relative_paths(tmp_path):
+    media = tmp_path / "sample.wav"
+    media.write_bytes(b"same recording")
+    row = {"state": {"audio": "sample.wav"}, "questions": {"x": Q["present"]}, "expected": {"x": True}}
+    data = tmp_path / "rows.jsonl"
+    data.write_text(json.dumps(row) + "\n")
+    rows = load_rows(data)
+    assert rows[0]["state"]["audio"] == str(media)
+    with pytest.raises(ValueError, match="data leakage"):
+        check_splits(train=rows, test=rows)
+
+
+def test_native_collation_keeps_last_token_and_media_masks():
+    examples = [{"input_ids": torch.tensor([[1, 2]]), "attention_mask": torch.tensor([[1, 1]]),
+                 "input_features": torch.ones(1, 3, 8), "input_features_mask": torch.ones(1, 3, dtype=torch.bool)},
+                {"input_ids": torch.tensor([[3, 4, 5]]), "attention_mask": torch.tensor([[1, 1, 1]]),
+                 "input_features": torch.ones(1, 2, 8), "input_features_mask": torch.ones(1, 2, dtype=torch.bool)}]
+    batch = collate_multimodal_inputs(examples, 0)
+    assert batch["input_ids"].tolist() == [[0, 1, 2], [3, 4, 5]]
+    assert batch["attention_mask"].tolist() == [[0, 1, 1], [1, 1, 1]]
+    assert batch["input_features_mask"].tolist() == [[True, True, True], [True, True, False]]
+    assert batch["input_features"].shape == (2, 3, 8)
+
+
+
+
+def test_empty_context_is_distinguished_by_the_decision_question():
+    one = {"state": "{}", "questions": {"x": Q["present"]}}
+    other = {"state": "{}", "questions": {"x": Q["category"]}}
+    check_splits(train=[one], test=[other])
+    with pytest.raises(ValueError, match="data leakage"):
+        check_splits(train=[one], test=[one])
+
+
+
+
+def test_metrics_accept_all_equally_valid_options():
+    from laya.multimodal_train import metrics
+    records = [{"qtype": 0, "k": 3, "modality": "text", "logits": np.array([0., 4., -1.]),
+                "target": np.array([0.5, 0.5, 0.])}]
+    assert metrics(records)["overall"]["accuracy"] == 1.0
+
+
+def test_inline_media_http_endpoint_rejects_paths_and_shares_auth(monkeypatch):
+    import base64
+    import io
+    from PIL import Image
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    from laya.serve import create_app
+    monkeypatch.setenv("LAYA_API_KEY", "test-key")
+    agent = tiny_agent()
+    image = io.BytesIO()
+    Image.new("RGB", (4, 4), "white").save(image, format="PNG")
+    body = {"questions": {"x": Q["category"]}, "image": {"base64": base64.b64encode(image.getvalue()).decode()}}
+    with TestClient(create_app(Router(multimodal=agent, vega=False))) as client:
+        assert client.post("/v1/multimodal", json=body).status_code == 401
+        response = client.post("/v1/multimodal", json=body, headers={"Authorization": "Bearer test-key"})
+        assert response.status_code == 200, response.text
+        assert response.json()["routing"]["model"] == "multimodal"
+        body["image"] = {"path": "/etc/passwd"}
+        assert client.post("/v1/multimodal", json=body, headers={"Authorization": "Bearer test-key"}).status_code == 422
+
+
+@pytest.mark.parametrize("mode", ["head", "full"])
+def test_training_performs_real_gradient_updates_and_holds_test_out(tmp_path, mode):
+    agent = tiny_agent()
+    original = agent.model.get_output_embeddings().weight.detach().clone()
+    row = {"id": "train", "state": "training text", "questions": {"x": Q["category"]}, "expected": {"x": "bright"}}
+    train = tmp_path / "train.jsonl"
+    train.write_text(json.dumps(row) + "\n")
+    test = tmp_path / "test.jsonl"
+    row["state"], row["id"] = "independent test text", "test"
+    test.write_text(json.dumps(row) + "\n")
+    saved = []
+    agent.save = lambda path, mode: saved.append((str(path), mode))
+    report = finetune_multimodal(train, tmp_path / "out", test_data=test, agent=agent,
+                                config=MultimodalTrainConfig(mode=mode, epochs=2, learning_rate=0.01,
+                                                             grad_accum=4, gradient_checkpointing=False))
+    assert not torch.equal(original, agent.model.get_output_embeddings().weight)
+    assert report["optimizer_steps"] == 2 and report["held_out"]
+    assert report["test_rows"] == 1 and report["train_rows"] == 1
+    assert report["before"]["overall"]["n"] == report["after"]["overall"]["n"] == 1
+    assert saved[-1][1] == mode
+
+
+@pytest.mark.skipif(not os.environ.get("LAYA_MM_MODEL"), reason="set LAYA_MM_MODEL to a local multimodal checkpoint")
+def test_real_backbone_image_audio_and_reload(tmp_path):
+    from PIL import Image
+    agent = MultimodalAgent(os.environ["LAYA_MM_MODEL"], device=os.environ.get("LAYA_MM_DEVICE", "cpu"))
+    q = {"present": Q["present"]}
+    before = agent.predict(image=Image.new("RGB", (64, 64), "red"), questions=q)
+    agent.predict(audio=np.zeros(16000, np.float32), sampling_rate=16000, questions=q)
+    agent.save(tmp_path)
+    restored = MultimodalAgent(tmp_path, device=agent.device)
+    after = restored.predict(image=Image.new("RGB", (64, 64), "red"), questions=q)
+    assert before["answers"] == after["answers"]
+
+
+def test_development_selection_restores_best_weights_before_final_save(tmp_path, monkeypatch):
+    import laya.multimodal_train as training
+    from safetensors.torch import save_file
+    agent = tiny_agent()
+    train, selection = tmp_path / "train.jsonl", tmp_path / "selection.jsonl"
+    sample = {"state": "train", "questions": {"x": Q["category"]}, "expected": {"x": "bright"}}
+    train.write_text(json.dumps(sample) + "\n")
+    sample["state"] = "independent development context"
+    selection.write_text(json.dumps(sample) + "\n")
+    saved = {}
+    def save(path, mode):
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+        values = {k: v.detach().clone() for k, v in agent.model.lm_head.state_dict().items()}
+        saved[path.name] = values
+        save_file(values, str(path / "decision_head.safetensors"))
+    agent.save = save
+    calls = []
+    def collect(*args):
+        calls.append(1)
+        return []
+    monkeypatch.setattr(training, "collect_records", collect)
+    monkeypatch.setattr(training, "metrics", lambda records: {
+        "by_modality": {"text": {"accuracy": 1. if len(calls) == 1 else .5}}, "overall": {"nll": 1.}})
+    report = finetune_multimodal(train, tmp_path / "out", selection_data=selection, agent=agent,
+        config=MultimodalTrainConfig(mode="head", epochs=2, learning_rate=.01, gradient_checkpointing=False))
+    assert report["optimizer_steps"] == 2 and report["selected_step"] == 1
+    torch.testing.assert_close(saved["out"]["weight"], saved["checkpoint_best"]["weight"], atol=0, rtol=0)
+    assert not torch.equal(saved["out"]["weight"], saved["checkpoint_latest"]["weight"])
+
+
+@pytest.mark.parametrize("mode", ["head", "lora", "full", "merged"])
+def test_transformers_checkpoint_roundtrip_and_adapter_continuation(tmp_path, monkeypatch, mode):
+    transformers = pytest.importorskip("transformers")
+    if not hasattr(transformers, "Gemma4Config"):
+        pytest.skip("Gemma 4 checkpoint tests need the multimodal extra's Transformers version")
+    if mode in ("lora", "merged"):
+        pytest.importorskip("peft")
+    from laya.multimodal_train import configure_training
+    text = transformers.Gemma4TextConfig(vocab_size=256, hidden_size=16, intermediate_size=32,
+        num_hidden_layers=2, num_attention_heads=2, num_key_value_heads=1, head_dim=8,
+        vocab_size_per_layer_input=256, hidden_size_per_layer_input=4,
+        layer_types=["sliding_attention", "full_attention"], num_kv_shared_layers=0)
+    vision = transformers.Gemma4VisionConfig(hidden_size=16, intermediate_size=32, num_hidden_layers=1,
+        num_attention_heads=2, num_key_value_heads=2, head_dim=8, patch_size=2, position_embedding_size=16)
+    audio = transformers.Gemma4AudioConfig(hidden_size=16, num_hidden_layers=1, num_attention_heads=2,
+        subsampling_conv_channels=[4, 4], output_proj_dims=16)
+    config = transformers.Gemma4Config(text_config=text, vision_config=vision, audio_config=audio,
+        image_token_id=250, audio_token_id=251, video_token_id=252)
+    backbone = transformers.Gemma4ForConditionalGeneration(config)
+    source = tmp_path / "base"
+    backbone.save_pretrained(source)
+    processor = TinyProcessor()
+    processor.save_pretrained = lambda path: Path(path).mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(transformers.AutoProcessor, "from_pretrained", lambda *args, **kwargs: processor)
+    agent = MultimodalAgent(source, device="cpu")
+    parameters = configure_training(agent, MultimodalTrainConfig(mode="lora" if mode == "merged" else mode,
+        gradient_checkpointing=False, train_projectors=mode in ("lora", "merged")))
+    if mode == "lora":
+        base = agent.model.get_base_model()
+        with torch.no_grad():
+            for name in agent.native_trainable_modules:
+                next(base.get_submodule(name).parameters()).add_(.25)
+    inputs, _, _ = agent._prepare(agent._input("example"), Q["category"])
+    agent.model.train()
+    loss = -torch.log_softmax(agent._logits(inputs, 2), -1)[0, 1]
+    loss.backward()
+    optimizer = torch.optim.AdamW(parameters, lr=0.01)
+    optimizer.step()
+    agent.model.eval()
+    if mode == "merged":
+        agent.model = agent.model.merge_and_unload(safe_merge=True)
+    before = agent._logits(inputs, 2).detach()
+    agent.ordinal_calibration = {"models": {"text:2": {"kind": "temperature", "parameters": [.4], "prior": [.5, .5]}}}
+    score_question = {"t": "score", "crit": ["low", "high"]}
+    decoded = agent._decode(before[0], score_question)
+    saved = tmp_path / "saved"
+    agent.save(saved, mode="full" if mode == "merged" else None)
+    assert json.loads((saved / "multimodal_config.json").read_text())["mode"] == ("full" if mode == "merged" else mode)
+    restored = MultimodalAgent(saved, device="cpu")
+    torch.testing.assert_close(restored._logits(inputs, 2), before, atol=0, rtol=0)
+    assert restored.ordinal_calibration == agent.ordinal_calibration
+    assert restored._decode(before[0], score_question) == decoded
+    if mode == "lora":
+        assert (saved / "native_projectors.safetensors").is_file()
+        for name in agent.native_trainable_modules:
+            expected = agent.model.get_base_model().get_submodule(name).state_dict()
+            actual = restored.model.get_base_model().get_submodule(name).state_dict()
+            for key in expected:
+                torch.testing.assert_close(actual[key], expected[key], atol=0, rtol=0)
+        continued = configure_training(restored, MultimodalTrainConfig(mode="lora", gradient_checkpointing=False))
+        assert restored.ordinal_calibration == {}
+        assert continued and all(p.requires_grad for p in continued)
+        restored._logits(inputs, 2).sum().backward()
+        assert any(p.grad is not None and p.grad.abs().sum() > 0 for p in continued)
+
+
+def test_jsonl_preserves_unicode_separators(tmp_path):
+    row = {"state": "decision\u2028embedded\u0085line", "questions": {"x": Q["present"]},
+           "expected": {"x": True}}
+    path = tmp_path / "train.jsonl"
+    path.write_text(json.dumps(row, ensure_ascii=False) + "\n")
+    assert load_rows(path)[0]["state"] == row["state"]

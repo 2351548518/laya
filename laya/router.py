@@ -61,6 +61,7 @@ DEFAULT_MODELS = {
 #: with fitted heads. Text the encoders can read keeps going to the encoders exactly as before.
 VEGA_MODEL = "vega"
 VEGA_REPO = "nandakishorm/vega-U"
+MULTIMODAL_MODEL = "multimodal"
 
 # The same checkpoints also live in their own repos, for anyone who prefers them.
 STANDALONE_MODELS = {
@@ -753,6 +754,7 @@ class Router(HookRegistry):
         # A state estimated past this many tokens goes to vega, because no encoder checkpoint can
         # read it whole; 8,192 is `laya-multilingual` at `max_len=8192`, the most any encoder takes.
         vega_over_tokens: int = 8192,
+        multimodal: Any = None,
     ):
         self.hooks = normalise_hooks(hooks, on_predict_start, on_predict_end)
         self.hooks_raise = bool(hooks_raise)
@@ -819,6 +821,11 @@ class Router(HookRegistry):
         self.vega_over_tokens = int(vega_over_tokens)
         self._vega_spec: Any = None
         self._install_vega(vega)
+        self._multimodal_spec = multimodal if multimodal is not False else None
+        if self._multimodal_spec is not None and hasattr(multimodal, "predict"):
+            self._agents[MULTIMODAL_MODEL] = multimodal
+            self._order.append(MULTIMODAL_MODEL)
+            self._evict()
         if preload:
             self.preload()
 
@@ -871,6 +878,8 @@ class Router(HookRegistry):
         if key in self.models:
             return key
         if key == VEGA_MODEL and getattr(self, "_vega_spec", None) is not None:
+            return key
+        if key == MULTIMODAL_MODEL and getattr(self, "_multimodal_spec", None) is not None:
             return key
         raise ValueError("unknown model %r; choose one of %s (or an alias: %s)"
                          % (name, sorted(self.models) + ([VEGA_MODEL] if getattr(self, "_vega_spec", None) is not None else []),
@@ -981,6 +990,8 @@ class Router(HookRegistry):
             if key == VEGA_MODEL:
                 raise ValueError("invalid checkpoint name %r: it names the vega lane; pass Router(vega=...) "
                                  "to configure it" % (name,))
+            if key == MULTIMODAL_MODEL:
+                raise ValueError("invalid checkpoint name %r: use Router(multimodal=...) to configure this lane" % name)
         if source is not None and not isinstance(source, (str, tuple, list)):
             raise TypeError("checkpoint source for %r must be a repo id, a local path or a (repo, subfolder) "
                             "pair, got %s" % (name, type(source).__name__))
@@ -1080,6 +1091,12 @@ class Router(HookRegistry):
     def _build(self, key: str):
         """Construct the Agent for `key`: config is read under `_lock`, the build runs outside it."""
         from .agent import Agent
+        if key == MULTIMODAL_MODEL and self._multimodal_spec is not None:
+            if hasattr(self._multimodal_spec, "predict"):
+                return self._multimodal_spec
+            from .multimodal import DEFAULT_MULTIMODAL_MODEL, MultimodalAgent
+            source = DEFAULT_MULTIMODAL_MODEL if self._multimodal_spec is True else self._multimodal_spec
+            return MultimodalAgent(source, device=self.device, token=self.token, revision=self.revision)
         if key == VEGA_MODEL and self._vega_spec is not None:
             if not isinstance(self._vega_spec, (bool, str)):
                 return self._vega_spec          # an attached agent, back after an eviction
@@ -1373,6 +1390,12 @@ class Router(HookRegistry):
                                  detection=None, workflow=None)
 
         vega_on = allow_vega and self.vega_enabled
+        multimodal = getattr(self, "_multimodal_spec", None)
+        media_state = isinstance(state, dict) and any(state.get(k) is not None for k in ("image", "audio", "video"))
+        if multimodal is not None and (media is not None or media_state):
+            source = getattr(multimodal, "model_id", multimodal if isinstance(multimodal, str) else None)
+            return RouteDecision(model=MULTIMODAL_MODEL, repo=source,
+                                 reason="native multimodal decision backbone", detection=None, workflow=None)
         if media is not None:
             if not vega_on:
                 raise ValueError("an %s needs the vega lane, which this Router does not have: install "
@@ -1497,7 +1520,7 @@ class Router(HookRegistry):
         media = media_given[0] if media_given else None
         if state is None and media is None:
             raise TypeError("state must not be None; pass a string, dict, or list (or image=, audio=, video=)")
-        if state is not None and media is not None:
+        if state is not None and media is not None and getattr(self, "_multimodal_spec", None) is None:
             raise ValueError("pass either a state or %s=, not both" % media)
         if not isinstance(questions, dict):
             raise TypeError("questions must be a dict of question id -> definition, got %s" % type(questions).__name__)
@@ -1557,7 +1580,7 @@ class Router(HookRegistry):
                             overrides["max_len"] = ctx.max_len
                         if ctx.head_max_len is not None:
                             overrides["head_max_len"] = ctx.head_max_len
-                        if decision["model"] == VEGA_MODEL:
+                        if decision["model"] in (VEGA_MODEL, MULTIMODAL_MODEL):
                             # vega's predict takes laya's shape plus the media; `max_len` and
                             # `head_max_len` are recorded there and not applied
                             result = agent.predict(ctx.states[0], ctx.questions, lang=effective_lang,

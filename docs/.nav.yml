@@ -5,6 +5,8 @@ nav:
   - Guides:
       - use-cases.md
       - structured.md
+      - multimodal.md
+      - grounding.md
       - hooks
       - langchain.md
       - llamaindex.md

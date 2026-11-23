@@ -1,0 +1,42 @@
+name: Native multimodal core
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  multimodal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CUDA_VISIBLE_DEVICES: ""
+      USE_TF: "0"
+      USE_TORCH: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      OMP_NUM_THREADS: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install CPU runtime and native training extras
+        run: |
+          python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e '.[multimodal,serve]' pytest httpx ruff
+      - name: Core lint and compilation
+        run: |
+          ruff check laya/ --select=E9,F63,F7,F82,F401,F811 --line-length=120
+          python -m compileall -q laya/ tests/
+      - name: Native contracts and small CPU backbone checks
+        run: >-
+          python -m pytest -q
+          tests/test_multimodal.py tests/test_grounding.py
+          tests/test_multimodal_distributed.py
+          tests/test_multimodal_readout.py tests/test_multimodal_optimization.py
+          tests/test_multimodal_objectives.py tests/test_decision_backbones.py
+          tests/test_multimodal_cli.py

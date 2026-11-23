@@ -45,6 +45,7 @@ _LAZY_ATTRS = {
     "PINNED_REVISIONS": (".revisions", "PINNED_REVISIONS"),
     "Agent": (".agent", "Agent"),
     "VegaAgent": (".vega", "VegaAgent"),       # vegaml's engine behind laya's surface
+    "MultimodalAgent": (".multimodal", "MultimodalAgent"),
     "RLAgent": (".agent", "RLAgent"),
     "load": (".agent", "load"),
     "fit_temperatures": (".calibrate", "fit_temperatures"),
@@ -102,6 +103,7 @@ __all__ = [
     "Agent",
     "RLAgent",
     "VegaAgent",
+    "MultimodalAgent",
     "load",
     "fit_temperatures",
     "fit_one_temperature",

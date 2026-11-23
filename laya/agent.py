@@ -2196,7 +2196,8 @@ def load(model_id_or_path: str = "convaiinnovations/laya", device: Optional[str]
          calibration: Optional[str] = None, backend: Optional[str] = None,
          onnx_path: Optional[str] = None, compile_warmup: bool = True,
          compile_cache: bool = False, compile_mode: str = "default",
-         vegaml: Union[bool, str, None] = None) -> Union[Agent, "ONNXAgent", "VegaAgent"]:
+         vegaml: Union[bool, str, None] = None,
+         multimodal: Union[bool, str, None] = None) -> Union[Agent, "ONNXAgent", "VegaAgent"]:
     """Load a Laya agent.
 
         laya.load(vegaml=True)                                        # vegaml's engine, laya's API
@@ -2225,6 +2226,21 @@ def load(model_id_or_path: str = "convaiinnovations/laya", device: Optional[str]
     `hooks` / `on_predict_start` / `on_predict_end` observe or shape every prediction; see
     `laya.hooks`. `calibration` is the same optional JSON path accepted by `Agent`.
     """
+    if ((multimodal is not None and multimodal is not False)
+            or os.path.isfile(os.path.join(model_id_or_path, "multimodal_config.json"))):
+        if vegaml is not None and vegaml is not False:
+            raise ValueError("choose either multimodal= or vegaml=")
+        if backend is not None or fast or compile or onnx_path is not None or subfolder is not None:
+            raise ValueError("multimodal models use their own local backbone; encoder backend controls do not apply")
+        if expected_sha256 is not None or lang_temperatures is not None or calibration is not None:
+            raise ValueError("multimodal loading uses revision= and its saved modality calibration; encoder calibration/digest controls do not apply")
+        from .multimodal import DEFAULT_MULTIMODAL_MODEL, MultimodalAgent
+        source = multimodal if isinstance(multimodal, str) else (
+            DEFAULT_MULTIMODAL_MODEL if model_id_or_path == "convaiinnovations/laya" else model_id_or_path)
+        return MultimodalAgent(source, device=device, revision=revision, token=token,
+                               hooks=hooks, on_predict_start=on_predict_start,
+                               on_predict_end=on_predict_end, hooks_raise=hooks_raise,
+                               hooks_concurrent=hooks_concurrent, hooks_timeout=hooks_timeout)
     if vegaml is not None and vegaml is not False:
         # vegaml's engine behind laya's surface; everything laya-specific below (registry names,
         # ONNX, TileLang, torch.compile) is about ModernBERT checkpoints and does not apply.

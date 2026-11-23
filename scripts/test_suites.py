@@ -133,6 +133,14 @@ PYTEST_SUITES = [
     "tests/test_vega.py",
     "tests/test_router_vega.py",
     "tests/test_policy.py",
+    "tests/test_multimodal.py",
+    "tests/test_multimodal_distributed.py",
+    "tests/test_grounding.py",
+    "tests/test_multimodal_readout.py",
+    "tests/test_multimodal_optimization.py",
+    "tests/test_multimodal_objectives.py",
+    "tests/test_decision_backbones.py",
+    "tests/test_multimodal_cli.py",
 ]
 
 

@@ -1,5 +1,11 @@
 # HTTP API
 
+Native media decisions are available at `POST /v1/multimodal` when the server is configured with
+`LAYA_MULTIMODAL_MODEL` (a backbone name or trained local checkpoint). This route accepts inline
+base64 file bytes and shares the server's authentication and bounded request handling. See the
+[multimodal guide](multimodal.md#router-and-http) for its separate media contract. The existing
+`/v1/systemone` endpoints retain their text contract.
+
 `laya-serve` exposes Laya over the TypeSafe Jev `/v1/systemone` wire protocol. A client written
 against Jev -- `hs-jev`, `typesafe-sdk`, or your own -- can point its base URL at this server and
 keep working: Laya's `predict()` output is already schema-compatible, and the server adds only the
@@ -34,6 +40,7 @@ Everything is environment variables, so one image serves a laptop dev run and a 
 | `LAYA_PORT` | bind port | `8000` |
 | `LAYA_ROOT_PATH` | public URL prefix when served behind a reverse proxy | empty |
 | `LAYA_DEVICE` | torch device for every checkpoint | auto |
+| `LAYA_MULTIMODAL_MODEL` | native multimodal backbone or trained local checkpoint for `/v1/multimodal` | off |
 | `LAYA_PRELOAD` | build the checkpoints at startup, not lazily | `1` |
 | `LAYA_MODELS` | comma list to preload (`english,multilingual,typed-decisions`); empty = all | all |
 | `LAYA_THREADS` | cap torch intra-op threads on CPU; keep it <= physical cores -- oversubscribing logical cores is a large regression | torch default |

@@ -903,7 +903,11 @@ def proper_reward(
     w_rps: float = 1.0,
     log_floor: float = -9.21,
 ) -> torch.Tensor:
-    """Strictly proper scoring rule reward: log score + spherical score + ranked probability score.
+    """Historical RLCD reward: clipped log score + spherical score + ranked probability score.
+
+    The finite log floor is a numerical surrogate. Unlike the unclipped scoring rules, this
+    combination is not globally strictly proper for arbitrarily small target probabilities.
+    Supervised decision losses use stable log-softmax and differentiable Brier/RPS terms.
 
     q: [..., N, K] reported distributions
     target: [N, K] (one-hot or soft target distributions)
