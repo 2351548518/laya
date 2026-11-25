@@ -66,8 +66,9 @@ NAME = re.compile(r"\bLAYA_[A-Z0-9_]+\b")
 # Markdown a user reads for configuration. The package's own docstrings are deliberately
 # not here: rendering them is not wired up, which is how LAYA_MAX_CONCURRENT went missing.
 DOC_FILES = ("README.md", "BENCHMARKS.md", "CONTRIBUTING.md")
-SKIP_DIRS = {".git", ".github", ".cache", ".venv", "site", "__pycache__", "node_modules",
-             "dist", "build", ".pytest_cache", ".ruff_cache"}
+SKIP_DIRS = {".git", ".github", ".cache", ".venv", ".venv-mm", "site", "__pycache__", "node_modules",
+             "dist", "build", ".pytest_cache", ".ruff_cache", "_local", "models",
+             "multimodal-data", "multimodal-runs", "Testing"}
 
 # Documented elsewhere already, by a pull request that has not merged. Each entry has to
 # stay *undocumented* to remain valid, so the row retires itself the moment the page lands
@@ -616,7 +617,7 @@ def main() -> int:
     # the two rows this suite was written for, pinned to the page that carries them, so a
     # later edit that deletes one fails by name rather than only as a set difference
     anchors = {"LAYA_MAX_CONCURRENT": "docs/docker.md",
-               "LAYA_MPS_AMP_MIN_ROWS": "README.md"}
+               "LAYA_MPS_AMP_MIN_ROWS": "docs/laya-guide.md"}
     for name, page in sorted(anchors.items()):
         check_true("%s is documented on %s" % (name, page),
                    page in docs.get(name, set()), sorted(docs.get(name, set())))

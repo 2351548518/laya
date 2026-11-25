@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve Laya. This guide keeps reviews fast and the history clean.
+Thanks for helping improve laya-multimodal. This guide keeps reviews fast and the history clean.
 
 By taking part you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
@@ -10,6 +10,9 @@ Laya is a fast, local, on-device decision engine. Keep additions in that spirit:
 in the user's own process or on their own hardware, with no dependency on a hosted service or an
 external API. A feature that only works against a hosted backend is out of scope for the core
 package; it belongs in a separate integration or a community project.
+
+Keep reusable multimodal code in `laya/`, `scripts/multimodal/` and `configs/multimodal/`.
+Store source-specific preparation, intermediate outputs and experiment logs under `_local/`.
 
 ## Ways to contribute
 

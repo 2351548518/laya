@@ -673,14 +673,12 @@ def _headings(path):
     return found
 
 
+_WORKSPACE_DIRS = {".git", "__pycache__", "node_modules", ".pytest_cache", ".venv", ".venv-mm", ".hf-cache",
+                   "_local", "models", "multimodal-data", "multimodal-runs", "Testing", "site"}
 _md = []
 for _dirpath, _dirnames, _filenames in os.walk("."):
-    # `.pytest_cache` ships a README of its own and `.venv` is where CONTRIBUTING tells
-    # contributors to install; neither is part of the repository. `.hf-cache` holds
-    # third-party dataset cards downloaded by setup_laya.sh (gitignored).
-    _dirnames[:] = [d for d in _dirnames
-                    if d not in (".git", "__pycache__", "node_modules", ".pytest_cache",
-                                 ".venv", ".hf-cache")]
+    # Scan project docs without walking local downloads or installed packages.
+    _dirnames[:] = [d for d in _dirnames if d not in _WORKSPACE_DIRS]
     _md.extend(os.path.normpath(os.path.join(_dirpath, f))
                for f in _filenames if f.endswith(".md"))
 _md = sorted(_md)
@@ -1096,9 +1094,7 @@ _extra_section = pyproject.split("[project.optional-dependencies]")[1].split("\n
 _declared_extras = set(re.findall(r"^([a-z][\w-]*)\s*=\s*\[", _extra_section, re.M))
 _referenced_extras = {}
 for _dirpath, _dirnames, _filenames in os.walk("."):
-    # `.venv` is where CONTRIBUTING tells contributors to install, and it is not the repository.
-    _dirnames[:] = [d for d in _dirnames
-                    if d not in (".git", "__pycache__", "node_modules", ".pytest_cache", ".venv")]
+    _dirnames[:] = [d for d in _dirnames if d not in _WORKSPACE_DIRS]
     for _f in _filenames:
         if not _f.endswith((".py", ".md", ".yml", ".toml")):
             continue

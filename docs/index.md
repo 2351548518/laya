@@ -1,23 +1,24 @@
-# Laya
+# laya-multimodal
 
-Multilingual, non-autoregressive System 1 decision engine: typed `choice`, `score` and `noul`
-decisions over any state, in a single forward pass.
+Local System 1 decisions over text and native media. Each question uses one forward pass
+and returns a `choice`, `score`, `noul` or a single `box`.
 
-A `choice` question picks one of several options, a `score` question places the state on a
-scale, and a `noul` question gives the probability that the answer is yes. Laya runs on your own
-hardware, reads 100+ languages, and its `Router` picks the checkpoint for each request.
+A `choice` question picks one of the supplied options, a `score` question gives a distribution
+over ordered levels, and a `noul` question gives the probability of yes. A `box` question localizes
+one referred object in an image.
 
 ## Start here
 
-Install Laya and make a first decision with the README's
-[Installation](https://github.com/NandhaKishorM/laya#installation) and
-[Quickstart](https://github.com/NandhaKishorM/laya#quickstart). They stay in the README so there
-is one copy to keep current.
+Install the source checkout, download the released checkpoint and run the first prediction.
+[Installation and quickstart](https://github.com/2351548518/laya#quickstart)
 
 ## Find a guide
 
 | To | Read |
 |---|---|
+| run or train native text, image, audio and video decisions | [Native multimodal decisions](multimodal.md) |
+| locate one object in an image | [Single-box grounding](grounding.md) |
+| download the released model or deploy a quantized variant locally | [Models and GGUF deployment](multimodal-release.md) |
 | get typed values back from a JSON schema or a pydantic model | [Schema-driven decisions](structured.md) |
 | log, redact, cache or gate every decision without forking Laya | [Prediction hooks](hooks/index.md) |
 | adopt Laya incrementally without granting execution permission | [Staged adoption](staged-adoption.md) |
@@ -32,5 +33,5 @@ is one copy to keep current.
 | look up a class, function or parameter | [Python API reference](reference/index.md) |
 | score a labelled dataset, compare to a baseline, or gate a build on it | [Evaluation harness](evals.md) |
 
-Confidence gating is in the
-[README](https://github.com/NandhaKishorM/laya#automated-confidence-gating) for now.
+See the inherited text model guide for CLI flags, batch hooks, confidence gating and Vega.
+[Laya text routing and integrations](laya-guide.md)

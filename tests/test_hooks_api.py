@@ -1710,18 +1710,18 @@ try:
           _compose_probe_seen, ["defaults", "installed", "per-call"])
 finally:
     _hooks_mod.clear_default_hooks()
-# --------------------------------------- README.md batch path: predict_batch vs route_batch
-# README.md's "Per-call hooks reach the batch path" bullet claims specific kwargs for
+# --------------------------------------- Laya guide batch path: predict_batch vs route_batch
+# The Laya guide's "Per-call hooks reach the batch path" bullet claims specific kwargs for
 # Router.predict_batch and Router.route_batch. Pre-fix it lumped both together and claimed
 # they both take `hooks`, `on_predict_start`, `on_predict_end` and `hooks_raise`, but
 # route_batch fires only on_route and has no predict events to bind convenience callables
 # to, so its signature carries neither on_predict_start nor on_predict_end. Both take
 # hooks_timeout, which the pre-fix bullet did not mention.
-_readme_md = os.path.join(REPO, "README.md")
+_readme_md = os.path.join(REPO, "docs", "laya-guide.md")
 with open(_readme_md, encoding="utf-8") as _rmf:
     _readme_text = _rmf.read()
 
-check_true("README.md drops the pre-fix combined batch-hooks claim",
+check_true("Laya guide drops the pre-fix combined batch-hooks claim",
            "Router.predict_batch` and `Router.route_batch` take `hooks`, `on_predict_start`, "
            "`on_predict_end` and `hooks_raise`, matching `predict`" not in _readme_text)
 
@@ -1729,7 +1729,7 @@ check_true("README.md drops the pre-fix combined batch-hooks claim",
 _bullets = [ln for ln in _readme_text.splitlines()
             if ln.startswith("* ")
             and "Router.predict_batch" in ln and "Router.route_batch" in ln]
-check_true("README.md has one Per-call-hooks-reach-the-batch bullet",
+check_true("Laya guide has one Per-call-hooks-reach-the-batch bullet",
            len(_bullets) == 1, "found %d" % len(_bullets))
 _batch_bullet = _bullets[0] if _bullets else ""
 

@@ -12,7 +12,7 @@ a stable tool interface. Both use Laya's `Router` to select a checkpoint and ret
 `choice`, `score`, and `noul` decisions; neither is an open-ended question-answering or text
 generation interface.
 
-For the routing decision and typed-question examples, see the README's [Route Mode quickstart](https://github.com/NandhaKishorM/laya#quickstart-route-mode-recommended).
+For routing and typed-question examples, see the [Route Mode quickstart](laya-guide.md#quickstart-route-mode-recommended).
 For confidence and built-in workflows, see the README's [confidence gating](https://github.com/NandhaKishorM/laya#automated-confidence-gating) and [workflow presets](https://github.com/NandhaKishorM/laya#built-in-workflow-presets).
 
 ## 1. Command line

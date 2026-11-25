@@ -99,6 +99,9 @@ fit-routing/
 
 # Local collection pipelines, experiment outputs, and training compatibility links.
 /_local/
+/Testing/
+*.gguf
+*.safetensors
 /research/configs
 /research/results/
 /research/scripts/*.py

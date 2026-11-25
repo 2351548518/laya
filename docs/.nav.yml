@@ -3,10 +3,12 @@
 nav:
   - index.md
   - Guides:
-      - use-cases.md
-      - structured.md
       - multimodal.md
       - grounding.md
+      - multimodal-release.md
+      - laya-guide.md
+      - use-cases.md
+      - structured.md
       - hooks
       - langchain.md
       - llamaindex.md

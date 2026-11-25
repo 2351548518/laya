@@ -4,6 +4,9 @@
 It uses the backbone's image, audio and video processing, a shared candidate scorer, and an
 optional compact single-box readout. Every question uses one backbone forward pass.
 
+The published Qwen3.5-4B checkpoint is available as merged safetensors and typed-decision GGUF.
+[Models and GGUF deployment](multimodal-release.md)
+
 Install the optional runtime and training dependencies:
 
 ```bash
@@ -14,7 +17,7 @@ pip install -e '.[multimodal]'
 
 | Backbone family | Text | Images | Audio | Video |
 | --- | --- | --- | --- | --- |
-| Gemma 4 | yes | yes | native waveform | ordered frames, with optional soundtrack |
+| Gemma 4 E2B | yes | yes | native waveform | ordered frames, with optional soundtrack |
 | Qwen3.5 | yes | yes | unsupported | native frames and timestamps; visual-only |
 
 The local aliases include `gemma4`, `qwen3.5-4b` and `qwen3.5-9b`. A local model directory or
@@ -54,6 +57,20 @@ The existing hooks, `predict_batch`, `Router(multimodal=...)` and inline-media H
 use the same runtime. Identical-media features may be reused within an inference request;
 training does not reuse detached features across parameter updates.
 
+## From input to answer
+
+`MultimodalAgent` in `laya/multimodal.py` renders the question and passes it with the input
+to the backbone's processor. For `choice`, `noul` and `score`, `candidate_positions` maps
+the candidate markers to their token positions after media insertion. `CandidateScorer`
+in `laya/multimodal_readout.py` compares each candidate's hidden state with the final question
+state. A softmax turns the scores into probabilities. For example, probabilities of 0.2 and
+0.8 for `continue` and `inspect` produce `choice="inspect"`. The same two probabilities for
+levels 0 and 1 produce `score=0.8`.
+
+For a `box` question, `GroundingHead` in `laya/grounding.py` projects the final valid hidden
+state to normalized coordinates and an IoU quality estimate. One box targets one referred
+object. The quality estimate describes localization confidence.
+
 ## Router and HTTP
 
 Configure the native lane with a trained local checkpoint:
@@ -89,10 +106,10 @@ Alternatively, replace `expected` with a native probability target:
 {"gold":{"action":{"probabilities":{"continue":0.2,"inspect":0.8}}}}
 ```
 
-Preserve the original source and group identifiers. Separate training, validation, calibration
-and test groups, including their media identities. Test labels are not training or checkpoint
-selection inputs. Dataset-specific downloads, conversions, balancing and historical experiments
-belong to the ignored local workbench rather than the core package.
+Preserve the original source and group identifiers. Use distinct training, validation, calibration
+and test groups, including their media identities. Store dataset preparation in `_local/`.
+The public dataset provides a separate, source-attributed export. See its card for its contents
+and how the media are stored. [Open JEV Omni public data](https://huggingface.co/datasets/ZeeoRe/open-jev-omni-public)
 
 For joint training, each data directory contains `train.jsonl`, `dev.jsonl` for single-box
 validation, and `decision_dev.jsonl` for decision validation. A head warmup directory can contain
@@ -136,7 +153,11 @@ Omit `--visual-only` for a Gemma 4 audio/video run. The native backbone reads th
 The Qwen recipe trains language LoRA adapters, the visual merger and the decision/localization
 readouts. It keeps the visual encoder frozen. Main decision supervision uses cross-entropy;
 box targets use L1, GIoU and quality losses. Warmup can additionally use Brier and ordinal RPS.
-These are supervised recipes, not a claim to reproduce proprietary Jev RLCD training.
+These recipes use supervised targets. In `laya/grounding_train.py`, a hard decision row such
+as `inspect` raises the probability of that option through cross-entropy. A soft target such
+as `[0.2, 0.8]` weights the two log probabilities by 0.2 and 0.8. For an image annotated with
+one box, L1 penalizes coordinate error, GIoU penalizes poor overlap, and the quality loss trains
+the confidence estimate from the predicted box's overlap with the target.
 
 Readout and localization calculations use FP32. LoRA training uses gradient checkpointing,
 length bucketing, per-module learning rates and a warmup/cosine schedule. Optional activation
@@ -180,5 +201,5 @@ registered in `scripts/test_suites.py`, and the native multimodal CI lane runs o
 model downloads.
 
 The ignored `_local/` directory holds dataset-specific preparation code, private research
-configs, comparison experiments, logs and their source/processing records. Compatibility paths
-may remain locally while a training job is active. They are excluded from the published source.
+configs, comparison experiments, logs and their source/processing records. Local datasets,
+model weights and training outputs go in `multimodal-data/`, `models/` and `multimodal-runs/`.
