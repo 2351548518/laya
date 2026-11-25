@@ -121,6 +121,12 @@ check_param("MultimodalAgent.detect", MultimodalAgent.detect, "labels", None)
 check_param("MultimodalAgent.detect", MultimodalAgent.detect, "threshold", .5)
 MultimodalAgent._check_question("locate", {"type": "box", "instructions": "the red mug"})
 check_true("multimodal Box preserves official no-criteria schema", True)
+from laya.vega import _fold as fold_vega_answer  # noqa: E402
+vega_choice = fold_vega_answer({"choice": "1", "probs": {"1": .9, "other": .1}, "prediction_set": ["1"]},
+                               {"type": "choice", "criteria": {1: "first", "other": "other"}})
+check("Vega choice preserves caller label types", vega_choice["choice"], 1)
+check("Vega probabilities preserve caller label types", vega_choice["probabilities"], {1: .9, "other": .1})
+check("Vega prediction set preserves caller label types", vega_choice["prediction_set"], [1])
 from laya.grounding_train import GroundingTrainConfig, finetune_grounding  # noqa: E402
 from laya.grounding import grounding_loss  # noqa: E402
 from laya.grounding import GroundingHead  # noqa: E402
