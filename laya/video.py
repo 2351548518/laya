@@ -1,30 +1,14 @@
-"""Video in, the same typed decision out: the sound track if it carries speech, frames if not.
+"""Local FFmpeg helpers for video probing, frame sampling and 16 kHz audio extraction.
 
-No open model under a billion parameters watches a clip and reads a question sheet, so the
-video path does not pretend to be one. It splits the clip into the two things the engine can
-already read, and chooses between them by what the clip contains:
-
-* **Speech.** The sound track is pulled out at 16 kHz mono and transcribed. If the transcript
-  holds real words, the decision is made on it through the text path, so fitted heads, the
-  refit calibration, the conformal set and the route all apply, exactly as for audio. The
-  transcript rides along, because a decision made on words the caller never saw cannot be
-  audited.
-* **Frames.** A silent clip (or one whose sound track is music, noise, or nothing) has a few
-  evenly spaced frames sampled and tiled into one contact sheet, which goes through the image
-  path. That is the vision tower's zero-shot readout: heads and calibration do not apply to
-  pixels, and the answer says so with ``calibrated: False``.
-
-Decoding goes through the ``ffmpeg`` binary when it is on the path. laya takes on no Python
-dependency for video, and a machine without ffmpeg is told exactly that in one sentence rather
-than failing somewhere inside a codec. Everything runs locally: the clip never leaves the
-process.
-
-    from laya.video import probe, extract_audio, sample_frames, contact_sheet
+The native multimodal agent passes sampled frames and supported audio to the model processor.
+Vega uses a speech transcript when available and assembles a contact sheet for its image path.
+FFmpeg must be on the PATH. Probing uses ffprobe when it is available.
 """
 from __future__ import annotations
 
 import io
 import json
+import math
 import os
 import re
 import shutil
@@ -80,8 +64,12 @@ def as_path(video) -> Tuple[str, Optional[str]]:
     """
     if isinstance(video, (bytes, bytearray)):
         fd, path = tempfile.mkstemp(suffix=".video")
-        with os.fdopen(fd, "wb") as f:
-            f.write(bytes(video))
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(video)
+        except BaseException:
+            os.unlink(path)
+            raise
         return path, path
     if isinstance(video, (str, os.PathLike)):
         path = os.fspath(video)
@@ -94,16 +82,21 @@ def as_path(video) -> Tuple[str, Optional[str]]:
 def probe(path: str) -> dict:
     """Duration in seconds (0.0 when the tool reports none) and whether the clip has an audio
     stream, from ffprobe when it is there and from ffmpeg's own banner when it is not."""
-    _need_ffmpeg()
+    ffmpeg = _need_ffmpeg()
     ffprobe = shutil.which("ffprobe")
     if ffprobe is not None:
         out = _run([ffprobe, "-v", "error", "-show_entries", "format=duration",
                     "-show_entries", "stream=codec_type", "-of", "json", path], "probe the clip")
         info = json.loads(out.decode("utf-8", "replace") or "{}")
-        dur = float((info.get("format") or {}).get("duration") or 0.0)
+        try:
+            dur = float((info.get("format") or {}).get("duration", 0.0))
+        except (TypeError, ValueError):
+            dur = 0.0
+        if not math.isfinite(dur) or dur < 0:
+            dur = 0.0
         kinds = {s.get("codec_type") for s in info.get("streams", [])}
         return {"duration_s": dur, "has_audio": "audio" in kinds, "has_video": "video" in kinds}
-    proc = subprocess.run([shutil.which("ffmpeg"), "-i", path], stdout=subprocess.PIPE,
+    proc = subprocess.run([ffmpeg, "-i", path], stdout=subprocess.PIPE,
                           stderr=subprocess.PIPE)
     text = proc.stderr.decode("utf-8", "replace")
     dur = 0.0
@@ -172,7 +165,9 @@ def sample_frames(path: str, n: int = 4, duration_s: Optional[float] = None) -> 
         times = [duration_s * (i + 0.5) / n for i in range(n)]
     frames, got = [], []
     for t in times:
-        png = _run([exe, "-v", "error", "-ss", "%.3f" % t, "-i", path, "-frames:v", "1",
+        # Raw streams may be unable to seek even to zero. Decode their first frame directly.
+        seek = ["-ss", "%.3f" % t] if t > 0 else []
+        png = _run([exe, "-v", "error", *seek, "-i", path, "-frames:v", "1",
                     "-f", "image2pipe", "-vcodec", "png", "-"], "read a frame at %.1fs" % t)
         if not png:
             continue

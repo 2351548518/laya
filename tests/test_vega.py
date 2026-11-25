@@ -825,6 +825,38 @@ def test_probe_survives_a_banner_that_reports_no_duration(monkeypatch):
     assert v.probe("clip.h264")["duration_s"] == 62.5
 
 
+@pytest.mark.parametrize("duration", ["N/A", "nan", "inf", "-1", None, "1.25"])
+def test_ffprobe_reports_streams_when_duration_is_unavailable(monkeypatch, duration):
+    import json
+
+    from laya import video as v
+
+    info = {"format": {"duration": duration}, "streams": [{"codec_type": "video"}, {"codec_type": "audio"}]}
+    monkeypatch.setattr(v.shutil, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr(v, "_run", lambda args, what: json.dumps(info).encode("utf-8"))
+    assert v.probe("clip.mkv") == {"duration_s": 1.25 if duration == "1.25" else 0.0,
+                                   "has_audio": True, "has_video": True}
+
+
+def test_video_without_duration_reads_first_frame_without_seeking(monkeypatch):
+    from io import BytesIO
+
+    from laya import video as v
+
+    Image = pytest.importorskip("PIL.Image")
+    buffer = BytesIO()
+    Image.new("RGB", (8, 8)).save(buffer, format="PNG")
+
+    def read_frame(args, what):
+        assert "-ss" not in args
+        return buffer.getvalue()
+
+    monkeypatch.setattr(v, "_need_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr(v, "_run", read_frame)
+    frames, times = v.sample_frames("raw.h264", n=4, duration_s=0.0)
+    assert len(frames) == 1 and times == [0.0]
+
+
 @needs_ffmpeg
 def test_video_helpers_on_synthetic_clips(tmp_path):
     import numpy as np
