@@ -108,6 +108,8 @@ The suites that need hardware, a compiler or local weights are not part of the P
 - `tests/test_mcp_local_e2e.py` -- expects checkpoints under `~/laya_models` and the `mcp` extra.
 - `tests/test_onnx.py` -- needs the `onnx` extra; it runs in the ONNX lane of `evals.yml`, not the PR job.
 - `tests/test_server_example.py` -- needs the weights `examples/server.py` loads; it runs in `evals.yml`.
+- `tests/test_guard_document_781.py` -- the historical guardrail check requires the pinned
+  local English checkpoint. Run it as `python tests/test_guard_document_781.py --checkpoint models/laya`.
 
 Before opening a pull request, run the lint and compile checks the CI runs:
 
