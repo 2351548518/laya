@@ -256,11 +256,26 @@ def test_retention_guard_checks_every_modality():
     assert not decision_retained(after,before,.05)
 
 
+def test_joint_validation_accepts_hard_and_soft_decision_target_formats():
+    from laya.grounding_train import grounding_metrics
+    from test_multimodal import tiny_agent
+
+    agent = tiny_agent()
+    row = {"state": "A scene with a mug", "questions": {"visible": {
+        "type": "noul", "instructions": "Is the mug visible?"}}}
+    hard = {**row, "expected": {"visible": True}}
+    soft = {**row, "gold": {"visible": {"probabilities": {"false": 0., "true": 1.}}}}
+    hard_metrics = grounding_metrics(agent, [hard], limit=0)
+    assert hard_metrics["presence_n"] == 1
+    assert hard_metrics == grounding_metrics(agent, [soft], limit=0)
+
+
 def test_permuted_decision_replay_preserves_training_epoch_order(tmp_path):
     import json
     from test_multimodal import tiny_agent
     from laya.grounding_train import finetune_grounding
     agent=tiny_agent();agent.model.grounding_head=GroundingHead(8,32,4)
+    agent.model.peft_config = {}  # Metadata retained by merged base models.
     agent.grounding_trained=agent.detection_trained=False
     agent.save=lambda path:None
     original=agent.model.get_output_embeddings().weight.detach().clone()

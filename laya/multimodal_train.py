@@ -18,7 +18,7 @@ import torch
 
 from .calibrate import fit_temperature_map
 from .common import QTYPES, ece_score, temp_bucket, unpermute_probs
-from .multimodal import DEFAULT_MULTIMODAL_MODEL, MultimodalAgent, _active_head
+from .multimodal import DEFAULT_MULTIMODAL_MODEL, MultimodalAgent, _active_head, _is_adapter_model
 from .multimodal_objectives import decision_loss, expand_lora, grow_lora, learning_rate_factor, lora_target_pattern, optimizer_groups
 from .multimodal_distributed import distributed_context
 from .train import target_from_expected, target_from_gold
@@ -385,7 +385,7 @@ def configure_training(agent, config):
     agent.temperature, agent.temperature_by_options = [1.0] * 3, {}
     if config.mode == "full":
         agent._checkpoint_mode = "full"
-    if hasattr(agent.model, "peft_config"):
+    if _is_adapter_model(agent.model):
         if config.mode != "lora":
             raise ValueError("an adapter checkpoint must be continued in lora mode, or merged before head/full training")
         grow_lora(agent.model, config.lora_rank, config.lora_alpha)
@@ -406,7 +406,7 @@ def configure_training(agent, config):
             modules_to_save=["lm_head"], bias="none"))
     else:
         agent.model.get_output_embeddings().requires_grad_(True)
-    base = agent.model.get_base_model() if hasattr(agent.model, "peft_config") else agent.model
+    base = agent.model.get_base_model() if _is_adapter_model(agent.model) else agent.model
     if getattr(agent, "readout", "letter") == "candidate":
         base.decision_scorer.requires_grad_(True).float()
     _configure_projectors(agent, config)
@@ -422,7 +422,7 @@ def configure_training(agent, config):
 def _configure_projectors(agent, config):
     if not config.train_projectors:
         return
-    base = agent.model.get_base_model() if hasattr(agent.model, "peft_config") else agent.model
+    base = agent.model.get_base_model() if _is_adapter_model(agent.model) else agent.model
     names = [name for name, module in base.named_modules()
              if name in {"model.embed_audio", "model.embed_vision"} and module is not None]
     if not names:
@@ -491,7 +491,7 @@ def _training_order(items, config, rng):
 def _train_mode(agent, config):
     agent.model.train()
     if config.mode != "full":
-        base = agent.model.get_base_model() if hasattr(agent.model, "peft_config") else agent.model
+        base = agent.model.get_base_model() if _is_adapter_model(agent.model) else agent.model
         for name in ("model.vision_tower", "model.audio_tower"):
             try:
                 module = base.get_submodule(name)
@@ -510,11 +510,11 @@ def _restore_checkpoint(agent, path, mode):
         set_peft_model_state_dict(agent.model, load_file(str(Path(path) / "adapter/adapter_model.safetensors")))
     _active_head(agent.model).load_state_dict(load_file(str(Path(path) / "decision_head.safetensors")))
     if getattr(agent, "readout", "letter") == "candidate":
-        base = agent.model.get_base_model() if hasattr(agent.model, "peft_config") else agent.model
+        base = agent.model.get_base_model() if _is_adapter_model(agent.model) else agent.model
         base.decision_scorer.load_state_dict(load_file(str(Path(path) / "candidate_head.safetensors")))
     names = getattr(agent, "native_trainable_modules", [])
     if names and mode != "full":
-        base = agent.model.get_base_model() if hasattr(agent.model, "peft_config") else agent.model
+        base = agent.model.get_base_model() if _is_adapter_model(agent.model) else agent.model
         weights = load_file(str(Path(path) / "native_projectors.safetensors"))
         for name in names:
             prefix = name + "."

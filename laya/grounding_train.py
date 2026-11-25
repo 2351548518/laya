@@ -17,7 +17,7 @@ from torch.nn import functional as F
 
 from .evals import file_fingerprint
 from .grounding import box_iou, crowd_overlap, grounding_loss, validate_boxes
-from .multimodal import MultimodalAgent, _active_head
+from .multimodal import MultimodalAgent, _active_head, _is_adapter_model
 from .multimodal_distributed import distributed_context
 from .multimodal_train import MultimodalTrainConfig, configure_training, collate_multimodal_inputs, _train_mode
 from .multimodal_objectives import learning_rate_factor, optimizer_groups
@@ -297,7 +297,7 @@ def _decision_batch_loss(agent,chunk,inputs,config):
 def _grounding_train_mode(agent, config):
     if config.mode == 'head':
         agent.model.eval()
-        base = agent.model.get_base_model() if hasattr(agent.model, 'peft_config') else agent.model
+        base = agent.model.get_base_model() if _is_adapter_model(agent.model) else agent.model
         base.grounding_head.train()
     else:
         # Transformer checkpointing is conditional on training=True. Freeze stochastic
@@ -317,7 +317,7 @@ def grounding_metrics(agent, rows, limit=256, threshold=.25):
         qid, qdef = next(iter(row["questions"].items()))
         inputs, q, _ = agent._prepare(agent._input(row["state"]), qdef)
         if "grounding" not in row:
-            y = target_from_gold(q, row["gold"][qid])
+            y = target_from_gold(q, row["gold"][qid]) if "gold" in row else target_from_expected(q, row["expected"][qid])
             probabilities = agent._logits(inputs, len(y))[0].softmax(-1)
             if q.get('option_order') is not None:
                 probabilities = probabilities[torch.argsort(torch.as_tensor(q['option_order'],device=agent.device))]
@@ -370,14 +370,14 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
     dev = load_grounding_rows(dev_data)
     if cfg.slots == 1 and any(row.get('grounding',{}).get('task')=='multiple' for row in chain(rows, dev)):
         raise ValueError('single-box training requires a single-target view; never relabel multi-object annotations as one box')
-    groups = {row["group"] for row in rows}
-    if groups & {row["group"] for row in dev}:
+    dev_groups = {row["group"] for row in dev}
+    if any(row["group"] in dev_groups for row in rows):
         raise ValueError("grounding train/dev image groups overlap")
     agent = agent or MultimodalAgent(model, device=ctx.device if ctx.world_size > 1 else device,
                                      grounding_slots=cfg.slots, max_len=cfg.max_len)
     agent.max_len = cfg.max_len
     agent._video_cache_dir = cfg.video_cache_dir or '.cache/multimodal-video'
-    base = agent.model.get_base_model() if hasattr(agent.model, "peft_config") else agent.model
+    base = agent.model.get_base_model() if _is_adapter_model(agent.model) else agent.model
     if not hasattr(base, "grounding_head"):
         raise ValueError("grounding architecture must be installed before training")
     if cfg.slots == 1 and base.grounding_head.architecture != 'single-v1':
@@ -392,7 +392,7 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
     else:
         configure_training(agent, MultimodalTrainConfig(mode=cfg.mode, lora_rank=cfg.lora_rank,
             lora_alpha=cfg.lora_alpha, lora_targets=cfg.lora_targets, train_projectors=agent.model_type == 'gemma4'))
-        base = agent.model.get_base_model() if hasattr(agent.model, "peft_config") else agent.model
+        base = agent.model.get_base_model() if _is_adapter_model(agent.model) else agent.model
         if agent.model_type.startswith('qwen') and cfg.mode == 'lora':
             mergers = [name for name, _ in base.named_modules() if name.endswith('visual.merger')]
             for name in mergers:
@@ -413,7 +413,7 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
     if replay_data:
         from .multimodal_train import load_rows
         replay = load_rows(replay_data)
-        replay = [r for r in replay if r.get("group") not in {x["group"] for x in dev}]
+        replay = [r for r in replay if r.get("group") not in dev_groups]
         if agent.model_type not in {"gemma4", "qwen2_5_omni", "qwen2_5_omni_thinker", "gemma3n"}:
             replay = [r for r in replay if not (isinstance(r["state"], dict) and r["state"].get("audio") is not None)]
     rng = random.Random(cfg.seed); order = list(range(len(rows))); output = Path(output); output.mkdir(parents=True, exist_ok=True)

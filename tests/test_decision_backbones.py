@@ -73,6 +73,7 @@ def test_merged_qwen_keeps_decision_and_box_inference_with_stale_peft_metadata()
     from laya.grounding import GroundingHead
     from laya.multimodal import MultimodalAgent, _is_adapter_model
     from laya.multimodal_readout import CandidateScorer
+    from laya.multimodal_train import MultimodalTrainConfig, configure_training
     torch.manual_seed(108); torch.set_num_threads(1)
     model = Qwen3_5ForConditionalGeneration(tiny_qwen_config()).eval()
     model.decision_scorer = CandidateScorer(32)
@@ -91,6 +92,9 @@ def test_merged_qwen_keeps_decision_and_box_inference_with_stale_peft_metadata()
         torch.testing.assert_close(agent._logits(inputs, 2), expected, rtol=0, atol=0)
         for name, value in boxes.items():
             torch.testing.assert_close(agent._grounding_outputs(inputs)[name], value, rtol=0, atol=0)
+    trainable = configure_training(agent, MultimodalTrainConfig(mode="head"))
+    expected = list(agent.model.get_output_embeddings().parameters()) + list(agent.model.decision_scorer.parameters())
+    assert {id(p) for p in trainable} == {id(p) for p in expected}
 
 
 def test_length_bucketing_preserves_global_loss_and_gradients():
