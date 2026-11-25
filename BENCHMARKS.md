@@ -1,5 +1,14 @@
 # Laya benchmarks
 
+## Native multimodal checkpoints
+
+The published Qwen3.5-4B has a native evaluation and a separate GGUF development evaluation.
+The GGUF report includes both patched runtime reruns, the matching visual projectors and the
+accuracy denominator for each metric. Use the native evaluator for your own labelled local data.
+[Multimodal benchmark guide](benchmarks/README.md) · [GGUF release results](docs/multimodal-release.md)
+
+## Classic Laya text checkpoints
+
 Every checkpoint answered **byte-identical questions** in each run (fixed seed). Jev figures are **third-party published, never measured here** — no TypeSafe API access — so sample sizes and prompts differ; treat them as indicative.
 
 | run | what | where |

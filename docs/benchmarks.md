@@ -1,7 +1,13 @@
 # Benchmarks and known limits
 
+For native Qwen or Gemma decisions, start with the local evaluator and the model-specific
+release results. [Multimodal benchmark guide](https://github.com/2351548518/laya/blob/main/benchmarks/README.md) ·
+[GGUF development results](multimodal-release.md#select-a-gguf-pair)
+
+## Classic Laya text results
+
 Laya's results depend on the checkpoint, task, question wording, option count and hardware. Use
-the [full benchmark tables](https://github.com/NandhaKishorM/laya/blob/main/BENCHMARKS.md)
+the [full benchmark tables](https://github.com/2351548518/laya/blob/main/BENCHMARKS.md#classic-laya-text-checkpoints)
 to find a comparable run before choosing a checkpoint or a confidence threshold. The
 [research directory](https://github.com/NandhaKishorM/laya/tree/main/research) holds the scripts
 and result files behind the main tables.
