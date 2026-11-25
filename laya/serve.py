@@ -1073,6 +1073,20 @@ def _state_length(state: Any) -> int:
         raise HTTPException(status_code=400, detail="'state' must be JSON-serializable")
 
 
+def _require_inline_media(router: Any, state: Any, model: Optional[str], task: Any) -> None:
+    """Require inline bytes for native media submitted over HTTP."""
+    if (getattr(router, "_multimodal_spec", None) is None or not isinstance(state, dict)
+            or not any(state.get(key) is not None for key in ("image", "audio", "video"))):
+        return
+    from .router import MULTIMODAL_MODEL, canonical_name
+
+    selected = model if model is not None else task
+    if selected is None or canonical_name(selected) == MULTIMODAL_MODEL:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=422, detail="send native media as inline file bytes to /v1/multimodal")
+
+
 def _check_request_limits(state: Any, questions: Any, max_choice_options: int = MAX_CHOICE_OPTIONS) -> None:
     """Reject absent or oversized inference requests before tokenization (400/413)."""
     from fastapi import HTTPException
@@ -1630,6 +1644,7 @@ def create_app(router: Optional[Any] = None):
         # that cannot resolve names falls back to the built-in table, which is the
         # registry such a fake is asserting anyway.
         model = _resolve_model(body.get("model"), getattr(router, "resolve", None))
+        _require_inline_media(router, state, model, body.get("task"))
         max_budget_cap = _resolve_max_token_budget()
         max_len = _validate_budget_param(body, "max_len", max_budget_cap)
         head_max_len = _validate_budget_param(body, "head_max_len", max_budget_cap)
@@ -1791,6 +1806,8 @@ def create_app(router: Optional[Any] = None):
         # Same resolver fallback as `_systemone_inner`: a test double without a
         # registry-aware `resolve` keeps the built-in table it was written against.
         model = _resolve_model(body.get("model"), getattr(router, "resolve", None))
+        for state in states:
+            _require_inline_media(router, state, model, body.get("task"))
         max_budget_cap = _resolve_max_token_budget()
         max_len = _validate_budget_param(body, "max_len", max_budget_cap)
         head_max_len = _validate_budget_param(body, "head_max_len", max_budget_cap)

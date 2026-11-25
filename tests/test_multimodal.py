@@ -360,6 +360,25 @@ def test_inline_media_http_endpoint_rejects_paths_and_shares_auth(monkeypatch):
         assert client.post("/v1/multimodal", json=body, headers={"Authorization": "Bearer test-key"}).status_code == 422
 
 
+@pytest.mark.parametrize("selection", [{}, {"model": "multimodal"}, {"task": "MuLTiMoDaL"}])
+def test_http_text_endpoints_require_inline_bytes_for_native_media(monkeypatch, selection):
+    from laya.router import Router
+    from laya.serve import create_app
+
+    TestClient = pytest.importorskip("fastapi.testclient").TestClient
+    monkeypatch.setenv("LAYA_PRELOAD", "0")
+    monkeypatch.delenv("LAYA_API_KEY", raising=False)
+    agent = tiny_agent()
+    state = {"image": "example.png"}
+    with TestClient(create_app(Router(multimodal=agent, vega=False))) as client:
+        for endpoint, inputs in (("/v1/systemone", {"state": state}),
+                                 ("/v1/systemone/batch", {"states": ["Text context", state]})):
+            response = client.post(endpoint, json={**selection, **inputs, "questions": Q})
+            assert response.status_code == 422
+            assert "/v1/multimodal" in response.json()["detail"]
+    assert agent.model.calls == 0
+
+
 @pytest.mark.parametrize("mode", ["head", "full"])
 def test_training_performs_real_gradient_updates_and_holds_test_out(tmp_path, mode):
     agent = tiny_agent()
