@@ -40,11 +40,14 @@ def test_filtered_distillation_and_anchor_have_finite_masked_gradients():
     logits = torch.tensor([[0.5, -0.2, 1.], [0., 0., -10000.]], requires_grad=True)
     mask = torch.tensor([[True, True, True], [True, True, False]])
     target = torch.tensor([[1., 0., 0.], [0., 1., 0.]])
-    teacher = torch.tensor([[0.8, 0.1, 0.1], [1., 0., 0.]])
+    teacher = torch.tensor([[0.8, 0.1, 0.1], [float("nan"), 0., 0.]])
+    reference = target.clone()
+    reference[1, 0] = float("nan")
+    accepted = torch.tensor([True, False])
     loss, parts = decision_loss(logits, target, mask, torch.tensor([0, 2]), teacher=teacher,
-        teacher_mask=torch.tensor([True, False]), distill_weight=0.2, reference=target, kl_weight=0.01)
+        teacher_mask=accepted, distill_weight=0.2, reference=reference, reference_mask=accepted, kl_weight=0.01)
     loss.backward()
-    assert torch.isfinite(logits.grad).all() and logits.grad[1, 2] == 0
+    assert torch.isfinite(loss) and torch.isfinite(logits.grad).all() and logits.grad[1, 2] == 0
     assert parts["distillation_kl"] > 0 and parts["reference_kl"] > 0
 
 

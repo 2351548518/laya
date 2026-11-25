@@ -11,6 +11,7 @@ from datetime import timedelta
 import os
 from pathlib import Path
 import random
+import tempfile
 
 import numpy as np
 import torch
@@ -60,6 +61,7 @@ class DistributedContext:
         """Sum already globally normalized gradients, preserving globally unused grad=None."""
         if self.world_size == 1:
             return
+        parameters = tuple(parameters)
         present = torch.tensor([p.grad is not None for p in parameters], dtype=torch.int32, device=self.device)
         dist.all_reduce(present, op=dist.ReduceOp.MAX)
         active = [p for p, flag in zip(parameters, present.tolist()) if flag]
@@ -141,9 +143,13 @@ class DistributedContext:
 
 
 def _atomic_torch_save(value, path):
-    temporary = path.with_name(path.name + ".partial")
-    torch.save(value, temporary)
-    os.replace(temporary, path)
+    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".partial")
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            torch.save(value, stream)
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
 
 
 def distributed_context():

@@ -60,23 +60,22 @@ def decision_loss(logits, target, mask, qtypes, *, objective="soft-ce", ordinal_
         loss = loss + brier_weight * brier
         parts["brier"] = float(brier.detach())
     if teacher is not None and distill_weight:
-        accepted = teacher_mask if teacher_mask is not None else torch.ones(logits.shape[0], dtype=torch.bool, device=logits.device)
-        if accepted.any():
+        if teacher_mask is None or teacher_mask.any():
             temperature = distill_temperature
-            t = teacher.clamp_min(1e-12).pow(1 / temperature) * mask
+            teacher_options = mask if teacher_mask is None else mask & teacher_mask[:, None]
+            t = teacher.masked_fill(~teacher_options, 0).clamp_min(1e-12).pow(1 / temperature) * teacher_options
             t = t / t.sum(-1, keepdim=True).clamp_min(1e-12)
             student_logp = torch.log_softmax(logits.float().masked_fill(~mask, -1e4) / temperature, -1)
             kd = (t * (t.clamp_min(1e-12).log() - student_logp)).sum(-1)
             # Weight over the full batch so a rare teacher does not receive an inflated coefficient.
-            kd = (kd * accepted).mean() * temperature ** 2
+            kd = kd.mean() * temperature ** 2
             loss = loss + distill_weight * kd
             parts["distillation_kl"] = float(kd.detach())
     if reference is not None and kl_weight:
-        ref = reference.detach() * mask
+        reference_options = mask if reference_mask is None else mask & reference_mask[:, None]
+        ref = reference.detach().masked_fill(~reference_options, 0)
         ref = ref / ref.sum(-1, keepdim=True).clamp_min(1e-12)
         anchor = (ref * (ref.clamp_min(1e-12).log() - logp)).sum(-1)
-        if reference_mask is not None:
-            anchor = anchor * reference_mask
         anchor = anchor.mean()
         loss = loss + kl_weight * anchor
         parts["reference_kl"] = float(anchor.detach())

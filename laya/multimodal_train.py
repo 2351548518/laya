@@ -18,7 +18,9 @@ import torch
 
 from .calibrate import fit_temperature_map
 from .common import QTYPES, ece_score, temp_bucket, unpermute_probs
+from .evals import file_fingerprint
 from .multimodal import DEFAULT_MULTIMODAL_MODEL, MultimodalAgent, _active_head, _is_adapter_model
+from .multimodal_calibration import ordinal_probabilities
 from .multimodal_objectives import decision_loss, expand_lora, grow_lora, learning_rate_factor, lora_target_pattern, optimizer_groups
 from .multimodal_distributed import distributed_context
 from .train import target_from_expected, target_from_gold
@@ -133,29 +135,30 @@ def load_rows(path):
     """Read local media JSONL and resolve media paths relative to its location."""
     path = Path(path).resolve()
     rows = []
-    # JSON strings may contain literal Unicode line separators; JSONL uses only LF.
-    for line_number, line in enumerate(path.read_text().split("\n"), 1):
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        row = json.loads(line)
-        if not isinstance(row, dict) or not isinstance(row.get("questions"), dict):
-            raise ValueError("%s:%d needs a questions object" % (path, line_number))
-        if "state" not in row or not isinstance(row.get("expected", row.get("gold")), dict):
-            raise ValueError("%s:%d needs state and expected (or gold)" % (path, line_number))
-        state = row["state"]
-        if isinstance(state, dict):
-            for key in ("image", "audio", "video"):
-                if state.get(key) is not None:
-                    values = state[key] if isinstance(state[key], list) else [state[key]]
-                    paths = []
-                    for value in values:
-                        media = Path(value)
-                        media = media if media.is_absolute() else path.parent / media
-                        if not media.is_file():
-                            raise FileNotFoundError("%s:%d missing %s" % (path, line_number, media))
-                        paths.append(str(media.resolve()))
-                    state[key] = paths if isinstance(state[key], list) else paths[0]
-        rows.append(row)
+    # Iterate physical lines so Unicode line separators in JSON strings stay intact.
+    with path.open(encoding="utf-8") as stream:
+        for line_number, line in enumerate(stream, 1):
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            row = json.loads(line)
+            if not isinstance(row, dict) or not isinstance(row.get("questions"), dict):
+                raise ValueError("%s:%d needs a questions object" % (path, line_number))
+            if "state" not in row or not isinstance(row.get("expected", row.get("gold")), dict):
+                raise ValueError("%s:%d needs state and expected (or gold)" % (path, line_number))
+            state = row["state"]
+            if isinstance(state, dict):
+                for key in ("image", "audio", "video"):
+                    if state.get(key) is not None:
+                        values = state[key] if isinstance(state[key], list) else [state[key]]
+                        paths = []
+                        for value in values:
+                            media = Path(value)
+                            media = media if media.is_absolute() else path.parent / media
+                            if not media.is_file():
+                                raise FileNotFoundError("%s:%d missing %s" % (path, line_number, media))
+                            paths.append(str(media.resolve()))
+                        state[key] = paths if isinstance(state[key], list) else paths[0]
+            rows.append(row)
     if not rows:
         raise ValueError("empty multimodal dataset: %s" % path)
     return rows
@@ -291,12 +294,13 @@ def metrics(records, temperature=None, temperature_by_options=None, modality_cal
     for rec in records:
         qt, k = rec["qtype"], rec["k"]
         calibration = (modality_calibration or {}).get(rec["modality"], {})
-        scale = calibration.get("temperature_by_options", temperature_by_options).get(
-            temp_bucket(qt, k), calibration.get("temperature", temperature)[qt])
-        if qt == QTYPES["score"] and ordinal_calibration:
-            from .multimodal_calibration import ordinal_probabilities
-            p = ordinal_probabilities(rec["logits"], ordinal_calibration["models"].get(rec["modality"] + ":" + str(k)))
+        use_ordinal = qt == QTYPES["score"] and bool(ordinal_calibration)
+        model = ordinal_calibration["models"].get(f"{rec['modality']}:{k}") if use_ordinal else None
+        if use_ordinal and (model is not None or qt not in calibration.get("fitted_types", [])):
+            p = ordinal_probabilities(rec["logits"], model)
         else:
+            scale = calibration.get("temperature_by_options", temperature_by_options).get(
+                temp_bucket(qt, k), calibration.get("temperature", temperature)[qt])
             z = rec["logits"] / scale
             p = np.exp(z - z.max())
             p /= p.sum()
@@ -537,10 +541,10 @@ def finetune_multimodal(train_data, output_dir, *, model=DEFAULT_MULTIMODAL_MODE
     np.random.seed(config.seed)
     torch.manual_seed(config.seed)
     train_rows = load_rows(train_data)
-    val_rows = load_rows(validation_data) if validation_data else []
-    test_rows = load_rows(test_data) if test_data else []
-    selection_rows = load_rows(selection_data) if selection_data else []
     if distributed.main:
+        val_rows = load_rows(validation_data) if validation_data else []
+        test_rows = load_rows(test_data) if test_data else []
+        selection_rows = load_rows(selection_data) if selection_data else []
         check_splits(train=train_rows, validation=val_rows, test=test_rows, selection=selection_rows)
     distributed.barrier()
     output = Path(output_dir)
@@ -574,7 +578,9 @@ def finetune_multimodal(train_data, output_dir, *, model=DEFAULT_MULTIMODAL_MODE
     if not items:
         raise ValueError("no training decisions")
     references = {r["example_hash"]: r for r in json.loads(Path(reference_data).read_text())} if reference_data else {}
-    if config.kl_weight and not references:
+    distill = config.distill_weight > 0
+    anchor = config.kl_weight > 0
+    if anchor and not references:
         raise ValueError("kl_weight requires reference_data collected on the exact training decisions")
     if references:
         for row, qid, qdef, target in items:
@@ -583,14 +589,14 @@ def finetune_multimodal(train_data, output_dir, *, model=DEFAULT_MULTIMODAL_MODE
                     key in references and references[key]["k"] != len(target)):
                 raise ValueError("reference cache does not match training input/options: " + str(row.get("id")))
     teacher_count = sum(bool(row.get("teacher_targets", {}).get(qid)) for row, qid, _, _ in items)
-    if config.distill_weight and teacher_count == 0:
+    if distill and teacher_count == 0:
         raise ValueError("distillation enabled but training has no separate teacher targets")
     rng = random.Random(config.seed)
     losses, steps, trained_decisions, elapsed = [], 0, 0, time.perf_counter()
     effective_batch = config.global_batch_size or config.grad_accum * config.micro_batch * distributed.world_size
     total_steps = config.schedule_steps or math.ceil(len(items) / effective_batch) * config.epochs
     selection_history, best_key, best_step = [], None, None
-    train_sha = hashlib.sha256(Path(train_data).read_bytes()).hexdigest()
+    train_sha = file_fingerprint(train_data)
     resume_cursor, optimizer_restored = 0, False
     if config.resume_from:
         progress = json.loads((Path(config.resume_from) / "training_progress.json").read_text())
@@ -661,7 +667,7 @@ def finetune_multimodal(train_data, output_dir, *, model=DEFAULT_MULTIMODAL_MODE
 
     def select_model():
         nonlocal best_key, best_step
-        if not selection_rows:
+        if not selection_data:
             return
         measured = metrics(collect_records(agent, selection_rows, config.micro_batch)) if distributed.main else None
         measured = distributed.broadcast(measured)
@@ -711,16 +717,17 @@ def finetune_multimodal(train_data, output_dir, *, model=DEFAULT_MULTIMODAL_MODE
                     teacher = row.get("teacher_targets", {}).get(qid)
                     teacher = target_from_gold(agent._to_internal(qdef), teacher) if teacher else None
                     accepted = teacher is not None and target[int(np.argmax(teacher))] == max(target)
-                    reference = references.get(example_hash(row, qid, qdef))
+                    reference = references.get(example_hash(row, qid, qdef)) if references else None
                     reference_accepted = reference is not None
                     if reference is not None:
                         z = np.asarray(reference["logits"], dtype=np.float64)
                         reference = np.exp(z - z.max()); reference /= reference.sum()
                         if config.reference_gold_agree:
                             reference_accepted = target[int(reference.argmax())] == max(target)
+                    teacher_scores = [teacher[i] for i in order] if distill and teacher is not None else []
+                    reference_scores = [float(reference[i]) for i in order] if anchor and reference is not None else []
                     examples.append((inputs, [target[i] for i in order], QTYPES[q["t"]],
-                        [teacher[i] for i in order] if teacher is not None else [0.] * len(target), accepted,
-                        [float(reference[i]) for i in order] if reference is not None else [0.] * len(target), reference_accepted))
+                                     teacher_scores, accepted, reference_scores, reference_accepted))
                 # Native batches may be split by their actual padded token footprint. Every
                 # micro-batch retains the same optimizer-window denominator, including a tail.
                 position = 0
@@ -743,10 +750,11 @@ def finetune_multimodal(train_data, output_dir, *, model=DEFAULT_MULTIMODAL_MODE
                     sigma = config.rl_sigma_start + (config.rl_sigma_end - config.rl_sigma_start) * progress
                     loss, _parts = decision_loss(logits, y, mask, torch.tensor([e[2] for e in batch], device=agent.device),
                         objective=config.loss, ordinal_weight=config.ordinal_weight, brier_weight=config.brier_weight,
-                        teacher=tensor([e[3] for e in batch]), teacher_mask=torch.tensor([e[4] for e in batch], device=agent.device),
+                        teacher=tensor([e[3] for e in batch]) if distill else None,
+                        teacher_mask=torch.tensor([e[4] for e in batch], device=agent.device) if distill else None,
                         distill_weight=config.distill_weight, distill_temperature=config.distill_temperature,
-                        reference=tensor([e[5] for e in batch]) if references else None, kl_weight=config.kl_weight,
-                        reference_mask=torch.tensor([e[6] for e in batch], device=agent.device),
+                        reference=tensor([e[5] for e in batch]) if anchor else None, kl_weight=config.kl_weight,
+                        reference_mask=torch.tensor([e[6] for e in batch], device=agent.device) if anchor else None,
                         sigma=sigma, rl_samples=config.rl_samples, rl_weight=config.rl_weight)
                     if not torch.isfinite(loss):
                         raise RuntimeError("nonfinite training loss at row %r question %r" % (row.get("id"), qid))
@@ -804,7 +812,7 @@ def finetune_multimodal(train_data, output_dir, *, model=DEFAULT_MULTIMODAL_MODE
     if best_step is not None:
         _restore_checkpoint(agent, output / "checkpoint_best", config.mode)
     calibration = None
-    if val_rows and distributed.main:
+    if distributed.main and val_rows:
         print("Fitting temperatures on validation decisions", flush=True)
         validation_records = collect_records(agent, val_rows, config.micro_batch)
         _save_records(output / "validation.json", validation_records)
@@ -820,29 +828,32 @@ def finetune_multimodal(train_data, output_dir, *, model=DEFAULT_MULTIMODAL_MODE
                         getattr(agent, "modality_calibration", {})) if test_rows else None
         agent.save(output, mode=config.mode)
     distributed.barrier()
-    report = {"model": agent.model_id, "model_type": agent.model_type, "revision": agent.revision,
-              "config": asdict(config), "train_rows": len(train_rows), "train_decisions": len(items),
-              "validation_rows": len(val_rows), "test_rows": len(test_rows), "optimizer_steps": steps,
-              "trained_decisions": trained_decisions,
-              "selection_rows": len(selection_rows), "selection_history": selection_history,
-              "world_size": distributed.world_size, "global_batch_size": effective_batch,
-              "schedule_total_steps": total_steps, "policy_estimator": "per-decision leave-one-out without std normalization",
-              "parallelism": "synchronous optimizer-window gradient sum" if distributed.world_size > 1 else "single process",
-              "resume": {"checkpoint": config.resume_from, "starting_decisions": resume_cursor,
-                         "optimizer_restored": optimizer_restored},
-              "selected_step": best_step if best_step is not None else steps,
-              "teacher_target_decisions": teacher_count, "reference_cache": str(reference_data) if reference_data else None,
-              "trainable_parameters": sum(p.numel() for p in parameters),
-              "total_parameters": sum(p.numel() for p in agent.model.parameters()), "epoch_loss": losses,
-              "elapsed_seconds": time.perf_counter() - elapsed, "before": before,
-              "after_uncalibrated": after_uncalibrated, "after": after,
-              "calibration": calibration, "held_out": bool(test_rows),
-              "dataset_sha256": {"train": hashlib.sha256(Path(train_data).read_bytes()).hexdigest(),
-                                 "validation": hashlib.sha256(Path(validation_data).read_bytes()).hexdigest() if validation_data else None,
-                                 "test": hashlib.sha256(Path(test_data).read_bytes()).hexdigest() if test_data else None,
-                                 "selection": hashlib.sha256(Path(selection_data).read_bytes()).hexdigest() if selection_data else None,
-                                 "reference": hashlib.sha256(Path(reference_data).read_bytes()).hexdigest() if reference_data else None}}
+    report = None
     if distributed.main:
+        report = {
+            "model": agent.model_id, "model_type": agent.model_type, "revision": agent.revision,
+            "config": asdict(config), "train_rows": len(train_rows), "train_decisions": len(items),
+            "validation_rows": len(val_rows), "test_rows": len(test_rows), "optimizer_steps": steps,
+            "trained_decisions": trained_decisions,
+            "selection_rows": len(selection_rows), "selection_history": selection_history,
+            "world_size": distributed.world_size, "global_batch_size": effective_batch,
+            "schedule_total_steps": total_steps, "policy_estimator": "per-decision leave-one-out without std normalization",
+            "parallelism": "synchronous optimizer-window gradient sum" if distributed.world_size > 1 else "single process",
+            "resume": {"checkpoint": config.resume_from, "starting_decisions": resume_cursor,
+                       "optimizer_restored": optimizer_restored},
+            "selected_step": best_step if best_step is not None else steps,
+            "teacher_target_decisions": teacher_count, "reference_cache": str(reference_data) if reference_data else None,
+            "trainable_parameters": sum(p.numel() for p in parameters),
+            "total_parameters": sum(p.numel() for p in agent.model.parameters()), "epoch_loss": losses,
+            "elapsed_seconds": time.perf_counter() - elapsed, "before": before,
+            "after_uncalibrated": after_uncalibrated, "after": after,
+            "calibration": calibration, "held_out": bool(test_rows),
+            "dataset_sha256": {"train": train_sha,
+                               "validation": file_fingerprint(validation_data) if validation_data else None,
+                               "test": file_fingerprint(test_data) if test_data else None,
+                               "selection": file_fingerprint(selection_data) if selection_data else None,
+                               "reference": file_fingerprint(reference_data) if reference_data else None},
+        }
         (output / "train_report.json").write_text(json.dumps(report, indent=2) + "\n")
     report = distributed.broadcast(report)
     return report

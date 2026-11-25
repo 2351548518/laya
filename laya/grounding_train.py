@@ -129,7 +129,7 @@ def _validate_grounding_row(row):
 
 def load_grounding_rows(path):
     rows = []
-    with Path(path).open() as stream:
+    with Path(path).open(encoding="utf-8") as stream:
         for line in stream:
             row = json.loads(line)
             _validate_grounding_row(row)

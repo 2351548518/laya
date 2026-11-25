@@ -427,6 +427,45 @@ def test_training_performs_real_gradient_updates_and_holds_test_out(tmp_path, mo
     assert saved[-1][1] == mode
 
 
+@pytest.mark.parametrize("use_kl", [False, True])
+def test_training_builds_optional_targets_only_for_enabled_losses(tmp_path, monkeypatch, use_kl):
+    import laya.multimodal_train as training
+
+    question = Q["category"]
+    row = {"state": "training sample", "questions": {"x": question}, "expected": {"x": "bright"},
+           "teacher_targets": {"x": {"probabilities": {"bright": .8, "dark": .2}}}}
+    train = tmp_path / "train.jsonl"
+    train.write_text(json.dumps(row) + "\n")
+    reference = None
+    if use_kl:
+        reference = tmp_path / "reference.json"
+        reference.write_text(json.dumps([{"example_hash": training.example_hash(row, "x", question),
+                                         "k": 2, "logits": [.7, .3]}]))
+    else:
+        def unused_hash(*args):
+            pytest.fail("SFT without a reference cache should skip hashing training decisions")
+        monkeypatch.setattr(training, "example_hash", unused_hash)
+
+    original = training.decision_loss
+    observed = []
+
+    def check_loss(*args, **kwargs):
+        for name in ("teacher", "teacher_mask", "reference", "reference_mask"):
+            assert (kwargs[name] is not None) == use_kl
+        loss, parts = original(*args, **kwargs)
+        observed.append(parts)
+        return loss, parts
+
+    monkeypatch.setattr(training, "decision_loss", check_loss)
+    agent = tiny_agent()
+    agent.save = lambda *args, **kwargs: None
+    weight = .2 if use_kl else 0.
+    config = MultimodalTrainConfig(mode="head", gradient_checkpointing=False, distill_weight=weight, kl_weight=weight)
+    report = finetune_multimodal(train, tmp_path / "out", reference_data=reference, agent=agent, config=config)
+    assert report["teacher_target_decisions"] == 1 and len(observed) == 1
+    assert all((name in observed[0]) == use_kl for name in ("distillation_kl", "reference_kl"))
+
+
 @pytest.mark.skipif(not os.environ.get("LAYA_MM_MODEL"), reason="set LAYA_MM_MODEL to a local multimodal checkpoint")
 def test_real_backbone_image_audio_and_reload(tmp_path):
     from PIL import Image
@@ -538,8 +577,8 @@ def test_transformers_checkpoint_roundtrip_and_adapter_continuation(tmp_path, mo
 
 
 def test_jsonl_preserves_unicode_separators(tmp_path):
-    row = {"state": "decision\u2028embedded\u0085line", "questions": {"x": Q["present"]},
+    row = {"state": "多模态\u2028embedded\u0085line", "questions": {"x": Q["present"]},
            "expected": {"x": True}}
     path = tmp_path / "train.jsonl"
-    path.write_text(json.dumps(row, ensure_ascii=False) + "\n")
-    assert load_rows(path)[0]["state"] == row["state"]
+    path.write_bytes(("# comment\r\n" + json.dumps(row, ensure_ascii=False) + "\r\n").encode("utf-8"))
+    assert load_rows(path) == [row]

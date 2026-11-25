@@ -42,6 +42,26 @@ def test_decoder_canonical_order_no_double_temperature_and_unseen_identity():
     assert agent._decode(canonical[:2], choice) == result
 
 
+def test_missing_ordinal_bucket_preserves_fitted_modality_temperature():
+    agent = tiny_agent()
+    agent.modality_calibration = {"text": dict(temperature=[1., 2., 1.], fitted_types=[1])}
+    logits = torch.tensor([2., -1., 3.])
+    question = dict(t="score", crit=["low", "medium", "high"])
+    record = dict(qtype=1, k=3, modality="text", logits=logits.double().numpy(), target=np.array([0., 0., 1.]))
+    expected = agent._decode(logits, question)
+    agent.ordinal_calibration = dict(models={"text:4": channel()})
+    assert expected["calibrated"]
+    assert agent._decode(logits, question) == expected
+    assert metrics([record], modality_calibration=agent.modality_calibration,
+                   ordinal_calibration=agent.ordinal_calibration) == metrics(
+                       [record], modality_calibration=agent.modality_calibration)
+
+    agent.ordinal_calibration["models"]["text:3"] = channel("identity", k=3)
+    identity = agent._decode(logits, question)
+    assert not identity["calibrated"]
+    assert identity["score"] == round(float(np.arange(3) @ ordinal_probabilities(record["logits"])), 4)
+
+
 @pytest.mark.parametrize("mutation", ["bucket", "nan", "size", "negative", "sum", "kind"])
 def test_invalid_profile_rejected(mutation):
     model = channel()

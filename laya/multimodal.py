@@ -645,19 +645,21 @@ class MultimodalAgent(Agent):
 
     def _decode(self, logits, q, modality="text"):
         k = len(logits)
+        qtype = QTYPES[q["t"]]
         calibration = getattr(self, "modality_calibration", {}).get(modality, {})
-        temperatures = calibration.get("temperature", self.temperature)
-        buckets = calibration.get("temperature_by_options", self.temperature_by_options)
-        scale = buckets.get(temp_bucket(QTYPES[q["t"]], k), temperatures[QTYPES[q["t"]]])
         ordinal = getattr(self, "ordinal_calibration", {})
-        calibrated = QTYPES[q["t"]] in calibration.get("fitted_types", [])
-        if q["t"] == "score" and ordinal:
-            # Channels operate on canonical ordered levels and already include temperature.
+        calibrated = qtype in calibration.get("fitted_types", [])
+        use_ordinal = q["t"] == "score" and bool(ordinal)
+        model = ordinal["models"].get(f"{modality}:{k}") if use_ordinal else None
+        if use_ordinal and (model is not None or not calibrated):
+            # A fitted channel includes its own temperature. An unfitted modality uses raw logits.
             canonical = unpermute_probs(logits.detach().double().cpu().numpy(), q.get("option_order"))
-            model = ordinal["models"].get(modality + ":" + str(k))
             p = ordinal_probabilities(canonical, model)
             calibrated = model is not None and model["kind"] != "identity"
         else:
+            temperatures = calibration.get("temperature", self.temperature)
+            buckets = calibration.get("temperature_by_options", self.temperature_by_options)
+            scale = buckets.get(temp_bucket(qtype, k), temperatures[qtype])
             p = torch.softmax(logits / scale, -1).detach().cpu().numpy()
             p = unpermute_probs(p, q.get("option_order"))
         answer = {"type": q["t"], "answer_confidence": round(float(p.max()), 4),
