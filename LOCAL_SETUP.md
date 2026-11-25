@@ -1,16 +1,15 @@
-# Laya on this machine — local setup
+# Local setup
 
 For native multimodal setup on Linux or Apple silicon, run `./setup_laya.sh --multimodal`.
 On Windows, use `start.bat --multimodal` to serve a downloaded native checkpoint.
 On Intel macOS, the classic setup uses Python 3.10–3.12 and the pinned CPU/MPS stack.
 [Native service and SDKs](docs/multimodal-clients.md)
 
-The host measurements below describe the classic text checkpoints on an Intel Mac.
-[laya-multimodal installation](README.md#installation)
+## Classic text test environment
 
-Laya (the checkout in `laya/`) now runs here on real weights: all three checkpoints, real forward
-passes, on CPU and on the AMD GPU through Metal (MPS). This file records what was installed, the
-two code changes that were needed, how to re-run everything, and the numbers that were measured.
+The following record documents three classic text checkpoints tested on an Intel Mac.
+The checks ran on the CPU and on an AMD GPU using Metal Performance Shaders (MPS).
+[laya-multimodal installation](README.md#installation)
 
 ## Host
 
@@ -21,7 +20,7 @@ two code changes that were needed, how to re-run everything, and the numbers tha
 | GPU | AMD Radeon Pro Vega II (32 GB) + Radeon PRO W6800X Duo, Metal 3 |
 | accelerator APIs | **no CUDA** — CPU, or MPS via Metal |
 
-## What was installed (all inside the repository; everything below is gitignored)
+## Test environment and tools
 
 | path | contents |
 |---|---|
@@ -41,9 +40,8 @@ two code changes that were needed, how to re-run everything, and the numbers tha
 
 ## Code changes that were required
 
-The first two are real portability bugs, not local hacks; both are covered by
-`tests/test_portability.py` (18 checks, including the CUDA-OOM fallback), which is wired into
-CI along with `tests/test_training.py`.
+`tests/test_portability.py` covers the first two compatibility fixes and the CUDA-OOM fallback.
+CI runs the portability suite and `tests/test_training.py`.
 
 ### 1. `laya/common.py` — transformers 5 checkpoints on transformers 4
 

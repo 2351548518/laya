@@ -31,7 +31,7 @@ source .venv/bin/activate
 python -m pip install -e '.[multimodal]'
 ```
 
-The Python package is imported as `laya`. The HTTP server is available with
+Import the package as `laya`. To serve predictions over HTTP, install
 `python -m pip install -e '.[multimodal,serve]'`.
 
 On Linux and Apple silicon, `./setup_laya.sh --multimodal` prepares `.venv-mm` and downloads
@@ -44,8 +44,7 @@ For a container, mount the local checkpoint and enable the native media dependen
 
 ## Quickstart
 
-Download the merged Qwen3.5-4B checkpoint. After the download, prediction uses local files and
-can run on your own CPU or GPU.
+Download the merged Qwen3.5-4B checkpoint for local CPU or GPU inference.
 
 ```bash
 hf download ZeeoRe/jev-multimodal-qwen3.5-4b --local-dir models/jev-multimodal-qwen3.5-4b
@@ -54,23 +53,24 @@ hf download ZeeoRe/jev-multimodal-qwen3.5-4b --local-dir models/jev-multimodal-q
 ```python
 from laya import MultimodalAgent
 
-agent = MultimodalAgent("models/jev-multimodal-qwen3.5-4b", device="cuda")
-questions = {
+checkpoint = "models/jev-multimodal-qwen3.5-4b"
+agent = MultimodalAgent(checkpoint, device="cuda")
+routing_questions = {
     "route": {
         "type": "choice",
         "instructions": "Which team should handle the request?",
         "criteria": {"billing": "invoices and refunds", "technical": "software issues"},
     },
 }
-out = agent.predict("I was charged twice for the same invoice.", questions)
-print(out["answers"]["route"])
+decision = agent.predict("I was charged twice for the same invoice.", routing_questions)
+print(decision["answers"]["route"])
 
-# Use your own image and refer to one object.
-out = agent.predict(
+# Put an image containing a red cup at scene.jpg.
+location = agent.predict(
     image="scene.jpg",
     questions={"target": {"type": "box", "instructions": "the red cup"}},
 )
-print(out["answers"]["target"]["box"])
+print(location["answers"]["target"]["box"])
 ```
 
 Use `device="cpu"` for CPU inference. For Qwen video, use a state such as
@@ -85,9 +85,10 @@ laya --multimodal models/jev-multimodal-qwen3.5-4b \
   --preset triage "I was charged twice for the same invoice." --json
 ```
 
-Use the [native Notebook](https://github.com/2351548518/laya/blob/main/notebooks/laya_native_multimodal.ipynb)
-to try text and media decisions and inspect the JSONL format. For a separate application process,
-the Python and TypeScript SDKs send media to your local server. [Native SDK examples](https://github.com/2351548518/laya/blob/main/docs/multimodal-clients.md)
+The notebook walks through text and media decisions and creates example JSONL records.
+The Python and TypeScript SDKs send media from an application to your local server.
+[Native multimodal notebook](https://github.com/2351548518/laya/blob/main/notebooks/laya_native_multimodal.ipynb) ·
+[Native SDK examples](https://github.com/2351548518/laya/blob/main/docs/multimodal-clients.md)
 
 ## Train and evaluate
 
@@ -105,10 +106,11 @@ flowchart LR
     Box --> Coordinates["Normalized box and quality"]
 ```
 
-Train on JSONL rows containing input state, questions and decision targets or a single-box
-annotation. The starter recipes warm up the readouts and then train the readouts, language LoRA
-and the Qwen visual merger. The training guide includes four-GPU commands, a decision-only CLI,
-held-out calibration and evaluation. [Training guide](https://github.com/2351548518/laya/blob/main/docs/multimodal.md#head-warmup-and-lora-training) ·
+Use JSONL records with an input state, a question, and either a decision target or a single-box
+annotation. The starter recipes first train the readouts on a frozen backbone. The Qwen LoRA
+stage then updates the readouts, language adapters and visual merger together. The training guide
+covers four-GPU training, held-out calibration and evaluation.
+[Training guide](https://github.com/2351548518/laya/blob/main/docs/multimodal.md#head-warmup-and-lora-training) ·
 [Grounding](https://github.com/2351548518/laya/blob/main/docs/grounding.md) · [Commands](https://github.com/2351548518/laya/blob/main/scripts/multimodal/README.md)
 
 ## GGUF deployment
@@ -154,7 +156,8 @@ python -m compileall -q laya/ tests/
 python -m pytest -q tests/test_multimodal.py tests/test_grounding.py tests/test_multimodal_export.py
 ```
 
-See the [contribution guide](https://github.com/2351548518/laya/blob/main/CONTRIBUTING.md) for the full suite and the documentation build.
+The contribution guide covers the full test suite and strict documentation build.
+[Contributor setup](https://github.com/2351548518/laya/blob/main/CONTRIBUTING.md)
 
 ## Credits and license
 

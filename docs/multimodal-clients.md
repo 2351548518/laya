@@ -1,12 +1,12 @@
 # Native media from Python and TypeScript
 
-Run `laya-serve` on your machine with a trained native checkpoint. The server process owns the
-model and decodes the media. The two SDKs send file bytes to `POST /v1/multimodal`.
+Run `laya-serve` with a trained native checkpoint. The Python and TypeScript SDKs send file
+bytes to `POST /v1/multimodal`, where the server decodes the media and runs the model.
 
 ## Start the service
 
-From the repository root, with the [native runtime installed](multimodal.md) and a
-[checkpoint downloaded](multimodal-release.md), run:
+Use the downloaded checkpoint and run these commands from the repository root.
+[Native checkpoint download](multimodal-release.md)
 
 ```sh
 python -m pip install -e '.[multimodal,serve]'
@@ -48,7 +48,8 @@ print(target["box"], target["confidence"])
 
 ## TypeScript
 
-Build or install the package using the [SDK setup guide](https://github.com/2351548518/laya/tree/main/sdk/typescript).
+Build or install the TypeScript client.
+[SDK installation](https://github.com/2351548518/laya/tree/main/sdk/typescript)
 
 ```ts
 import { readFile } from "node:fs/promises";
@@ -63,8 +64,8 @@ const prediction = await client.predictMultimodal(
 console.log(prediction.answers.target.box, prediction.answers.target.confidence);
 ```
 
-Pass exactly one nonempty `image`, `audio`, or `video` file. Optional `state` supplies JSON
-context, such as a text instruction. Both SDKs encode media bytes as base64 in the request.
+Pass exactly one nonempty `image`, `audio`, or `video` file. Use `state` for optional context,
+such as a text instruction. Both SDKs encode media bytes as base64 in the request.
 The TypeScript client also accepts a browser `File` converted with
 `new Uint8Array(await file.arrayBuffer())`.
 
@@ -75,10 +76,10 @@ serve a trained Gemma 4 E2B checkpoint and send audio file bytes. Video decoding
 The server caps the complete JSON body at 2 MiB, including the base64 overhead. Use short clips
 for this endpoint or use the in-process Python API for larger local files.
 
-The endpoint accepts `choice`, `noul`, `score`, and `box` questions. `box` describes one object
-in an image and returns `top`, `left`, `bottom`, and `right` in `[0, 1]`, plus a localization
-quality estimate. `usage.forward_passes` counts the executed questions. The service enforces
-its request and token budgets. [Single-box grounding](grounding.md)
+The endpoint accepts `choice`, `noul`, `score`, and `box` questions. An image box answer contains
+normalized `left`, `top`, `right`, and `bottom` coordinates. Its `confidence` estimates overlap
+with the target. `usage.forward_passes` counts the executed questions.
+[Single-box grounding](grounding.md)
 
 For pure text, use the SDK's `predict` or `predictBatch`/`predict_batch` on the text endpoints.
 For in-process text and media inference with the same native checkpoint, use
@@ -86,8 +87,8 @@ For in-process text and media inference with the same native checkpoint, use
 
 ## HTTP without an SDK
 
-Send a JSON object to `POST /v1/multimodal`. Encode the original file bytes with standard base64
-and put the string in the `base64` property of the corresponding media field. For example:
+Send a JSON object to `POST /v1/multimodal`. Put the base64-encoded file bytes in the media
+field's `base64` property.
 
 ```json
 {

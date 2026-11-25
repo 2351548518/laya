@@ -1,16 +1,15 @@
 # Local single-box grounding
 
-The multimodal runtime attaches a compact single-box head to the same backbone used for typed
-decisions. It selects the last valid native state and applies layer normalization, a projection,
-GELU and a five-value readout: four coordinates and a localization quality logit.
+The single-box head reads the same backbone used for typed decisions. It takes the last valid
+hidden state and applies layer normalization, a linear projection, GELU and a final linear layer.
+The five outputs encode four coordinates and one localization quality logit.
 
-A `single-v1` checkpoint contains no object-query decoder, set matching head or detector slots.
-Explicit legacy set checkpoints remain loadable for compatibility. New starter recipes use one
-box and do not train multi-object detection.
+The starter recipes use the compact `single-v1` head for one referred object. The runtime can
+also load legacy set checkpoints with their own detector heads.
 
 ## Prediction contract
 
-Load a checkpoint trained with single-box supervision:
+Load a checkpoint trained with single-box supervision.
 
 ```python
 from laya import MultimodalAgent
@@ -20,45 +19,41 @@ result = agent.predict(
     image="scene.jpg",
     questions={"target": {"type": "box", "instructions": "the red mug"}},
 )
-box = result["answers"]["target"]["box"]
+target = result["answers"]["target"]
+print(target["box"], target["confidence"])
 ```
 
-A box question has only `type` and `instructions`; it has no answer candidates. Coordinates are
-normalized to the image and returned as `left`, `top`, `right` and `bottom`. Multiply horizontal
-coordinates by image width and vertical coordinates by image height to obtain pixel positions.
-The output has positive width and height. The quality score estimates IoU and is not
-automatically a calibrated probability that an object is present.
+A box question takes `type` and `instructions`. The answer has `left`, `top`, `right` and
+`bottom` coordinates in `[0, 1]`, with positive width and height. Multiply horizontal coordinates
+by the image width and vertical coordinates by the height for pixel positions. The answer's
+`confidence` estimates the intersection over union (IoU) between the predicted and target boxes.
 
-A fresh localization head must be trained. A compact single-box checkpoint rejects multi-object
-`detect()` calls rather than returning an untrained set prediction. Each question uses one
-native backbone pass and generates zero answer tokens.
+Each box question uses one backbone pass and returns zero generated tokens. Use `predict()`
+with a trained single-box head. The legacy `detect()` method requires a trained set head.
 
 ## Training records
 
-A grounding row contains one box question and one normalized `xyxy` target:
+A positive grounding row pairs one box question with one normalized `xyxy` target.
 
 ```json
 {"id":"mug-1","group":"image-1","state":{"image":"images/scene.jpg"},"questions":{"target":{"type":"box","instructions":"the red mug"}},"grounding":{"task":"single","boxes":[[0.15,0.2,0.65,0.8]]}}
 ```
 
 Keep images and source groups separate across training, development, calibration and test data.
-Malformed, nonfinite and out-of-frame boxes are rejected. Multiple annotations are not truncated
-to one target. An empty target supervises absence/quality without inventing a zero-sized box.
+Each box needs finite, ordered coordinates within the image. For `task: "single"`, select a
+distinct referred object for each question. An empty `boxes` list gives the quality head a target
+of zero and skips the coordinate losses.
 
-`finetune_grounding` can mix these rows with native `choice`, `noul` and `score` decisions. The
-single-box objective uses L1 coordinate error, GIoU and IoU-quality supervision. Development
-selection can combine geometric accuracy with macro decision accuracy, with per-modality
-retention checks.
+`finetune_grounding` can mix these rows with `choice`, `noul` and `score` decisions. The box loss
+combines L1 coordinate error, generalized IoU (GIoU) and quality supervision from the observed
+IoU. During development, joint selection can combine box accuracy with macro decision accuracy
+across modalities.
 
-See the [multimodal guide](multimodal.md) for JSONL loading, fresh-base initialization, staged
-four-GPU training, calibration and evaluation commands. The core head is in `laya/grounding.py`,
-training is in `laya/grounding_train.py`, and portable settings are in `configs/multimodal/`.
+The head lives in `laya/grounding.py`, the trainer in `laya/grounding_train.py`, and the starter
+settings in `configs/multimodal/`. [Joint training and evaluation](multimodal.md#head-warmup-and-lora-training)
 
 ## Evaluation and scope
 
-The local evaluator reports mean IoU and accuracy at IoU 0.5 on the supplied single-box cohort.
-These scores are not COCO average precision. Report the exact source split, input budget,
-backbone and annotation conversion when comparing with external methods.
-
-The geometry and typed response contract are an open local implementation. They are not a claim
-about proprietary Jev weights, architecture internals or an unpublished RLCD recipe.
+For positive single-box examples, the local evaluator reports mean IoU and the fraction of
+predicted boxes with IoU ≥ 0.5. Report the source split, input budget, backbone and annotation
+conversion alongside these metrics when comparing with other implementations.

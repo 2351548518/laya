@@ -7,9 +7,9 @@ merger, candidate scorer and single-box head. Load it with `laya.MultimodalAgent
 
 ## Select a GGUF pair
 
-The language file contains the backbone and decision heads. The matching `mmproj` file
-contains the visual encoder and trained merger. Size includes both files. For text-only
-inference, the language file is sufficient.
+Use the language GGUF for text inference. For images and video, pair it with the matching
+`mmproj` file, which contains the visual encoder and trained merger. The table reports the
+combined size on disk.
 
 | Selected file | Size | Distillation rows | Original H | Selected H on prior runtime | Selected H after runtime fix |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -23,18 +23,19 @@ inference, the language file is sufficient.
 | Q1_0, size experiment | 0.624 GiB | 744 | 2.96% | 2.98% | Not rerun |
 
 The selected GGUF heads use teacher distillation with training-time head QAT disabled.
-H combines decision accuracy and box Acc@IoU ≥ 0.5 with the harmonic mean. The two complete
-runtime reruns each used 900 decisions and 128 positive single boxes. The fix recovered nine
-WebM inputs per model. All 1,019 previously valid answers matched, and localization accuracy
-was unchanged. These results use the development set from model selection and measure file
-size on disk. See the model card for exact projector pairings and measured desktop memory.
+H is the harmonic mean of decision accuracy and box accuracy at IoU ≥ 0.5. The Q4_K_M and
+IQ2_XS / SSM4 runtime reruns each used 900 decisions and 128 positive single boxes from the
+model-selection development set. The fix recovered nine WebM inputs per model, preserved
+all 1,019 previously valid answers and produced the same box accuracy. The model card lists
+the exact projector pairs and measured desktop memory.
 [GGUF model card](https://huggingface.co/ZeeoRe/jev-multimodal-qwen3.5-4b-GGUF) ·
 [Runtime evaluation](https://huggingface.co/ZeeoRe/jev-multimodal-qwen3.5-4b-GGUF/blob/main/recovery/runtime-fixed-evaluation.json)
 
 ## Run the decision server
 
-Build the local llama.cpp-jev fork at the validated revision with the patch used for the two
-runtime reruns. Install a C++ compiler and CMake, and put `ffmpeg` and `ffprobe` on PATH for video.
+Build the local llama.cpp-jev fork at the tested revision and apply the runtime patch used in
+the reruns.
+Install a C++ compiler and CMake. For video decoding, put `ffmpeg` and `ffprobe` on PATH.
 
 ```bash
 git clone https://github.com/2351548518/llama.cpp-jev.git
@@ -46,8 +47,8 @@ cmake -S llama.cpp-jev -B llama.cpp-jev/build-laya -DCMAKE_BUILD_TYPE=Release -D
 cmake --build llama.cpp-jev/build-laya --target llama-server llama-quantize -j 4
 ```
 
-Download only the compact selected pair and start the server on localhost. The Q4_K_M
-alternative uses `recovery/jev-multimodal-qwen3.5-4b-Q4_K_M.gguf` with `mmproj-Q8_0.gguf`.
+Download the IQ2_XS / SSM4 pair below and start the server on localhost. To run Q4_K_M, use
+`recovery/jev-multimodal-qwen3.5-4b-Q4_K_M.gguf` with `mmproj-Q8_0.gguf`.
 
 ```bash
 hf download ZeeoRe/jev-multimodal-qwen3.5-4b-GGUF \

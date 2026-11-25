@@ -1,14 +1,14 @@
 # Native multimodal decisions
 
-`MultimodalAgent` reads native media and returns typed decisions without generating answer text.
-It uses the backbone's image, audio and video processing, a shared candidate scorer, and an
-optional compact single-box readout. Every question uses one backbone forward pass.
+`MultimodalAgent` turns text and native media into typed answers. The backbone processes the
+input, and the candidate scorer or single-box head reads its hidden states. Each question uses
+one backbone forward pass and returns zero generated tokens.
 
 The published Qwen3.5-4B checkpoint is available as merged safetensors and typed-decision GGUF.
 [Models and GGUF deployment](multimodal-release.md) ·
 [Native multimodal Notebook](https://github.com/2351548518/laya/blob/main/notebooks/laya_native_multimodal.ipynb)
 
-Install the optional runtime and training dependencies:
+Install the optional runtime and training dependencies from the repository root.
 
 ```bash
 pip install -e '.[multimodal]'
@@ -31,7 +31,7 @@ checkpoint. Training data, model weights and local run outputs are not shipped i
 
 ## Local prediction
 
-Use the Python runtime below or run the same checkpoint from a terminal.
+Ask two questions about the same image in Python, or run the checkpoint from a terminal.
 [Native CLI](cli-mcp.md#native-multimodal-checkpoint)
 
 ```python
@@ -48,14 +48,14 @@ questions = {
 result = agent.predict("Current scene", questions, image="scene.jpg")
 ```
 
-`choice` returns a distribution over the supplied candidates. `noul` returns the probability of
-true. `score` returns a distribution and its expected ordered level index. Fractional targets
-remain distributions during training. Single-box localization is covered in [grounding](grounding.md).
+`choice` returns the selected candidate and a distribution over the supplied candidates. `noul`
+returns the probability of true. `score` returns a distribution over ordered levels and the
+expected level index. A `box` question localizes one referred object in an image.
+[Single-box grounding](grounding.md)
 
-For an audio-capable backbone, pass an audio path or a waveform with `sampling_rate`. Qwen3.5
-rejects audio rather than silently dropping it. Mark visual-only video states with
-`"video_audio": false`. Native input lengths exceeding `max_len` raise an error; media and
-questions are not silently truncated to fit.
+For an audio-capable backbone, pass an audio path or a waveform with `sampling_rate`. Use
+visual-only video with Qwen3.5. In the state object, set `video_audio` to `False` in Python or
+`false` in JSON. Inputs that exceed the `max_len` token budget raise an error after processing.
 
 The existing hooks, `predict_batch`, `Router(multimodal=...)` and inline-media HTTP endpoint can
 use the same runtime. All questions about one state share its decoded images, audio and sampled
@@ -64,21 +64,21 @@ also reuse identical visual features across questions about that state during in
 
 ## From input to answer
 
-`MultimodalAgent` in `laya/multimodal.py` renders the question and passes it with the input
-to the backbone's processor. For `choice`, `noul` and `score`, `candidate_positions` maps
-the candidate markers to their token positions after media insertion. `CandidateScorer`
-in `laya/multimodal_readout.py` compares each candidate's hidden state with the final question
-state. A softmax turns the scores into probabilities. For example, probabilities of 0.2 and
-0.8 for `continue` and `inspect` produce `choice="inspect"`. The same two probabilities for
-levels 0 and 1 produce `score=0.8`.
+`MultimodalAgent` in `laya/multimodal.py` passes the rendered question and its input to the
+backbone's processor. For `choice`, `noul` and `score`, `candidate_positions` identifies the
+candidate marker tokens after the processor inserts media tokens. `CandidateScorer` in
+`laya/multimodal_readout.py` projects and compares each marker's hidden state with the final
+question state. A softmax turns the resulting logits into probabilities. Probabilities of 0.2
+for `continue` and 0.8 for `inspect` yield `choice="inspect"`. The same probabilities over
+levels 0 and 1 yield `score=0.8`.
 
 For a `box` question, `GroundingHead` in `laya/grounding.py` projects the final valid hidden
-state to normalized coordinates and an IoU quality estimate. One box targets one referred
-object. The quality estimate describes localization confidence.
+state to one normalized box. Its quality score estimates the intersection over union (IoU)
+between the predicted box and the target.
 
 ## Router and HTTP
 
-Configure the native lane with a trained local checkpoint:
+Pass the trained checkpoint to `Router` to enable the native inference path.
 
 ```python
 router = laya.Router(multimodal="multimodal-runs/example/final")
@@ -86,26 +86,28 @@ result = router.predict("Current scene", questions, image="scene.jpg")
 ```
 
 For the HTTP server, install `.[multimodal,serve]`, set `LAYA_MULTIMODAL_MODEL` to the same
-checkpoint, and start `laya-serve`. `POST /v1/multimodal` accepts `state`, `questions`, exactly
-one of `image`, `audio` or `video`, and optional `max_len` and `min_confidence` controls. Encode
-file bytes as `{"base64": "..."}` in the selected media field. Remote callers cannot provide
-server file paths. Existing authentication, request size limits and admission controls apply.
-Video audio follows the configured backbone's capabilities. [HTTP API](http-api.md) ·
+checkpoint, and start `laya-serve`. Send `questions`, exactly one of `image`, `audio` or
+`video`, and any optional `state`, `max_len` or `min_confidence` fields to `POST /v1/multimodal`.
+Supply the media as `{"base64": "..."}` containing the original file bytes. The configured
+backbone determines which modalities and video audio the service can process. The request
+obeys the server's authentication, body size and token limits. [HTTP API](http-api.md) ·
 [Python and TypeScript media examples](multimodal-clients.md)
 
 ## Local JSONL data loading
 
-The core loaders live in `laya.multimodal_train` and `laya.grounding_train`. They read one JSON
-object per line and preserve Unicode and soft labels. The decision-only loader resolves relative
-media paths against the JSONL directory; joint training uses the recorded paths directly, so use
-absolute media paths or run from their intended working directory. A joint training record
-contains exactly one question.
+`laya.multimodal_train.load_rows` reads one JSON object per line and resolves relative media
+paths from the JSONL directory. The joint trainer's `laya.grounding_train.load_grounding_rows`
+requires exactly one question per row and passes its media paths to the runtime as written.
+Use absolute paths or run from the directory those paths are relative to.
+
+Use `expected` to label the correct decision.
 
 ```json
 {"id":"scene-1","group":"episode-1","state":{"image":"images/scene.jpg","text":"Current scene"},"questions":{"action":{"type":"choice","instructions":"Choose the next action.","criteria":{"continue":"continue normally","inspect":"inspect the situation"}}},"expected":{"action":"inspect"}}
 ```
 
-Alternatively, replace `expected` with a native probability target:
+Use `gold` to supply a probability distribution over the same answer options. Both trainers
+use `gold` when a row contains both fields.
 
 ```json
 {"gold":{"action":{"probabilities":{"continue":0.2,"inspect":0.8}}}}
@@ -121,22 +123,22 @@ validation, and `decision_dev.jsonl` for decision validation. A head warmup dire
 a smaller training subset with the same protected development files. Decision rows in joint
 validation accept either a hard `expected` label or a `gold` probability distribution.
 
-Prepared Qwen exports can carry `training_admission` receipts recording the processor, native
-token count and context budget. Receipts must match the chosen model. For local JSONL without
-stored receipts, the standalone trainer accepts `--allow-unadmitted`; native media capability
-and context checks still apply during loading and forward passes. This flag never drops audio
-or truncates an input.
+Prepared Qwen exports can record the processor, native token count and context budget in
+`training_admission`. Match the processor and budget to the run configuration. For local
+JSONL without these records, the standalone trainer accepts `--allow-unadmitted` and still
+checks the input modality and token limit.
 
 ## Head warmup and LoRA training
 
 The reusable joint trainer is `laya.grounding_train.finetune_grounding`. It supports `head`,
 `lora` and `full` modes. The standalone entry point is `scripts/multimodal/train.py`.
 
-The supplied recipes use a global batch of 64, a microbatch cap of 4 and a padded-token budget
-of 16,384. Each rank accumulates its part of the same optimizer window. Changing GPU count does
-not multiply the global batch size. Short and long inputs are packed within the native budget.
+The supplied recipes use a global batch size of 64 records across all GPUs. Each rank packs up
+to four records per microbatch within a budget of 16,384 padded tokens. A microbatch contributes
+in proportion to its share of the global batch before the ranks sum their gradients.
 
-Start from an original local backbone with fresh heads:
+Start with the original local Qwen backbone. This stage initializes the heads using the
+configured seed and trains the readouts while the backbone stays frozen.
 
 ```bash
 CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --standalone --nproc_per_node=4 \
@@ -146,7 +148,8 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --standalone --nproc_per_node=4 \
   --require-original-base --allow-unadmitted
 ```
 
-Continue from this run's selected head checkpoint, creating new LoRA adapters and an optimizer:
+Start the LoRA stage from the selected head checkpoint. This run creates new adapters and a
+fresh optimizer.
 
 ```bash
 CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --standalone --nproc_per_node=4 \
@@ -155,26 +158,30 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --standalone --nproc_per_node=4 \
   --config configs/multimodal/sft.json --visual-only --allow-unadmitted
 ```
 
-Omit `--visual-only` for a Gemma 4 audio/video run. The native backbone reads the media directly.
-The Qwen recipe trains language LoRA adapters, the visual merger and the decision/localization
-readouts. It keeps the visual encoder frozen. Main decision supervision uses cross-entropy;
-box targets use L1, GIoU and quality losses. Warmup can additionally use Brier and ordinal RPS.
-These recipes use supervised targets. In `laya/grounding_train.py`, a hard decision row such
-as `inspect` raises the probability of that option through cross-entropy. A soft target such
-as `[0.2, 0.8]` weights the two log probabilities by 0.2 and 0.8. For an image annotated with
-one box, L1 penalizes coordinate error, GIoU penalizes poor overlap, and the quality loss trains
-the confidence estimate from the predicted box's overlap with the target.
+Omit `--visual-only` and select a Gemma 4 backbone to train on audio and video with a
+soundtrack. The Qwen LoRA recipe trains the language adapters, visual merger, and decision
+and box readouts while keeping the visual encoder frozen.
 
-Readout and localization calculations use FP32. LoRA training uses gradient checkpointing,
-length bucketing, per-module learning rates and a warmup/cosine schedule. Optional activation
-CPU offload can help long contexts. It does not change the input evidence or create labels.
+The starter recipes use supervised losses in `laya/grounding_train.py`.
 
-The decision-only entry point remains available as `laya-mm-train`; run `laya-mm-train --help`
-for its JSONL, independent selection, calibration and resume options.
+- A hard label such as `inspect` gives all cross-entropy weight to that option. A soft target
+  of `[0.2, 0.8]` weights the log probabilities of `continue` and `inspect` by 0.2 and 0.8.
+  The head warmup adds Brier loss and applies ranked probability score (RPS) to ordinal decisions.
+- A box annotation supplies four coordinates. L1 penalizes coordinate errors, generalized IoU
+  (GIoU) penalizes poor overlap, and the quality loss uses the predicted box's IoU with the target.
+
+Readout calculations use FP32. The LoRA recipe uses gradient checkpointing, length bucketing,
+per-module learning rates, and cosine decay after warmup. Set `activation_offload_min_tokens`
+to offload saved activations to CPU for long inputs. Joint checkpoint selection uses the
+average of the available grounding score and macro decision accuracy across modalities.
+Retention checks can reject a checkpoint that exceeds its allowed development-set regression.
+
+Use `laya-mm-train --help` for the decision-only trainer's JSONL, checkpoint selection,
+calibration and resume options.
 
 ## Calibration and evaluation
 
-Fit decision temperatures on calibration data and check them on a separate development set:
+Fit decision temperatures on calibration data and check them on a separate development set.
 
 ```bash
 python scripts/multimodal/calibrate.py --model multimodal-runs/example/sft/best \
@@ -186,7 +193,7 @@ python scripts/multimodal/calibrate.py --model multimodal-runs/example/sft/best 
 The acceptance guard checks overall calibration and per-modality regressions. A rejected fit
 keeps the original model probabilities. Calibration never consumes the final test labels.
 
-Evaluate the frozen checkpoint on local typed decisions and single-box targets:
+Evaluate the frozen checkpoint on local typed decisions and single-box targets.
 
 ```bash
 python scripts/multimodal/evaluate.py --model multimodal-runs/example/final \
@@ -195,16 +202,16 @@ python scripts/multimodal/evaluate.py --model multimodal-runs/example/final \
   --out multimodal-runs/example/evaluation.json
 ```
 
-The report includes decision accuracy, NLL, Brier, ECE and score MAE, with modality/type slices.
-Grounding reports mean IoU and accuracy at IoU 0.5. These are local evaluations; converted
-question formats or custom source splits are not interchangeable with an official leaderboard.
+The report includes decision accuracy, NLL, Brier, ECE and score MAE, broken down by modality
+and question type. It also gives mean IoU and the fraction of positive single-box cases whose
+IoU reaches 0.5. To compare runs, report the source split, question conversion and input budget
+alongside the scores.
 
 ## Source and local workspace layout
 
-Core runtime and training modules are under `laya/`; portable commands are under
-`scripts/multimodal/`, with starter settings under `configs/multimodal/`. Core contracts are
-registered in `scripts/test_suites.py`, and the native multimodal CI lane runs on CPU without
-model downloads.
+Core runtime and training modules live in `laya/`. Find the portable commands in
+`scripts/multimodal/` and starter settings in `configs/multimodal/`. The native multimodal CI
+lane runs the relevant suites on CPU using small local fixtures.
 
 The ignored `_local/` directory holds dataset-specific preparation code, private research
 configs, comparison experiments, logs and their source/processing records. Local datasets,
