@@ -35,6 +35,9 @@ if not exist "%VENV%\Scripts\python.exe" (
         exit /b 1
     )
     !PYEXE! -m venv "%VENV%" || goto :fail
+)
+if not exist "%VENV%\Scripts\laya-serve.exe" (
+    echo [setup] Installing Laya dependencies...
     "%VENV%\Scripts\python.exe" -m pip install -q --upgrade pip || goto :fail
     "%VENV%\Scripts\python.exe" -m pip install -q %TORCH_PACKAGES% --index-url "%TORCH_INDEX_URL%" || goto :fail
     "%VENV%\Scripts\python.exe" -m pip install -q -e ".[%EXTRAS%]" || goto :fail
