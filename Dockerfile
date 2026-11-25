@@ -1,5 +1,6 @@
 # Build and runtime share one base so the copied virtualenv matches its interpreter.
 ARG PYTHON_IMAGE=python:3.11-slim-trixie
+ARG LAYA_MULTIMODAL=0
 
 FROM ${PYTHON_IMAGE} AS build
 
@@ -16,8 +17,10 @@ ENV PATH="/opt/venv/bin:$PATH"
 # the build if the wheel does not match the requested index.
 ARG TORCH_INDEX=cpu
 ARG TORCH_VERSION=2.14.0
+ARG LAYA_MULTIMODAL
 COPY docker/check_torch.py /opt/check_torch.py
-RUN pip install "torch==${TORCH_VERSION}" --index-url https://download.pytorch.org/whl/${TORCH_INDEX} \
+RUN if [ "$LAYA_MULTIMODAL" = "1" ]; then set -- torchvision; else set --; fi \
+    && pip install "torch==${TORCH_VERSION}" "$@" --index-url https://download.pytorch.org/whl/${TORCH_INDEX} \
     && python /opt/check_torch.py "${TORCH_INDEX}" \
     && pip check
 
@@ -25,9 +28,13 @@ WORKDIR /src
 COPY pyproject.toml setup.py README.md LICENSE ./
 COPY laya/ ./laya/
 # The `serve` extra puts `laya-serve` (POST /v1/systemone, GET /health) in the image, so
-# the same image can run a one-shot request or serve the Jev-compatible API. It adds
-# fastapi and uvicorn only; torch was installed above.
-RUN pip install ".[serve]" && pip check
+# the same image can run a one-shot request or serve the Jev-compatible API.
+RUN if [ "$LAYA_MULTIMODAL" = "1" ]; then \
+      pip install ".[serve,multimodal]" "torch==${TORCH_VERSION}" \
+      && python -c 'import laya.multimodal, soundfile, torchvision'; \
+    else \
+      pip install ".[serve]"; \
+    fi && pip check
 
 FROM ${PYTHON_IMAGE} AS runtime
 
@@ -37,9 +44,10 @@ FROM ${PYTHON_IMAGE} AS runtime
 # space-separated list of `repo[:subfolder]` specs; empty by default leaves the image as it was.
 ARG MODELSCOPE_MODEL=""
 ARG MODELSCOPE_REVISION="master"
+ARG LAYA_MULTIMODAL
 
-LABEL org.opencontainers.image.title="Laya Docker quickstart" \
-      org.opencontainers.image.source="https://github.com/NandhaKishorM/laya" \
+LABEL org.opencontainers.image.title="laya-multimodal" \
+      org.opencontainers.image.source="https://github.com/2351548518/laya" \
       org.opencontainers.image.licenses="Apache-2.0"
 
 # torch 2.14 swaps some eager CUDA ops (bmm, topk, sum, norms) for Triton kernels that it
@@ -56,6 +64,12 @@ ENV PATH="/opt/venv/bin:$PATH" \
     OMP_NUM_THREADS=4 \
     LAYA_DEVICE=cpu \
     HF_HOME=/home/laya/.cache/huggingface
+
+RUN if [ "$LAYA_MULTIMODAL" = "1" ]; then \
+      apt-get update \
+      && apt-get install -y --no-install-recommends ffmpeg libsndfile1 \
+      && rm -rf /var/lib/apt/lists/*; \
+    fi
 
 RUN groupadd --gid 10001 laya \
     && useradd --uid 10001 --gid laya --create-home laya \

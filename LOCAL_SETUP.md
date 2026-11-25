@@ -1,5 +1,9 @@
 # Laya on this machine — local setup
 
+For native multimodal setup on Linux or Apple silicon, run `./setup_laya.sh --multimodal`.
+The host measurements below describe the classic text checkpoints on an Intel Mac.
+[laya-multimodal installation](README.md#installation)
+
 Laya (the checkout in `laya/`) now runs here on real weights: all three checkpoints, real forward
 passes, on CPU and on the AMD GPU through Metal (MPS). This file records what was installed, the
 two code changes that were needed, how to re-run everything, and the numbers that were measured.

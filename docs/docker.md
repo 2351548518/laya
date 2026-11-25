@@ -1,5 +1,51 @@
 # Docker quickstart
 
+## Serve a native multimodal checkpoint
+
+Download a merged native checkpoint on the host and set `LAYA_MULTIMODAL_MODEL_DIR` to its
+directory. The container's user (UID 10001) needs read access to the checkpoint files.
+
+```bash
+export LAYA_MULTIMODAL_MODEL_DIR="$PWD/models/jev-multimodal-qwen3.5-4b"
+docker compose -f compose.yaml -f compose.http.yaml -f compose.multimodal.yaml \
+  up --build -d laya-serve
+curl -fsS http://127.0.0.1:8000/health
+```
+
+The overlay adds the native Python dependencies, FFmpeg and libsndfile, mounts the checkpoint
+read-only, and starts the HTTP service with Hub access disabled. Append `-f compose.cuda.yaml`
+before `up` on a host with the NVIDIA Container Toolkit. Set `LAYA_PRELOAD=1` to load the
+mounted checkpoint during startup. With lazy loading, `/health` checks whether the service is
+alive and the first request loads the model.
+
+Send an image to the native endpoint. Replace `scene.jpg` with a local image.
+
+```bash
+python - scene.jpg <<'PY'
+import base64
+import json
+import sys
+from pathlib import Path
+from urllib.request import Request, urlopen
+
+payload = {
+    "image": {"base64": base64.b64encode(Path(sys.argv[1]).read_bytes()).decode("ascii")},
+    "questions": {"target": {"type": "box", "instructions": "the red cup"}},
+}
+req = Request("http://127.0.0.1:8000/v1/multimodal", json.dumps(payload).encode(),
+              headers={"Content-Type": "application/json"})
+with urlopen(req) as response:
+    print(json.load(response)["answers"]["target"])
+PY
+```
+
+For audio or video, use the matching field and a checkpoint that supports that modality.
+For text decisions with the mounted checkpoint, send `"model": "multimodal"` to
+`POST /v1/systemone`.
+[Native input and HTTP contracts](multimodal.md#router-and-http) · [Released checkpoints](multimodal-release.md)
+
+## Classic text checkpoints
+
 Run the SDK without installing Python or PyTorch on your host. For the CPU
 quickstart, allow 8 GB of RAM and 10 GB of free disk, with Docker Engine or
 Docker Desktop and Compose v2 or newer.

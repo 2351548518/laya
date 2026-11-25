@@ -9,6 +9,7 @@
 !docker/
 !docker/entrypoint.py
 !docker/check_torch.py
+!docker/prefetch_modelscope.py
 !laya/
 !laya/**
 !examples/

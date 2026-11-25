@@ -126,6 +126,21 @@ jobs:
       LAYA_API_KEY: ci-test-key
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate native multimodal Compose overlays
+        env:
+          LAYA_MULTIMODAL_MODEL_DIR: ${{ github.workspace }}
+        run: |
+          docker compose -f compose.yaml -f compose.http.yaml -f compose.multimodal.yaml config --quiet
+          docker compose -f compose.yaml -f compose.http.yaml -f compose.multimodal.yaml -f compose.cuda.yaml config --quiet
+      - name: Build and check the native media runtime
+        run: |
+          docker build --build-arg LAYA_MULTIMODAL=1 -t laya:native-media .
+          docker run --rm --network none laya:native-media sh -ec '
+            ffmpeg -version
+            ffprobe -version
+            python -c "from laya import MultimodalAgent; import soundfile, torchvision"
+            pip check
+          '
       - name: Start laya-serve and wait until healthy
         run: docker compose up --build -d --wait --wait-timeout 300 laya-serve
       - name: Check binding, health and bearer auth
