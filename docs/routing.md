@@ -6,6 +6,10 @@ the multilingual checkpoint. Text whose language it cannot place follows `defaul
 multilingual checkpoint since 0.4.0. You can override that choice, supply your own language hint, or
 select the typed-decisions checkpoint explicitly.
 
+Use `Router(multimodal=CHECKPOINT)` to register a trained native checkpoint for media decisions.
+To send a text-only request to that checkpoint as well, pass `model="multimodal"` to
+`router.predict`. [Native routing and HTTP](multimodal.md#router-and-http)
+
 This guide covers model selection and lifecycle. For the question types accepted by prediction,
 see [Structured decisions](structured.md); for lifecycle callbacks, see [Prediction hooks](hooks/index.md).
 

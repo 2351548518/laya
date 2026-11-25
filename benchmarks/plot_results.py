@@ -1,14 +1,14 @@
 #!/usr/bin/env python
-"""Render benchmarks/bench-rtx4070.png from the three result JSONs.
+"""Render the historical RTX 4070 chart from the three committed result JSONs.
 
-    python benchmarks/plot_results.py
+    python benchmarks/plot_results.py --out _local/bench-rtx4070.png
 
 Panels: (1) agent-level speedup per checkpoint, (2) router-layer mixed EN/Hindi
 states/s, (3) consistency max|dp| per checkpoint with the 2e-2 bar.
 """
+import argparse
 import json
 import os
-import re
 import sys
 
 import matplotlib
@@ -20,39 +20,20 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def load(name):
-    with open(os.path.join(HERE, name)) as f:
+    with open(os.path.join(HERE, "results", name), encoding="utf-8") as f:
         return json.load(f)
 
 
-def declared_version():
-    """The version the figure is labelled with: ``LAYA_VER`` overrides, pyproject.toml is the default.
-
-    The default used to be a literal -- 0.3.11 -- which every release since the figure was first
-    rendered has left behind: the bump commit touches laya/__init__.py and pyproject.toml, never
-    this script, so a regeneration that does not set LAYA_VER labels a current run with the
-    version the script was written in. Read as text, not with tomllib: this script runs on
-    whatever Python a benchmarking machine has, and pyproject's version line is a literal.
-    """
-    override = os.environ.get("LAYA_VER")
-    if override:
-        return override
-    try:
-        with open(os.path.join(os.path.dirname(HERE), "pyproject.toml"), encoding="utf-8") as f:
-            text = f.read()
-    except OSError:
-        return "unknown"
-    match = re.search(r'^version\s*=\s*"([^"]+)"', text, re.M)
-    return match.group(1) if match else "unknown"
-
-
-def main():
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--out", default=os.path.join(os.path.dirname(HERE), "_local", "bench-rtx4070.png"))
+    args = parser.parse_args(argv)
     agent = load("results-rtx4070.json")
     router = load("results-router-rtx4070.json")
     consist = load("results-consistency-rtx4070.json")
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 4.2))
-    fig.suptitle("predict_batch on RTX 4070 — laya %s" % declared_version(),
-                 fontsize=13, fontweight="bold")
+    fig.suptitle("Classic predict_batch benchmark on RTX 4070", fontsize=13, fontweight="bold")
 
     # panel 1: agent-level speedup
     ax = axes[0]
@@ -112,10 +93,10 @@ def main():
                 ha="center", va="bottom", fontsize=7)
 
     plt.tight_layout(rect=[0, 0, 1, 0.94])
-    out = os.path.join(HERE, "bench-rtx4070.png")
-    plt.savefig(out, dpi=110)
+    os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+    plt.savefig(args.out, dpi=110)
     print("consistency: %d answers, %d flips -> %s" % (compared, flips, "PASS" if flips == 0 else "FAIL"))
-    print("wrote %s" % out)
+    print("wrote %s" % args.out)
 
 
 if __name__ == "__main__":

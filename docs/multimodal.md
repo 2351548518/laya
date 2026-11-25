@@ -4,9 +4,8 @@
 input, and the candidate scorer or single-box head reads its hidden states. Each question uses
 one backbone forward pass and returns zero generated tokens.
 
-The published Qwen3.5-4B checkpoint is available as merged safetensors and typed-decision GGUF.
-[Models and GGUF deployment](multimodal-release.md) ·
-[Native multimodal Notebook](https://github.com/2351548518/laya/blob/main/notebooks/laya_native_multimodal.ipynb)
+The released Qwen3.5-4B checkpoint is available as merged safetensors and typed-decision GGUF.
+[Models and GGUF deployment](multimodal-release.md)
 
 Install the optional runtime and training dependencies from the repository root.
 
@@ -31,13 +30,12 @@ checkpoint. Training data, model weights and local run outputs are not shipped i
 
 ## Local prediction
 
-Ask two questions about the same image in Python, or run the checkpoint from a terminal.
-[Native CLI](cli-mcp.md#native-multimodal-checkpoint)
+Ask two questions about the same image with the downloaded checkpoint.
 
 ```python
 import laya
 
-agent = laya.MultimodalAgent("multimodal-runs/example/final", device="cuda")
+agent = laya.MultimodalAgent("models/jev-multimodal-qwen3.5-4b", device="cpu")
 questions = {
     "action": {
         "type": "choice", "instructions": "Choose the next action.",
@@ -46,6 +44,8 @@ questions = {
     "review": {"type": "noul", "instructions": "Does this scene need human review?"},
 }
 result = agent.predict("Current scene", questions, image="scene.jpg")
+print(result["answers"]["action"]["probabilities"])
+print(result["answers"]["review"]["noul"])
 ```
 
 `choice` returns the selected candidate and a distribution over the supplied candidates. `noul`
@@ -61,6 +61,11 @@ The existing hooks, `predict_batch`, `Router(multimodal=...)` and inline-media H
 use the same runtime. All questions about one state share its decoded images, audio and sampled
 video frames. Each question still has its own prompt and forward pass. The Qwen3.5 runtime can
 also reuse identical visual features across questions about that state during inference.
+
+For runnable file-based examples and a checkpoint smoke test, use the examples and verification
+commands from the repository root. [Native example](https://github.com/2351548518/laya/blob/main/examples/README.md) ·
+[Checkpoint smoke test](https://github.com/2351548518/laya/blob/main/verify/README.md) ·
+[Native CLI](cli-mcp.md#native-multimodal-checkpoint) · [Python API](reference/multimodal.md)
 
 ## From input to answer
 
@@ -81,7 +86,7 @@ between the predicted box and the target.
 Pass the trained checkpoint to `Router` to enable the native inference path.
 
 ```python
-router = laya.Router(multimodal="multimodal-runs/example/final")
+router = laya.Router(multimodal="models/jev-multimodal-qwen3.5-4b", device="cpu")
 result = router.predict("Current scene", questions, image="scene.jpg")
 ```
 
@@ -192,20 +197,13 @@ python scripts/multimodal/calibrate.py --model multimodal-runs/example/sft/best 
 
 The acceptance guard checks overall calibration and per-modality regressions. A rejected fit
 keeps the original model probabilities. Calibration never consumes the final test labels.
+When ordinal channels are enabled, a score uses the channel for its modality and number of
+levels. If the channel is missing, the score uses the modality's fitted temperature or the raw
+distribution when the modality has no score fit.
 
-Evaluate the frozen checkpoint on local typed decisions and single-box targets.
-
-```bash
-python scripts/multimodal/evaluate.py --model multimodal-runs/example/final \
-  --decisions multimodal-data/example/test.jsonl \
-  --grounding multimodal-data/example/box_test.jsonl \
-  --out multimodal-runs/example/evaluation.json
-```
-
-The report includes decision accuracy, NLL, Brier, ECE and score MAE, broken down by modality
-and question type. It also gives mean IoU and the fraction of positive single-box cases whose
-IoU reaches 0.5. To compare runs, report the source split, question conversion and input budget
-alongside the scores.
+Evaluate the frozen checkpoint on local typed decisions and single-box targets. The benchmark
+guide gives the commands, metric denominators and latency protocol.
+[Native accuracy and latency](benchmarks.md#native-multimodal-checkpoints)
 
 ## Source and local workspace layout
 

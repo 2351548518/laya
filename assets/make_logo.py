@@ -1,4 +1,4 @@
-"""Generate the Laya logo: SVG sources plus PNG renders.
+"""Regenerate the Laya icon used by the documentation.
 
 The mark is one ring in two states. Half of it is an unbroken stroke; the other half breaks into
 points that shrink and fade, and the smallest point sits next to where the stroke begins again --
@@ -9,21 +9,13 @@ neither one the end. It carries a second meaning specific to this project -- a c
 resolving into discrete points is what the model does, turning unstructured state into a typed
 decision.
 
-  python3 assets/make_logo.py   ->  assets/logo-mark.svg  logo-mark.png
-                                       assets/logo-lockup.svg  logo-lockup.png
-                                       assets/logo-mark-mono.svg
+Run python assets/make_logo.py to write the SVG.
 """
 import math
-import os
-import subprocess
+from pathlib import Path
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ASSETS = os.path.join(REPO, "assets")
-os.makedirs(ASSETS, exist_ok=True)
-
-INK = "#111111"
+ASSETS = Path(__file__).resolve().parent
 BLUE = "#2a78d6"
-PAPER = "#eceef1"      # wordmark ink for dark backgrounds
 
 SIZE = 64          # viewBox
 CX = CY = 32.0
@@ -77,8 +69,7 @@ def dots(color):
     return "\n".join(out)
 
 
-def mark_svg(color, use_current=False):
-    c = "currentColor" if use_current else color
+def mark_svg(color):
     return '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d"
      width="%d" height="%d" role="img" aria-label="Laya">
   <title>Laya</title>
@@ -89,56 +80,13 @@ def mark_svg(color, use_current=False):
 %s
   </g>
 </svg>
-''' % (SIZE, SIZE, SIZE, SIZE, arc_path(), c, STROKE, dots(c))
-
-
-def lockup_svg(color, text=INK):
-    """Mark plus wordmark, left aligned, for README headers.
-
-    `text` is the wordmark ink -- dark for light backgrounds, near-white for dark ones, so the
-    README header stays legible under either GitHub theme.
-    """
-    w, h = 252, 72
-    s = 0.95                                   # mark scale inside the lockup
-    tx, ty = 2, (h - SIZE * s) / 2
-    return '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d"
-     width="%d" height="%d" role="img" aria-label="Laya">
-  <title>Laya</title>
-  <g transform="translate(%.2f,%.2f) scale(%.3f)">
-    <path d="%s" fill="none" stroke="%s" stroke-width="%.1f" stroke-linecap="round"/>
-%s
-  </g>
-  <text x="70" y="%d" font-family="DejaVu Sans, Helvetica Neue, Helvetica, Arial, sans-serif"
-        font-size="34" font-weight="600" letter-spacing="0.5" fill="%s">laya</text>
-  <text x="71.5" y="%d" font-family="DejaVu Sans, Helvetica Neue, Helvetica, Arial, sans-serif"
-        font-size="10.5" letter-spacing="2.6" fill="%s" opacity="0.78">DECISIONS, NOT TEXT</text>
-</svg>
-''' % (w, h, w, h, tx, ty, s, arc_path(), color, STROKE, dots(color), 42, text, 57, text)
-
-
-def render(svg_path, png_path, width):
-    subprocess.run(["rsvg-convert", "-w", str(width), "-a",
-                    "-o", png_path, svg_path], check=True)
-    return os.path.getsize(png_path)
+''' % (SIZE, SIZE, SIZE, SIZE, arc_path(), color, STROKE, dots(color))
 
 
 def main():
-    files = [
-        ("logo-mark.svg", mark_svg(BLUE), "logo-mark.png", 512),
-        ("logo-mark-ink.svg", mark_svg(INK), "logo-mark-ink.png", 512),
-        ("logo-mark-mono.svg", mark_svg(None, use_current=True), None, None),
-        ("logo-lockup.svg", lockup_svg(BLUE), "logo-lockup.png", 1040),
-        ("logo-lockup-dark.svg", lockup_svg(BLUE, PAPER), "logo-lockup-dark.png", 1040),
-    ]
-    for name, svg, png, width in files:
-        sp = os.path.join(ASSETS, name)
-        with open(sp, "w") as f:
-            f.write(svg)
-        line = "  %-22s %5d B" % (name, os.path.getsize(sp))
-        if png:
-            size = render(sp, os.path.join(ASSETS, png), width)
-            line += "   -> %-20s %6.1f KB" % (png, size / 1024)
-        print(line)
+    path = ASSETS / "logo-mark.svg"
+    path.write_text(mark_svg(BLUE), encoding="utf-8")
+    print(path.name)
 
 
 if __name__ == "__main__":

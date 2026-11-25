@@ -1,8 +1,39 @@
 # Benchmarks and known limits
 
-For native Qwen or Gemma decisions, start with the local evaluator and the model-specific
-release results. [Multimodal benchmark guide](https://github.com/2351548518/laya/blob/main/benchmarks/README.md) ·
-[GGUF development results](multimodal-release.md#select-a-gguf-pair)
+## Native multimodal checkpoints
+
+Evaluate a trained checkpoint on held-out typed decisions and single-box annotations.
+Run from the source checkout after installing `.[multimodal]`.
+
+```bash
+python scripts/multimodal/evaluate.py \
+  --model models/jev-multimodal-qwen3.5-4b --device cuda \
+  --decisions multimodal-data/held-out/decisions.jsonl \
+  --grounding multimodal-data/held-out/boxes.jsonl \
+  --out multimodal-runs/evaluation/report.json
+```
+
+Either split can be evaluated independently. Decision JSONL resolves relative media paths
+from the dataset directory. Use absolute image paths in the grounding JSONL when invoking
+the command from the repository root. Use visual-only video rows for Qwen3.5 and a trained
+audio-capable checkpoint for waveform rows. [Decision data format](multimodal.md#local-jsonl-data-loading) ·
+[Grounding data format](grounding.md#training-records)
+
+Decision accuracy counts questions. The report also gives negative log likelihood, Brier
+score, expected calibration error and ordinal mean absolute error with modality and type
+slices. The grounding denominator `single_n` counts positive single-box questions. The
+report gives mean intersection over union and the fraction reaching IoU ≥ 0.5. When both
+metrics have samples, `harmonic_accuracy` is the harmonic mean of overall decision accuracy
+and `acc_iou50`.
+
+When comparing checkpoints, fix the data split, question wording, video sampling and token
+budget. The report records dataset file hashes and the run settings. Keep the media and
+checkpoint revision fixed as well. GGUF accuracy applies to the specific language file,
+projector and runtime used to measure it. [GGUF development results](multimodal-release.md#select-a-gguf-pair)
+
+For single-request latency, use `benchmarks/bench_multimodal.py`. Its JSON report separates
+checkpoint load, first-call and steady-state latency, and records media metadata, thread count
+and token usage for each request. [Latency command and request format](https://github.com/2351548518/laya/tree/main/benchmarks#native-latency)
 
 ## Classic Laya text results
 

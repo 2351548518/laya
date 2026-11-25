@@ -121,11 +121,20 @@ def cell(agent, states, rows, repeats, warmup):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--checkpoint", default="english", choices=["english", "multilingual", "typed-decisions"])
+    parser.add_argument("--model", help="local classic checkpoint directory")
     parser.add_argument("--rows", default="1,2,4,5,6,8", help="question rows per request, comma separated")
     parser.add_argument("--repeats", type=int, default=3, help="passes over the %d states" % len(SHORT))
     parser.add_argument("--warmup", type=int, default=3, help="states run in both modes before timing")
     parser.add_argument("--out", help="write the results as JSON")
     args = parser.parse_args()
+    try:
+        row_counts = [int(rows) for rows in args.rows.split(",")]
+    except ValueError:
+        parser.error("rows must be a comma-separated list of integers")
+    if any(not 1 <= rows <= len(QUESTIONS) for rows in row_counts):
+        parser.error(f"each row count must be between 1 and {len(QUESTIONS)}")
+    if args.repeats < 1 or not 0 <= args.warmup <= len(SHORT):
+        parser.error(f"repeats must be positive and warmup must be between 0 and {len(SHORT)}")
 
     import torch
     import transformers
@@ -134,7 +143,8 @@ def main():
 
     if not torch.backends.mps.is_available():
         raise SystemExit("this benchmark needs an MPS device")
-    agent = laya.load(BUNDLE, device="mps", subfolder=None if args.checkpoint == "english" else args.checkpoint)
+    subfolder = None if args.model or args.checkpoint == "english" else args.checkpoint
+    agent = laya.load(args.model or BUNDLE, device="mps", subfolder=subfolder)
     default_rows = agent.mps_amp_min_rows
     result = {"checkpoint": args.checkpoint, "chip": chip(), "os": "macOS " + platform.mac_ver()[0],
               "torch": torch.__version__, "transformers": transformers.__version__, "laya": laya.__version__,
@@ -145,7 +155,7 @@ def main():
           "| decisions changed |")
     print("|---|---|---|---|---|---|---|---|---|")
     for name, states in (("short", SHORT), ("long", LONG)):
-        for rows in [int(r) for r in args.rows.split(",")]:
+        for rows in row_counts:
             row = {"state": name, **cell(agent, states, rows, args.repeats, args.warmup)}
             result["cells"].append(row)
             print("| %s | %d | %d | %.1f | %.1f | %+.1f | %.4f | %.4f | %d / %d |"

@@ -4,6 +4,7 @@ These pages are generated from the docstrings in `laya/`, so they change with th
 from `ONNXAgent` and `laya.train`, every name below can be imported from the top-level package,
 for example `from laya import Router`.
 
+- [MultimodalAgent](multimodal.md) runs native text and media questions with locally trained heads.
 - [Agent](agent.md): `Agent` and `load` run one checkpoint; `ONNXAgent` runs an exported ONNX
   model.
 - [Router](router.md): `Router` picks the checkpoint for each request; `RouteDecision` records

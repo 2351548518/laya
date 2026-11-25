@@ -40,6 +40,8 @@ A positive grounding row pairs one box question with one normalized `xyxy` targe
 ```
 
 Keep images and source groups separate across training, development, calibration and test data.
+Use absolute image paths or make relative paths resolve from the working directory of the trainer
+or evaluator.
 Each box needs finite, ordered coordinates within the image. For `task: "single"`, select a
 distinct referred object for each question. An empty `boxes` list gives the quality head a target
 of zero and skips the coordinate losses.

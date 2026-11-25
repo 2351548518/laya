@@ -40,11 +40,11 @@ def main():
     from torch._dynamo.utils import counters
     kw = {"backend": args.dynamo_backend} if args.dynamo_backend else {}
     if args.stock:
-        A.compile_model = lambda m: torch.compile(m, **kw)
+        A.compile_model = lambda m, **options: torch.compile(m, **(options | kw))
         A.independent_dims = nullcontext
     elif kw:
-        A.compile_model = lambda m: _compile.compile_model(m, **kw)
-    agent = A.Agent(args.model, subfolder=args.subfolder, device=args.device, compile=True)
+        A.compile_model = lambda m, **options: _compile.compile_model(m, **(options | kw))
+    agent = A.Agent(args.model, subfolder=args.subfolder, device=args.device, compile=True, compile_warmup=False)
     print("%s compile, device %s, torch %s" % ("stock" if args.stock else "this tree", agent.device, torch.__version__))
     if args.warmup:
         print("  warmup(): %8.2f s, graphs so far %d" % (agent.warmup(), counters["stats"]["unique_graphs"]))

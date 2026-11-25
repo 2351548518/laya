@@ -1,20 +1,32 @@
 # Local runtime checks
 
-For the native decision model, run the [multimodal Notebook](../notebooks/laya_native_multimodal.ipynb)
-with a trained local checkpoint. It exercises text, image localization, visual video and, for
-Gemma 4, waveform input. The [native evaluation guide](../docs/multimodal.md#calibration-and-evaluation)
-covers labelled decision and grounding metrics. For the HTTP path, use the
-[SDK examples](../docs/multimodal-clients.md).
+## Native checkpoints
 
-For a terminal smoke test of an installed checkpoint, use
-`laya --multimodal CHECKPOINT --device cpu --preset triage "Please refund the duplicate charge."`.
-
-The Python scripts in this directory test the classic text checkpoints. With the three
-checkpoint directories under `models/`, run from the repository root:
+Install `.[multimodal]` and run from the repository root using the downloaded checkpoint.
+[Model setup](../docs/multimodal-release.md)
 
 ```sh
+python verify/multimodal_smoke_test.py models/jev-multimodal-qwen3.5-4b --device cpu
+```
+
+The check exercises `choice`, `score` and `noul` on text and uses a generated image for
+an image decision and, when the checkpoint has a trained grounding head, a `box` answer.
+It validates the answer shape, normalized geometry and token accounting. Pass `--video clip.mp4`
+to check visual video or `--audio clip.wav` with a trained Gemma 4 checkpoint. Video decoding
+requires `ffmpeg` and `ffprobe`. Use labelled splits for accuracy measurements.
+[Native benchmarks](../docs/benchmarks.md#native-multimodal-checkpoints) · [HTTP checks](../docs/multimodal-clients.md)
+
+## Classic text checkpoints
+
+With the three classic checkpoints under `models/`, run these checks from the repository root.
+
+```sh
+python verify/checkpoints.py --models ./models
 python verify/laya_smoke_test.py --models ./models --device cpu
 ```
 
-The classic smoke test covers checkpoint loading, text routing and typed decisions.
+`checkpoints.py` checks the pinned weights against this directory's manifest.
+`laya_smoke_test.py` exercises text routing and typed answers. `edge_sweep.py`,
+`numerics_check.py` and `soak_check.py` cover boundary inputs, numerical parity and repeated
+calls. `bench_devices.py` measures classic CPU and available MPS paths.
 [Classic local setup](../LOCAL_SETUP.md)

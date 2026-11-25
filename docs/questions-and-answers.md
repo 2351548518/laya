@@ -154,8 +154,7 @@ probability of the side being reported, which is why `urgent` below reads 0.8727
 entropy gives over two options. Either way it is **not** on `answer_confidence`'s scale, so the two
 must not be gated against one number:
 
-```python
-# the same three answers, and the two numbers are not the same
+```text
 dept      confidence 0.9339   answer_confidence 0.9881
 urgent    confidence 0.8727   answer_confidence 0.8727
 severity  confidence 0.5187   answer_confidence 0.7881

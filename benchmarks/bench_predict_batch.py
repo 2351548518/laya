@@ -20,6 +20,7 @@ Three things, all offline after the checkpoints are cached:
 import argparse
 import json
 import os
+from pathlib import Path
 import statistics
 import time
 
@@ -28,6 +29,7 @@ os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
 
 BUNDLE = "convaiinnovations/laya"
+CHECKPOINT_DIRS = {"english": "laya", "multilingual": "laya-multilingual", "typed-decisions": "laya-typed-decisions"}
 QUESTIONS = {
     "department": {"type": "choice", "instructions": "Which department should handle this request?",
                    "criteria": {"billing": "invoices, payments, refunds",
@@ -63,14 +65,15 @@ def timed(fn, repeats):
     return statistics.median(samples)
 
 
-def bench(agent, n_states, n_questions, repeats):
+def bench(agent, n_states, n_questions, repeats, batch_size):
     questions = {f"q{i}": q for i, q in
                  enumerate(list(QUESTIONS.values())[:n_questions])}
     states = [STATES[i % len(STATES)] for i in range(n_states)]
 
-    agent.predict_batch(states, questions)   # warmup (kernel autotune, first batch shape)
+    agent.system_one(states[0], questions)
+    agent.predict_batch(states, questions, batch_size=batch_size)
     looped = timed(lambda: [agent.system_one(s, questions) for s in states], repeats)
-    batched = timed(lambda: agent.predict_batch(states, questions), repeats)
+    batched = timed(lambda: agent.predict_batch(states, questions, batch_size=batch_size), repeats)
     speedup = looped / batched if batched else float("inf")
     return {"states": n_states, "questions_per_state": n_questions,
             "looped_ms": round(looped, 1), "batched_ms": round(batched, 1),
@@ -79,31 +82,42 @@ def bench(agent, n_states, n_questions, repeats):
             "batched_qps": round(n_states * n_questions / batched * 1000, 1)}
 
 
+def compare_answers(single, batched):
+    kind = single["type"]
+    if kind != batched["type"]:
+        raise ValueError("batch changed the answer type")
+    if kind == "noul":
+        left, right = single["noul"], batched["noul"]
+        return abs(left - right), (left >= 0.5) != (right >= 0.5)
+    left, right = single["probabilities"], batched["probabilities"]
+    if left.keys() != right.keys():
+        raise ValueError("batch changed the answer options")
+    if kind == "choice":
+        flipped = single["choice"] != batched["choice"]
+    else:
+        flipped = max(left, key=left.get) != max(right, key=right.get)
+    return max(abs(left[key] - right[key]) for key in left), flipped
+
+
+def summarize_consistency(singles, batched, prefix):
+    max_delta, flips, compared, worst = 0.0, 0, 0, None
+    for i, (single, batch_result) in enumerate(zip(singles, batched, strict=True)):
+        if single["answers"].keys() != batch_result["answers"].keys():
+            raise ValueError("batch changed the question IDs")
+        for qid, answer in single["answers"].items():
+            delta, flipped = compare_answers(answer, batch_result["answers"][qid])
+            flips += int(flipped)
+            if delta > max_delta:
+                max_delta, worst = delta, f"{prefix}#{i}/{qid}"
+            compared += 1
+    return {"compared": compared, "max_delta": round(max_delta, 5), "flips": flips, "worst": worst}
+
+
 def consistency(agent, checkpoint, samples, batch_size):
-    samples = [STATES[i % len(STATES)] for i in range(samples)]
-    singles = [agent.system_one(s, CONSISTENCY_QUESTIONS) for s in samples]
-    max_delta, flips, compared = 0.0, 0, 0
-    worst = None
-    for i in range(0, len(samples), batch_size):
-        chunk = samples[i:i + batch_size]
-        batched = agent.predict_batch(chunk, CONSISTENCY_QUESTIONS)
-        for n, (single, batched_result) in enumerate(zip(singles[i:i + batch_size], batched)):
-            for qid, ans_s in single["answers"].items():
-                ans_b = batched_result["answers"][qid]
-                if ans_s["type"] == "noul":
-                    delta = abs(ans_s["noul"] - ans_b["noul"])
-                    if (ans_s["noul"] >= 0.5) != (ans_b["noul"] >= 0.5):
-                        flips += 1
-                else:
-                    keys = ans_s["probabilities"]
-                    delta = max(abs(ans_s["probabilities"][k] - ans_b["probabilities"][k]) for k in keys)
-                    if ans_s["type"] == "choice" and ans_s["choice"] != ans_b["choice"]:
-                        flips += 1
-                if delta > max_delta:
-                    max_delta, worst = delta, "%s#%d/%s" % (checkpoint, i + n, qid)
-                compared += 1
-    return {"checkpoint": checkpoint, "compared": compared, "max_delta": round(max_delta, 5),
-            "flips": flips, "worst": worst}
+    states = [STATES[i % len(STATES)] for i in range(samples)]
+    singles = [agent.system_one(state, CONSISTENCY_QUESTIONS) for state in states]
+    batched = agent.predict_batch(states, CONSISTENCY_QUESTIONS, batch_size=batch_size)
+    return {"checkpoint": checkpoint, **summarize_consistency(singles, batched, checkpoint)}
 
 
 ROUTER_QUESTIONS = {
@@ -123,12 +137,14 @@ def router_requests(n_states):
             for i in range(n_states)]
 
 
-def router_bench(router, n_states, repeats):
+def router_bench(router, n_states, repeats, batch_size):
     """Mixed EN/Hindi states: one-by-one predict() vs route-then-group predict_batch()."""
     requests = router_requests(n_states)
-    router.predict_batch(requests[:2])  # warmup
+    for request in requests[:2]:
+        router.predict(request["state"], request["questions"])
+    router.predict_batch(requests, batch_size=batch_size)
     looped = timed(lambda: [router.predict(r["state"], r["questions"]) for r in requests], repeats)
-    batched = timed(lambda: router.predict_batch(requests), repeats)
+    batched = timed(lambda: router.predict_batch(requests, batch_size=batch_size), repeats)
     speedup = looped / batched if batched else float("inf")
     return {"states": n_states, "looped_ms": round(looped, 1),
             "batched_ms": round(batched, 1), "speedup": round(speedup, 1),
@@ -142,26 +158,8 @@ def router_consistency(router, samples, batch_size):
     checkpoint. Deltas are label-attached; flips are top-1 disagreements."""
     requests = router_requests(samples)
     singles = [router.predict(r["state"], r["questions"]) for r in requests]
-    max_delta, flips, compared, worst = 0.0, 0, 0, None
-    for i in range(0, len(requests), batch_size):
-        batched = router.predict_batch(requests[i:i + batch_size])
-        for n, (single, batched_result) in enumerate(zip(singles[i:i + batch_size], batched)):
-            for qid, ans_s in single["answers"].items():
-                ans_b = batched_result["answers"][qid]
-                if ans_s["type"] == "noul":
-                    delta = abs(ans_s["noul"] - ans_b["noul"])
-                    if (ans_s["noul"] >= 0.5) != (ans_b["noul"] >= 0.5):
-                        flips += 1
-                else:
-                    delta = max(abs(ans_s["probabilities"][k] - ans_b["probabilities"][k])
-                                for k in ans_s["probabilities"])
-                    if ans_s["type"] == "choice" and ans_s["choice"] != ans_b["choice"]:
-                        flips += 1
-                if delta > max_delta:
-                    max_delta, worst = delta, "req#%d/%s" % (i + n, qid)
-                compared += 1
-    return {"samples": samples, "compared": compared, "max_delta": round(max_delta, 5),
-            "flips": flips, "worst": worst}
+    batched = router.predict_batch(requests, batch_size=batch_size)
+    return {"samples": samples, **summarize_consistency(singles, batched, "req")}
 
 
 def main() -> int:
@@ -170,29 +168,49 @@ def main() -> int:
     parser.add_argument("--questions", type=int, default=4)
     parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument("--checkpoints", default="english,multilingual,typed-decisions")
+    parser.add_argument("--models", type=Path, help="directory containing all selected classic checkpoints")
+    parser.add_argument("--device", help="inference device, such as cpu or cuda:0")
     parser.add_argument("--consistency", action="store_true")
     parser.add_argument("--router", action="store_true",
                         help="benchmark and verify Router.predict_batch on mixed EN/Hindi states")
     parser.add_argument("--samples", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=8)
-    parser.add_argument("--json", default="")
+    parser.add_argument("--json", type=Path)
     args = parser.parse_args()
+    try:
+        states = [int(value) for value in args.states.split(",")]
+    except ValueError:
+        parser.error("states must be a comma-separated list of positive counts")
+    if min(*states, args.repeats, args.samples, args.batch_size) < 1:
+        parser.error("states, repeats, samples and batch size must be positive")
+    if not 1 <= args.questions <= len(QUESTIONS):
+        parser.error(f"questions must be between 1 and {len(QUESTIONS)}")
+    checkpoints = [value.strip() for value in args.checkpoints.split(",")]
+    if any(name not in CHECKPOINT_DIRS for name in checkpoints):
+        parser.error("checkpoints must be english, multilingual or typed-decisions")
+    local = {}
+    if args.models:
+        for name in CHECKPOINT_DIRS if args.router else checkpoints:
+            path = args.models / CHECKPOINT_DIRS[name]
+            if not (path / "rl_agent_config.json").is_file():
+                parser.error(f"classic checkpoint is missing at {path}")
+            local[name] = str(path.resolve())
 
     import laya
     print("laya %s | torch %s | cuda %s" % (
         laya.__version__, __import__("torch").__version__,
         __import__("torch").cuda.get_device_name(0) if __import__("torch").cuda.is_available() else "off"))
 
-    out = {"bench": [], "consistency": [], "router": []}
+    out = {"bench": [], "consistency": [], "router": [], "batch_size": args.batch_size}
     if args.router:
         from laya import Router
 
-        router = Router(preload=True)
+        router = Router(preload=True, models=local or None, device=args.device, vega=False)
         print("== Router.predict_batch: 50/50 mixed EN/Hindi states (median of %d) ==" % args.repeats)
         print("| states | one-by-one ms | predict_batch ms | speedup | one-by-one states/s | batched states/s |")
         print("|---|---|---|---|---|---|")
-        for n in [int(x) for x in args.states.split(",")]:
-            row = router_bench(router, n, args.repeats)
+        for n in states:
+            row = router_bench(router, n, args.repeats, args.batch_size)
             out["router"].append(row)
             print("| %d | %.1f | %.1f | %.1fx | %.1f | %.1f |"
                   % (row["states"], row["looped_ms"], row["batched_ms"], row["speedup"],
@@ -204,19 +222,21 @@ def main() -> int:
               % (row["samples"], row["compared"], row["max_delta"], row["flips"], row["worst"],
                  "PASS" if row["flips"] == 0 else "FAIL"))
         if args.json:
-            with open(args.json, "w") as f:
+            args.json.parent.mkdir(parents=True, exist_ok=True)
+            with args.json.open("w", encoding="utf-8") as f:
                 json.dump(out, f, indent=2)
             print("\nwrote %s" % args.json)
         return 0 if out.get("router_consistency", {}).get("flips", 1) == 0 else 1
 
-    for checkpoint in [c.strip() for c in args.checkpoints.split(",")]:
-        agent = laya.load(BUNDLE, subfolder=None if checkpoint == "english" else checkpoint)
+    for checkpoint in checkpoints:
+        subfolder = None if local or checkpoint == "english" else checkpoint
+        agent = laya.load(local.get(checkpoint, BUNDLE), subfolder=subfolder, device=args.device)
         if not args.consistency:
             print("\n== %s: %d questions/state (median of %d) ==" % (checkpoint, args.questions, args.repeats))
             print("| states | looped ms | batched ms | speedup | looped q/s | batched q/s |")
             print("|---|---|---|---|---|---|")
-            for n in [int(x) for x in args.states.split(",")]:
-                row = bench(agent, n, args.questions, args.repeats)
+            for n in states:
+                row = bench(agent, n, args.questions, args.repeats, args.batch_size)
                 out["bench"].append({"checkpoint": checkpoint, **row})
                 print("| %d | %.1f | %.1f | %.1fx | %.1f | %.1f |"
                       % (row["states"], row["looped_ms"], row["batched_ms"],
@@ -234,12 +254,14 @@ def main() -> int:
               % (sum(r["compared"] for r in out["consistency"]), total_flips, total_max,
                  "PASS" if total_flips == 0 else "FAIL"))
         if args.json:
-            with open(args.json, "w") as f:
+            args.json.parent.mkdir(parents=True, exist_ok=True)
+            with args.json.open("w", encoding="utf-8") as f:
                 json.dump(out, f, indent=2)
             print("wrote %s" % args.json)
         return 0 if total_flips == 0 else 1
     if args.json:
-        with open(args.json, "w") as f:
+        args.json.parent.mkdir(parents=True, exist_ok=True)
+        with args.json.open("w", encoding="utf-8") as f:
             json.dump(out, f, indent=2)
         print("\nwrote %s" % args.json)
     return 0

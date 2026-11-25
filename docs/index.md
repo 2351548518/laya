@@ -17,7 +17,7 @@ Install the source checkout, download the released checkpoint and run the first 
 | To | Read |
 |---|---|
 | run or train native text, image, audio and video decisions | [Native multimodal decisions](multimodal.md) |
-| try native prediction and inspect example training records | [Native multimodal Notebook](https://github.com/2351548518/laya/blob/main/notebooks/laya_native_multimodal.ipynb) |
+| try native prediction and inspect example training records | [Runnable examples](https://github.com/2351548518/laya/tree/main/examples) and the [native Notebook](https://github.com/2351548518/laya/blob/main/notebooks/laya_native_multimodal.ipynb) |
 | send media to your local server from Python or TypeScript | [Native media SDKs](multimodal-clients.md) |
 | predict from a terminal with a trained local model | [Native multimodal CLI](cli-mcp.md#native-multimodal-checkpoint) |
 | locate one object in an image | [Single-box grounding](grounding.md) |
@@ -34,7 +34,8 @@ Install the source checkout, download the released checkpoint and run the first 
 | specialise a checkpoint for your own decisions | [Browser-agent fine-tuning example](finetune_browser_agent.md) and the [fine-tuning notebook](https://github.com/NandhaKishorM/laya/blob/main/notebooks/laya_finetune_typed_decisions_2xT4_kaggle.ipynb) |
 | judge benchmark results and deployment limits | [Benchmarks and known limits](benchmarks.md) |
 | look up a class, function or parameter | [Python API reference](reference/index.md) |
-| score a labelled dataset, compare to a baseline, or gate a build on it | [Evaluation harness](evals.md) |
+| score a native decision or grounding dataset | [Native benchmarks](benchmarks.md#native-multimodal-checkpoints) |
+| gate a build on a labelled classic text dataset | [Classic text evaluation harness](evals.md) |
 
 See the inherited text model guide for CLI flags, batch hooks, confidence gating and Vega.
 [Laya text routing and integrations](laya-guide.md)

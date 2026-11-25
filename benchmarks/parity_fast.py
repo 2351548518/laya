@@ -10,6 +10,8 @@ Writes every per-option probability from all three paths so the comparison can b
 prints the summary the PR quotes: max |p_fast - p_stock|, max |p_* - p_fp32|, argmax agreement, per question type.
 """
 import argparse, json, os, sys
+from importlib.util import find_spec
+from pathlib import Path
 os.environ.setdefault("USE_TF", "0"); os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np, torch
@@ -37,10 +39,7 @@ PRESETS = {"triage": triage_questions, "moderation": moderation_questions, "guar
 
 def states():
     for pname, fn in PRESETS.items():
-        try:
-            qs = fn()
-        except TypeError:
-            qs = fn
+        qs = fn()
         for i, t in enumerate(TEXTS):
             yield f"{pname}/{i}", {"subject": t[:60], "body": t}, dict(list(qs.items())[:8])
 
@@ -55,24 +54,50 @@ def batch(agent, state, questions):
     return {k: v.to(agent.device) for k, v in b.items() if torch.is_tensor(v)}, meta
 
 
-def probs(agent, b, meta, amp):
+def forward(agent, b, amp=True):
     with torch.no_grad(), torch.autocast("cuda", dtype=agent.dtype, enabled=amp):
-        logits, _ = agent.model(b["input_ids"], b["attention_mask"], b["marker_pos"], b["marker_mask"], b["qtype"])
+        return agent.model(b["input_ids"], b["attention_mask"], b["marker_pos"], b["marker_mask"], b["qtype"])
+
+
+def probs(agent, b, meta, amp):
+    logits, _ = forward(agent, b, amp)
     out = []
     for r, (qid, t, k) in enumerate(meta):
         z = logits[r, :k].float().cpu().numpy(); p = np.exp(z - z.max()); out.append((p / p.sum()).tolist())
     return out
 
 
+def load_cuda_agent(parser, args):
+    if not torch.cuda.is_available():
+        parser.error("this benchmark requires a CUDA device")
+    if find_spec("tilelang") is None:
+        parser.error("install the fast extra to benchmark TileLang")
+    try:
+        device = torch.device(args.device)
+    except (RuntimeError, ValueError) as exc:
+        parser.error(str(exc))
+    if device.type != "cuda":
+        parser.error("device must be cuda or cuda:N")
+    agent = laya.load(args.model, subfolder=args.subfolder, device=device)
+    if agent.device.type != "cuda":
+        parser.error("could not load the checkpoint on the requested CUDA device")
+    if args.dtype:
+        agent.dtype = {"bf16": torch.bfloat16, "fp16": torch.float16}[args.dtype]
+        agent.amp_enabled = True
+    if agent.dtype not in (torch.bfloat16, torch.float16):
+        parser.error("choose --dtype bf16 or fp16 for TileLang")
+    return agent
+
+
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument("--model", default="convaiinnovations/laya"); ap.add_argument("--subfolder", default=None); ap.add_argument("--json", default=None)
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--model", default="convaiinnovations/laya")
+    ap.add_argument("--subfolder")
+    ap.add_argument("--device", default="cuda")
+    ap.add_argument("--json", type=Path)
     ap.add_argument("--dtype", choices=["bf16", "fp16"], default=None, help="autocast dtype for stock and fast (default: the agent's)")
     a = ap.parse_args()
-    agent = laya.load(a.model, subfolder=a.subfolder)
-    if agent.device.type != "cuda":
-        sys.exit("needs CUDA")
-    if a.dtype:
-        agent.dtype = {"bf16": torch.bfloat16, "fp16": torch.float16}[a.dtype]
+    agent = load_cuda_agent(ap, a)
     tag = {torch.bfloat16: "bf16", torch.float16: "fp16"}[agent.dtype]
     stock_key = "p_stock_" + tag
     cases = []
@@ -89,14 +114,16 @@ def main():
         d["n"] += 1; d["d_fast_stock"] = max(d["d_fast_stock"], float(abs(z - y).max())); d["d_fast_fp32"] = max(d["d_fast_fp32"], float(abs(z - x).max()))
         d["d_stock_fp32"] = max(d["d_stock_fp32"], float(abs(y - x).max())); d["agree_fast_stock"] += int(z.argmax() == y.argmax()); d["agree_fast_fp32"] += int(z.argmax() == x.argmax())
         d["agree_stock_fp32"] += int(y.argmax() == x.argmax())
-    gpu = torch.cuda.get_device_name(0)
+    gpu = torch.cuda.get_device_name(agent.device)
     print(f"\n{a.model}/{a.subfolder or ''}  {gpu}  torch {torch.__version__}  dtype {agent.dtype}\n{len(cases)} questions over {len(set(c['state'] for c in cases))} fixed states")
     print(f"{'type':8s} {'n':>4s} {'max|fast-stock|':>16s} {'max|fast-fp32|':>15s} {'max|stock-fp32|':>16s} {'argmax fast=stock':>18s} {'fast=fp32':>10s} {'stock=fp32':>11s}")
     for t, d in sorted(by_t.items()):
         print(f"{t:8s} {d['n']:4d} {d['d_fast_stock']:16.4f} {d['d_fast_fp32']:15.4f} {d['d_stock_fp32']:16.4f} {d['agree_fast_stock']:>13d}/{d['n']:<4d} {d['agree_fast_fp32']:>6d}/{d['n']:<4d} {d['agree_stock_fp32']:>6d}/{d['n']}")
     if a.json:
-        os.makedirs(os.path.dirname(a.json), exist_ok=True)
-        json.dump({"model": a.model, "subfolder": a.subfolder, "gpu": gpu, "torch": torch.__version__, "dtype": str(agent.dtype), "summary": by_t, "cases": cases}, open(a.json, "w"), indent=1)
+        a.json.parent.mkdir(parents=True, exist_ok=True)
+        with a.json.open("w", encoding="utf-8") as stream:
+            json.dump({"model": a.model, "subfolder": a.subfolder, "gpu": gpu, "torch": torch.__version__,
+                       "dtype": str(agent.dtype), "summary": by_t, "cases": cases}, stream, indent=1)
         print("saved", a.json)
 
 

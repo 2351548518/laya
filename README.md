@@ -85,8 +85,14 @@ laya --multimodal models/jev-multimodal-qwen3.5-4b \
   --preset triage "I was charged twice for the same invoice." --json
 ```
 
-The notebook walks through text and media decisions and creates example JSONL records.
-The Python and TypeScript SDKs send media from an application to your local server.
+Run the Python example with the downloaded checkpoint. Add `--image scene.jpg` or
+`--video clip.mp4` to try local media.
+
+```bash
+python examples/native_multimodal.py models/jev-multimodal-qwen3.5-4b --device cpu
+```
+
+[Runnable examples](https://github.com/2351548518/laya/tree/main/examples) ·
 [Native multimodal notebook](https://github.com/2351548518/laya/blob/main/notebooks/laya_native_multimodal.ipynb) ·
 [Native SDK examples](https://github.com/2351548518/laya/blob/main/docs/multimodal-clients.md)
 
@@ -133,13 +139,14 @@ patch, native export commands and evaluation scope. [Model releases and GGUF set
 | Path | Contents |
 | --- | --- |
 | `laya/` | Inference, native media processing, JSONL loading, training and calibration |
+| `assets/` | Project banner, documentation icons and referenced benchmark figures |
 | `scripts/multimodal/` | Reusable training, evaluation, merge, conversion and quantization commands |
 | `configs/multimodal/` | Portable head warmup and LoRA recipes |
 | `sdk/python/`, `sdk/typescript/` | Local HTTP clients for text decisions, media decisions and single-box results |
-| `notebooks/`, `examples/` | Native multimodal walkthrough and classic checkpoint examples |
+| `notebooks/`, `examples/` | Runnable native and classic examples and JSONL walkthroughs |
 | `docs/` and `tests/` | Usage, API contracts and regression checks |
 | `laya-cpp/`, `laya-rust/`, `laya-dotnet/`, `laya-go/`, `laya-java/`, `laya-ts/` | Classic Laya text runtimes and instructions for calling the local multimodal services |
-| `benchmarks/`, `research/`, `verify/` | Evaluation recipes, published result records and local runtime checks |
+| `benchmarks/`, `research/`, `verify/` | Local latency benchmarks, published results and checkpoint smoke tests |
 | `Dockerfile`, `compose.*` and `setup_laya.sh` | Local installation and service deployment |
 | `start.bat`, `nix/` and `flake.nix` | Windows launcher and Nix service packaging |
 
@@ -153,7 +160,8 @@ experiments, generated figures and logs. These paths are ignored by Git.
 python -m pip install -e '.[multimodal,serve]' pytest httpx ruff
 ruff check laya/ --select=E9,F63,F7,F82,F401,F811 --line-length=120
 python -m compileall -q laya/ tests/
-python -m pytest -q tests/test_multimodal.py tests/test_grounding.py tests/test_multimodal_export.py
+python -m pytest -q tests/test_multimodal.py tests/test_grounding.py \
+  tests/test_multimodal_cli.py tests/test_multimodal_export.py
 ```
 
 The contribution guide covers the full test suite and strict documentation build.

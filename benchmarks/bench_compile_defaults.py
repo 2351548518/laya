@@ -22,6 +22,9 @@ def main():
     parser.add_argument("--mode", default=None)
     args = parser.parse_args()
     import torch
+
+    if not torch.cuda.is_available():
+        parser.error("this benchmark requires a CUDA device")
     from laya import Agent
 
     def smi():

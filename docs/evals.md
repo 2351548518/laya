@@ -1,4 +1,7 @@
-# Evaluation harness
+# Classic text evaluation harness
+
+For native multimodal accuracy and single-box geometry, use the local checkpoint evaluator.
+[Native benchmarks](benchmarks.md#native-multimodal-checkpoints)
 
 `laya.evals` turns a labelled dataset into a repeatable score, and a baseline into a
 pass/fail gate, so a quality change is a reviewable diff instead of a hand-check.

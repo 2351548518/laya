@@ -26,7 +26,7 @@ each. It is **mutable**: hooks may rewrite `states`, `questions` and `results`, 
 `decision`. It uses identity equality (`eq=False`), so a context is hashable and two contexts are
 never equal.
 
-```python
+```text
 @dataclass(eq=False)
 class PredictContext:
     states: List[Any]
@@ -387,7 +387,7 @@ router.predict_batch(requests, batch_size=None, hooks_timeout=None, min_confiden
                      sort_by_length=False, hooks=None, on_predict_start=None, on_predict_end=None,
                      hooks_raise=None, diagnostics=None)
 
-router.route_batch(requests, hooks_timeout=None, *, hooks=None, hooks_raise=None)
+router.route_batch(requests, hooks_timeout=None, hooks=None, hooks_raise=None)
 
 router.system_one(...)      # alias of predict
 router.load(name)           # builds on first use; fires on_load
@@ -464,15 +464,11 @@ is for. Use `on_predict_start=` / `on_predict_end=` for those.
 
 These are used internally and are stable, but most users do not need them.
 
-```python
-HOOK_EVENTS          # tuple of the six event names; the set hooks= is validated against
+```text
+HOOK_EVENTS
 normalise_hooks(hooks=None, on_predict_start=None, on_predict_end=None) -> list
-dispatch(hooks, event, ctx, *, raise_errors=True, lock=None) -> None
+dispatch(hooks, event, ctx, *, raise_errors=True, lock=None, timeout=None) -> None
 aggregate_usage(results) -> {"input_tokens": int, "output_tokens": int}
-```
-
-```python
-dispatch(hooks, event, ctx, *, raise_errors=True, lock=None, timeout=None)
 run_coroutine_sync(coro, loop=None)
 ```
 

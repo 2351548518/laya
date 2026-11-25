@@ -1,6 +1,7 @@
 # The classes most readers start from first. An unlisted page appears at the end.
 nav:
   - index.md
+  - multimodal.md
   - agent.md
   - router.md
   - helpers.md

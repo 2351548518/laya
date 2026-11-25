@@ -201,8 +201,11 @@ def main():
     manifest = json.loads((ROOT / "verify/checkpoints.json").read_text())
     entry = next(c for c in manifest["checkpoints"] if c["name"] == args.checkpoint)
     weights = ROOT / "models" / entry["path"]
+    if not weights.is_file():
+        parser.error(f"checkpoint weights are missing at {weights}. See python verify/checkpoints.py --fetch")
     digest = sha256(weights)
-    assert digest == entry["sha256"], "checkpoint differs from verify/checkpoints.json"
+    if digest != entry["sha256"]:
+        parser.error("checkpoint SHA-256 differs from verify/checkpoints.json")
     agent = Agent(str(weights.parent), device="cpu", fast=False, compile=False)
     agent.amp_enabled = False
     assert next(agent.model.parameters()).dtype == torch.float32
