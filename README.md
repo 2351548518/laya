@@ -1,4 +1,4 @@
-# laya-multimodal
+<h1 align="center">laya-multimodal</h1>
 
 <img src="https://raw.githubusercontent.com/2351548518/laya/main/assets/laya-multimodal-banner.webp" alt="Text, image, video and audio inputs converge into a local decision" width="100%">
 
@@ -36,6 +36,8 @@ The Python package is imported as `laya`. The HTTP server is available with
 
 On Linux and Apple silicon, `./setup_laya.sh --multimodal` prepares `.venv-mm` and downloads
 the merged Qwen checkpoint shown below. Pass `--skip-models` to use an existing checkpoint.
+On Windows, `start.bat --multimodal` starts the local HTTP service with a downloaded checkpoint.
+[Host setup](https://github.com/2351548518/laya/blob/main/LOCAL_SETUP.md)
 
 For a container, mount the local checkpoint and enable the native media dependencies with
 `compose.multimodal.yaml`. [Docker setup](https://github.com/2351548518/laya/blob/main/docs/docker.md#serve-a-native-multimodal-checkpoint)
@@ -75,6 +77,13 @@ Use `device="cpu"` for CPU inference. For Qwen video, use a state such as
 `{"text": "Inspect this clip", "video": "clip.mp4", "video_audio": False}`. A trained Gemma 4
 checkpoint also accepts `audio="clip.wav"` or a waveform and `sampling_rate`. The native guide
 covers input budgets, batch prediction, local routing and HTTP requests. [Native multimodal guide](https://github.com/2351548518/laya/blob/main/docs/multimodal.md)
+
+From a terminal, select the same local checkpoint with `laya --multimodal`.
+
+```bash
+laya --multimodal models/jev-multimodal-qwen3.5-4b \
+  --preset triage "I was charged twice for the same invoice." --json
+```
 
 Use the [native Notebook](https://github.com/2351548518/laya/blob/main/notebooks/laya_native_multimodal.ipynb)
 to try text and media decisions and inspect the JSONL format. For a separate application process,
@@ -130,6 +139,7 @@ patch, native export commands and evaluation scope. [Model releases and GGUF set
 | `laya-cpp/`, `laya-rust/`, `laya-dotnet/`, `laya-go/`, `laya-java/`, `laya-ts/` | Classic Laya text runtimes and instructions for calling the local multimodal services |
 | `benchmarks/`, `research/`, `verify/` | Evaluation recipes, published result records and local runtime checks |
 | `Dockerfile`, `compose.*` and `setup_laya.sh` | Local installation and service deployment |
+| `start.bat`, `nix/` and `flake.nix` | Windows launcher and Nix service packaging |
 
 Keep downloaded weights in `models/`, local datasets in `multimodal-data/`, and checkpoints
 and reports in `multimodal-runs/`. Use `_local/` for data collection and preparation,
@@ -150,8 +160,9 @@ See the [contribution guide](https://github.com/2351548518/laya/blob/main/CONTRI
 
 laya-multimodal extends the Laya project by Convai Innovations. The upstream project documents
 the original text decision models, SDKs and Vega integration. This fork follows upstream Laya
-0.5.3: bare `laya.Agent()` and `laya.load()` use Vega. Use `vegaml=False` to select the classic
-encoder and `laya.MultimodalAgent(...)` to load a native decision checkpoint.
+0.5.3. With `vegaml` installed, bare `laya.Agent()` and `laya.load()` use Vega. Use
+`vegaml=False` for the classic encoder and `laya.MultimodalAgent(...)` or
+`laya --multimodal CHECKPOINT` for a native decision checkpoint.
 [Laya text routing and integrations](https://github.com/2351548518/laya/blob/main/docs/laya-guide.md) · [Upstream Laya](https://github.com/NandhaKishorM/laya)
 
 The source is licensed under [Apache 2.0](https://github.com/2351548518/laya/blob/main/LICENSE). The base models and datasets retain their

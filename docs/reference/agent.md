@@ -15,6 +15,8 @@ it with `laya.load(multimodal=...)`. [Native Python usage](../multimodal.md#loca
 
 ::: laya.agent.load
 
+::: laya.multimodal.MultimodalAgent
+
 ::: laya.onnx_agent.ONNXAgent
 
 ## Quantized export

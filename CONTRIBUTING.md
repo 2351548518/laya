@@ -32,8 +32,8 @@ source .venv/bin/activate
 pip install -e ".[mcp]"
 ```
 
-Optional extras are declared in `pyproject.toml`: `serve`, `fast`, `mcp`, `structured`, `onnx`,
-`langchain`, `langgraph`, `llamaindex`, `crewai`.
+Optional extras are declared in `pyproject.toml`: `multimodal`, `serve`, `fast`, `mcp`,
+`structured`, `onnx`, `langchain`, `langgraph`, `llamaindex`, `crewai`, `agno`.
 Install the ones a change needs, for example `pip install -e ".[serve]"`.
 
 If you use [uv](https://docs.astral.sh/uv/), the same setup is below. uv environments come without
@@ -66,6 +66,13 @@ A handful are pytest based and run under one pytest invocation:
 
 ```bash
 python -m pytest tests/test_serve.py tests/test_truncation_direction.py -q
+```
+
+For native runtime changes, install `.[multimodal,serve]` and run the small-backbone checks.
+
+```bash
+python -m pytest -q tests/test_multimodal.py tests/test_grounding.py \
+  tests/test_multimodal_cli.py tests/test_multimodal_export.py
 ```
 
 The one list that both the CI `test` job and the release gate run is

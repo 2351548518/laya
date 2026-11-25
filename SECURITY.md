@@ -6,13 +6,9 @@ Laya is designed from the ground up for local, on-device execution. Because Laya
 
 ## Supported Versions
 
-Security patches and vulnerability remediation are prioritized for the current active release line and the previous release line.
-
-| Version | Supported          | Status |
-| :--- | :---: | :--- |
-| **0.3.x** | :white_check_mark: | Current active release line |
-| **0.2.x** | :white_check_mark: | Critical security patches only |
-| **< 0.2.0** | :x: | End of life; please upgrade to 0.3.x |
+The fork's current source version is 0.5.3. Identify a source commit and the exact checkpoint
+revision when reporting an issue. For GGUF inference, include the language and projector
+filenames and the llama.cpp-jev revision. [Model release reference](docs/multimodal-release.md)
 
 ---
 
@@ -35,7 +31,7 @@ We appreciate the efforts of security researchers and operators who help keep La
 To accelerate triage and verification, please provide:
 - **Vulnerability classification**: (e.g., authentication bypass, denial of service, remote memory exhaustion, unhandled exception crash, path traversal).
 - **Affected component**: (`laya` Python core, `laya.serve`, `laya-ts`, official Docker image, MCP integration).
-- **Affected versions**: Specific commit SHA or release tag (e.g., `v0.3.22`).
+- **Affected versions**: Specific commit SHA or release tag (e.g., `v0.5.3`).
 - **Reproduction steps**: A minimal script, curl command, or payload demonstrating the vulnerability.
 - **Impact assessment**: Practical severity, threat model, prerequisites, and realistic exploit scenarios.
 - **Remediation**: (Optional) Suggested patch or mitigation strategy if already identified.
@@ -59,7 +55,8 @@ When deploying Laya in production environments (especially when self-hosting `la
 
 ### 2. HTTP Server Hardening (`laya-serve`)
 - **Bearer Token Authentication**:
-  - `laya.serve` reads the `LAYA_API_KEY` environment variable. When set, all requests to `/v1/systemone` require `Authorization: Bearer <token>`.
+  - When `LAYA_API_KEY` is set, `/v1/systemone`, `/v1/systemone/batch`, `/v1/route`, and
+    `/v1/multimodal` require `Authorization: Bearer <token>`.
   - Authentication comparisons use constant-time `hmac.compare_digest` across UTF-8 encoded bytes with surrogate-escape handling to prevent both timing attacks and latin-1 decoding exceptions.
   - **Warning**: If `LAYA_API_KEY` is unset, authentication is disabled and the server answers requests without credentials. Always set `LAYA_API_KEY` in non-isolated environments.
 - **Network Interface Binding**:

@@ -7,23 +7,8 @@ TypeScript inference for Laya (`Agent.predict`, `Router`, `lang`, `email`, `pres
 The local `Agent` reads classic Laya text checkpoints. To ask the native Qwen or Gemma model
 about a file, start the local multimodal server and use the corresponding media field.
 [Server setup](https://github.com/2351548518/laya/blob/main/docs/multimodal-clients.md) ·
-[Typed laya-client example](https://github.com/2351548518/laya/blob/main/docs/multimodal-clients.md#typescript)
-
-```ts
-import { readFile } from "node:fs/promises";
-
-const image = await readFile("scene.jpg");
-const response = await fetch("http://127.0.0.1:8000/v1/multimodal", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    image: { base64: image.toString("base64") },
-    questions: { target: { type: "box", instructions: "the red cup" } },
-  }),
-});
-if (!response.ok) throw new Error(await response.text());
-console.log((await response.json()).answers.target);
-```
+[Typed laya-client example](https://github.com/2351548518/laya/blob/main/docs/multimodal-clients.md#typescript) ·
+[Raw HTTP request](https://github.com/2351548518/laya/blob/main/docs/multimodal-clients.md#http-without-an-sdk)
 
 ## Export weights (once per checkpoint)
 

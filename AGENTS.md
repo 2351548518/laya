@@ -2,7 +2,7 @@
 
 Context for AI coding assistants (Claude Code, Codex, Cursor, Copilot, Gemini CLI) working in this repository.
 
-**Laya** is a fast, local, on-device decision engine. These rules mirror [CONTRIBUTING.md](CONTRIBUTING.md); the assistant-facing summary lives here because coding agents read this file automatically.
+**laya-multimodal** adds native text, image, audio and video decisions plus single-box grounding to Laya. These rules mirror [CONTRIBUTING.md](CONTRIBUTING.md); the assistant-facing summary lives here because coding agents read this file automatically.
 
 ## Do NOT
 
@@ -25,12 +25,13 @@ Context for AI coding assistants (Claude Code, Codex, Cursor, Copilot, Gemini CL
 | Editing | Read | Check |
 |---|---|---|
 | `laya/` core | — | plain script suites: `python tests/test_router.py`, `tests/test_criteria.py`, `tests/test_hooks.py`, `tests/test_hooks_api.py` |
+| native model or training | [Native multimodal guide](docs/multimodal.md) | `python -m pytest -q tests/test_multimodal.py tests/test_grounding.py tests/test_multimodal_cli.py tests/test_multimodal_export.py` |
 | server path | `tests/test_serve.py` | `python -m pytest tests/test_serve.py` (skips when the `serve` extra is missing) |
 | ONNX path | `tests/test_onnx.py` | `python -m pytest tests/test_onnx.py` (skips when the `onnx` extra is missing) |
 | fast/local paths | `tests/test_fast.py`, `tests/test_local_e2e.py`, `tests/test_mcp_local_e2e.py` | need CUDA or checkpoints under `~/laya_models`; skipped otherwise |
 | docs, docstrings in `laya/` | `docs/`, `docs/.nav.yml` for page order | `pip install -r requirements-docs.txt`, then `zensical build --strict --clean` with no `griffe:` lines in the output |
 
-Optional extras are declared in `pyproject.toml` (`serve`, `fast`, `onnx`, `langchain`, `langgraph`); install only what the change needs.
+Optional extras are declared in `pyproject.toml` (`multimodal`, `serve`, `fast`, `onnx`, `langchain`, `langgraph`); install only what the change needs.
 
 ## Pull requests
 

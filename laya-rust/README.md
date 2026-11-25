@@ -8,7 +8,7 @@ outputs recorded from the Python code (`tests/golden`), but runs on
 
 The crate runs the classic text checkpoints listed below. Rust applications can use the local
 Python HTTP service for native Gemma or Qwen media decisions and the matching GGUF server for
-quantized Qwen decisions. [Native HTTP API](https://github.com/2351548518/laya/blob/main/docs/multimodal.md#router-and-http) ·
+quantized Qwen decisions. [Native HTTP request](https://github.com/2351548518/laya/blob/main/docs/multimodal-clients.md#http-without-an-sdk) ·
 [GGUF runtime](https://github.com/2351548518/laya/blob/main/docs/multimodal-release.md)
 
 You ask typed questions (`choice`, `score`, `noul`) about a piece of state, and they are answered

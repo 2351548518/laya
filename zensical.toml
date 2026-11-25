@@ -13,9 +13,9 @@ copyright = "Apache 2.0. Developed by Convai Innovations."
 # becomes a section that opens on that page.
 
 [project.theme]
-# Reuse the README logo to avoid maintaining a second copy.
-logo = "https://raw.githubusercontent.com/NandhaKishorM/laya/main/assets/logo-mark.svg"
-favicon = "https://raw.githubusercontent.com/NandhaKishorM/laya/main/assets/logo-mark.svg"
+# Reuse the repository's logo.
+logo = "https://raw.githubusercontent.com/2351548518/laya/main/assets/logo-mark.svg"
+favicon = "https://raw.githubusercontent.com/2351548518/laya/main/assets/logo-mark.svg"
 features = [
   "content.code.copy",
   "navigation.footer",

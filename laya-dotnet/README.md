@@ -10,7 +10,7 @@ at runtime**. What is not ported yet is listed under [Not in v1](#not-in-v1).
 `Laya.Onnx` runs the classic text checkpoints listed below. For native Gemma or Qwen image,
 audio and video decisions, send inline media with `System.Net.Http.HttpClient` to the local
 Python service. The GGUF service provides a separate local API for quantized Qwen.
-[Native HTTP request shape](../docs/docker.md#serve-a-native-multimodal-checkpoint) · [GGUF runtime](../docs/multimodal-release.md)
+[Native HTTP request](../docs/multimodal-clients.md#http-without-an-sdk) · [GGUF runtime](../docs/multimodal-release.md)
 
 You ask typed questions (`choice`, `score`, `noul`) about any state (text, an email, a ticket or a
 JSON-shaped object), and they are answered in **one non-autoregressive forward pass** with

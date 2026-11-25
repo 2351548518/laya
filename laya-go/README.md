@@ -9,7 +9,7 @@ The foundation (language detection, questions, sequences, the tokenizer) and the
 
 For native image, audio or video decisions, Go programs can send the file as base64 JSON using
 `net/http`. Run the media checkpoint in the local Python or GGUF service.
-[Native HTTP request shape](../docs/docker.md#serve-a-native-multimodal-checkpoint) · [GGUF runtime](../docs/multimodal-release.md)
+[Native HTTP request](../docs/multimodal-clients.md#http-without-an-sdk) · [GGUF runtime](../docs/multimodal-release.md)
 
 | Package | What it is |
 | --- | --- |
