@@ -227,6 +227,8 @@ Evaluate the frozen checkpoint on local typed decisions and single-box targets. 
 guide gives the commands, metric denominators and latency protocol. Native evaluation supports a
 named suite from a checked manifest. It reports accuracy and calibration by modality, question type,
 source and task when provided, and includes normalized score MAE and RPS.
+Set `--video-cache-size 24` to reuse decoded clips during serial evaluation. Requests sharing the
+same frame selection are evaluated together, with their results returned in the dataset's order.
 [Native accuracy and latency](benchmarks.md#native-multimodal-checkpoints)
 
 ## Source and local workspace layout

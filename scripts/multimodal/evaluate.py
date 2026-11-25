@@ -34,6 +34,7 @@ def main(argv=None):
     parser.add_argument('--grounding-micro-batch', type=int, default=1)
     parser.add_argument('--max-micro-tokens', type=int, default=4096)
     parser.add_argument('--video-cache')
+    parser.add_argument('--video-cache-size', type=int, default=0, help='decoded clips to retain in memory')
     args = parser.parse_args(argv)
     suite_path = None
     if args.suite_manifest or args.suite:
@@ -51,6 +52,8 @@ def main(argv=None):
     if min(args.micro_batch, args.grounding_micro_batch, args.max_micro_tokens) < 1 or (
             args.max_len is not None and args.max_len < 1):
         parser.error('Batch size, token budget and context length must be positive')
+    if args.video_cache_size < 0:
+        parser.error('Video cache size must be nonnegative')
     output = args.out.resolve()
     for source in (args.decisions, args.grounding, suite_path, args.suite_manifest):
         if source and (output == source.resolve() or
@@ -61,11 +64,12 @@ def main(argv=None):
         agent.max_len = args.max_len
     if args.video_cache:
         agent._video_cache_dir = args.video_cache
+    agent._video_cache_size = args.video_cache_size
     result = dict(model=args.model, backbone=agent.model_type, revision=agent.revision,
         device=str(agent.device), max_len=agent.max_len, default_video_frames=agent.frames,
         video_audio=agent.use_audio_in_video, micro_batch=args.micro_batch,
         grounding_micro_batch=args.grounding_micro_batch, max_micro_tokens=args.max_micro_tokens,
-        output_tokens=0, datasets={})
+        video_cache_size=args.video_cache_size, output_tokens=0, datasets={})
     decision_rows = load_rows(args.decisions) if args.decisions else []
     box_rows = load_grounding_rows(args.grounding) if args.grounding else []
     if suite_path:

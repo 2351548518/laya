@@ -180,6 +180,39 @@ def test_video_preserves_order_and_audio_together(tmp_path, monkeypatch):
         agent.predict(video=path, questions={"x": Q["category"]})
 
 
+def test_serial_evaluation_reuses_video_decodes_and_preserves_predictions(tmp_path, monkeypatch):
+    import laya.video as video
+    from PIL import Image
+
+    first, second = tmp_path / "first.mp4", tmp_path / "second.mp4"
+    first.touch()
+    second.touch()
+    decodes = []
+    monkeypatch.setattr(video, "probe", lambda path: {"duration_s": 3, "has_audio": False})
+
+    def sample(path, frames, _duration):
+        decodes.append((Path(path), frames))
+        color = "white" if Path(path) == first and frames == 3 else "black"
+        return [Image.new("RGB", (4, 4), color) for _ in range(frames)], list(range(frames))
+
+    monkeypatch.setattr(video, "sample_frames", sample)
+    rows = [{"id": str(i), "state": {"text": str(i), "video": str(path), "video_frames": frames,
+                                    "video_audio": False},
+             "questions": {"x": Q["present"]}, "expected": {"x": i % 2 == 0}}
+            for i, (path, frames) in enumerate(((first, 3), (second, 3), (first, 3), (first, 1)))]
+    reference = tiny_agent()
+    original = collect_records(reference, rows, micro_batch=1)
+    assert decodes == [(first, 3), (second, 3), (first, 3), (first, 1)]
+    decodes.clear()
+    cached = tiny_agent()
+    cached._video_cache_size = 1
+    optimized = collect_records(cached, rows, micro_batch=1)
+    assert decodes == [(first, 3), (second, 3), (first, 1)]
+    assert [r["id"] for r in optimized] == [r["id"] for r in original]
+    np.testing.assert_array_equal([r["logits"] for r in optimized], [r["logits"] for r in original])
+    np.testing.assert_array_equal([r["target"] for r in optimized], [r["target"] for r in original])
+
+
 def test_native_video_bytes_are_decoded_once_for_each_state(monkeypatch):
     pytest.importorskip("transformers.video_utils")
     from PIL import Image

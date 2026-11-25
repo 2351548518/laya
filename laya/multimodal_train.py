@@ -7,8 +7,10 @@ import copy
 from dataclasses import asdict, dataclass
 import hashlib
 from functools import lru_cache
+from itertools import chain
 import json
 import math
+import os
 from pathlib import Path
 import random
 import time
@@ -228,6 +230,22 @@ def _calibration_group(row):
     return str(row.get("dataset", "custom")) + ":" + str(row.get("group", row.get("id")))
 
 
+def _serial_evaluation_order(agent, items):
+    """Place requests sharing a decoded clip together when an in-memory cache is active."""
+    if not getattr(agent, "_video_cache_size", 0):
+        return enumerate(items)
+    groups = {}
+    for index, item in enumerate(items):
+        state = item[0]["state"]
+        video = state.get("video") if isinstance(state, dict) else None
+        key = index
+        if isinstance(video, (str, os.PathLike)) and not os.fspath(video).endswith(".frames.json"):
+            key = (os.path.realpath(video), state.get("video_frames", agent.frames),
+                   state.get("video_audio", agent.use_audio_in_video), tuple(state.get("video_bounds") or ()))
+        groups.setdefault(key, []).append((index, item))
+    return chain.from_iterable(groups.values())
+
+
 @torch.no_grad()
 def collect_records(agent, rows, micro_batch=4, *, max_micro_tokens=None):
     """Collect unrounded option logits for calibration and held-out evaluation."""
@@ -241,7 +259,8 @@ def collect_records(agent, rows, micro_batch=4, *, max_micro_tokens=None):
 
     def collect_batch():
         nonlocal finished
-        inputs = collate_multimodal_inputs(prepared, getattr(agent.tok, "pad_token_id", 0) or 0)
+        inputs = prepared[0] if len(prepared) == 1 else collate_multimodal_inputs(
+            prepared, getattr(agent.tok, "pad_token_id", 0) or 0)
         logits = agent._logits(inputs, max(len(entry[4]) for entry in metadata)).detach().cpu().numpy()
         for values, (index, row, qid, q, target, modality) in zip(logits, metadata):
             values = unpermute_probs(values[:len(target)], q.get("option_order"))
@@ -257,7 +276,10 @@ def collect_records(agent, rows, micro_batch=4, *, max_micro_tokens=None):
             print("evaluation decisions=%d/%d" % (finished, len(items)), flush=True)
 
     longest = 0
-    ordered = sorted(enumerate(items), key=lambda item: record_modality(item[1][0])) if micro_batch > 1 else enumerate(items)
+    if micro_batch == 1:
+        ordered = _serial_evaluation_order(agent, items)
+    else:
+        ordered = sorted(enumerate(items), key=lambda item: record_modality(item[1][0]))
     for index, (row, qid, qdef, target) in ordered:
         request, question = record_input(agent, row, qid, qdef)
         inputs, q, _media = agent._prepare(request, question)
