@@ -32,10 +32,8 @@ wheels/
 node_modules/
 *.tgz
 .pytest_cache/
-.DS_Store
-.env
-.pypirc
 .ruff_cache/
+.DS_Store
 .idea/
 
 # local setup artifacts from setup_laya.sh: ~2.3 GB of checkpoint weights and the download caches
@@ -48,6 +46,7 @@ research/*_benchmark_results.json
 
 # output of a local notebook run (Kaggle uses /kaggle/working)
 notebooks/finetune_run/
+.ipynb_checkpoints/
 
 
 # session transcripts (may contain pasted credentials)
@@ -60,10 +59,6 @@ model-*/
 *.onnx
 *.onnx.data
 
-# laya-ts: build output + deps
-laya-ts/dist/
-node_modules/
-
 # uv lockfile (repo pins via pip/venv, not uv)
 uv.lock
 
@@ -74,7 +69,6 @@ docs/superpowers/
 .env
 .env.*
 *.pypirc
-.pypirc
 *.token
 .hf_token
 hf_token*
@@ -88,18 +82,12 @@ credentials.json
 # Documentation site build output (zensical build)
 site/
 
-# ruff's cache, and the JSON the research harnesses write on every run
-.ruff_cache/
-research/*_benchmark_results.json
-
-# local checkpoint weights, kept out of the tree
-# (fetch them with: python verify/checkpoints.py --fetch)
-models/
+# local fitted heads from the text routing examples
 fit-routing/
 
 # Local collection pipelines, experiment outputs, and training compatibility links.
 /_local/
-/Testing/
+Testing/
 *.gguf
 *.safetensors
 /research/configs
