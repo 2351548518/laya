@@ -37,6 +37,8 @@ const RESULT = {
 
 /** The liveness answer, which is the only `/health` payload every caller is guaranteed to get. */
 const HEALTH = { status: 'ok' };
+const MULTIMODAL = { ...RESULT, model: 'multimodal',
+  usage: { ...RESULT.usage, forward_passes: 1, truncated: false } };
 
 /** The request body the client would send for `options`, minus `state` and `questions`. */
 async function controls(options) {
@@ -59,6 +61,7 @@ async function attempt(run) {
     const path = new URL(url).pathname;
     seen.push([init.method, path]);
     const payload = path === '/v1/route' ? { model: 'english', repo: 'local', reason: 'fixture' }
+      : path === '/v1/multimodal' ? MULTIMODAL
       : path === '/health' ? HEALTH : path === '/v1/systemone/batch'
       ? { results: [RESULT], total_usage: { input_tokens: 4, output_tokens: 0 } } : RESULT;
     return new Response(JSON.stringify(payload), { headers: { 'content-type': 'application/json' } });
@@ -128,6 +131,7 @@ test('the client calls exactly the endpoints the page says it calls', async () =
   const paths = new Map();
   for (const [method, run] of [['predict', l => l.predict('the state', QUESTIONS, {})],
                                ['predictBatch', l => l.predictBatch(['the state'], QUESTIONS)],
+                               ['predictMultimodal', l => l.predictMultimodal({ image: new Uint8Array([1]) }, QUESTIONS)],
                                ['route', l => l.route('the state')], ['health', l => l.health()]]) {
     const { seen, error } = await attempt(run);
     assert.equal(error, null, `${method}() must reach the fixture, got ${error && error.name}: ${error && error.message}`);
@@ -135,7 +139,8 @@ test('the client calls exactly the endpoints the page says it calls', async () =
     paths.set(method, seen[0]);
   }
   assert.deepEqual([...paths], [['predict', ['POST', '/v1/systemone']],
-    ['predictBatch', ['POST', '/v1/systemone/batch']], ['route', ['POST', '/v1/route']], ['health', ['GET', '/health']]],
+    ['predictBatch', ['POST', '/v1/systemone/batch']], ['predictMultimodal', ['POST', '/v1/multimodal']],
+    ['route', ['POST', '/v1/route']], ['health', ['GET', '/health']]],
     "the client's network surface moved; update the page and its executable contract");
 
   // Each call has to be stated by a sentence that names the method and the path it reaches. The page
@@ -149,7 +154,7 @@ test('the client calls exactly the endpoints the page says it calls', async () =
   // An exclusivity claim is decidable at the same seam: "the only endpoint the client calls" holds only
   // if the client calls one path, and "the only <kind> endpoint" holds only if the sentence names the
   // path of every method of that kind. `health` probes; `predict` and `predictBatch` carry decisions.
-  const KINDS = { inference: ['predict', 'predictBatch'] };
+  const KINDS = { inference: ['predict', 'predictBatch', 'predictMultimodal'] };
   for (const sentence of sentences(page)) {
     const claim = /\bthe only\b[^.]{0,40}?\bendpoints?\b/i.exec(sentence);
     if (!claim) continue;
@@ -195,7 +200,7 @@ test('the endpoint surface the page describes is the one the client declares',
     // A member is public if it is spelled out as a signature; `private body;` collapses to the keyword.
     const declared = [...declaration.matchAll(/^ {4}(?!constructor)(\w+)[<(]/gm)]
       .map(([, name]) => name).sort();
-    assert.deepEqual(declared, ['health', 'predict', 'predictBatch', 'route'],
+    assert.deepEqual(declared, ['health', 'predict', 'predictBatch', 'predictMultimodal', 'route'],
       'the client gained or lost a public method; update the endpoint inventory');
     for (const name of declared) {
       assert.ok(page.includes('`' + name + '`'),

@@ -1,4 +1,5 @@
 """Synchronous requests to the existing self-hosted HTTP API."""
+import base64
 import http.client
 import json
 import urllib.error
@@ -8,7 +9,7 @@ from typing import Any, Optional, cast
 
 from ._validation import batch_prediction, expect, json_value, prediction, probability, questions_value, timeout_value
 from .errors import LayaAPIError, LayaConnectionError, LayaResponseError, LayaTimeoutError, LayaValidationError
-from .types import BatchPrediction, Health, MinConfidence, Prediction, Questions, State
+from .types import BatchPrediction, Health, MinConfidence, MultimodalPrediction, Prediction, Questions, State
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -92,9 +93,34 @@ class LayaClient:
         batch_prediction(result, questions, len(states))
         return cast(BatchPrediction, result)
 
+    def predict_multimodal(self, questions: Questions, *, state: Optional[State] = None,
+                           image: Optional[bytes] = None, audio: Optional[bytes] = None,
+                           video: Optional[bytes] = None, max_len: Optional[int] = None,
+                           min_confidence: Optional[MinConfidence] = None,
+                           timeout: Optional[float] = None) -> MultimodalPrediction:
+        """Send one image, audio file or video as bytes to the configured native checkpoint."""
+        media = [(name, value) for name, value in (("image", image), ("audio", audio), ("video", video))
+                 if value is not None]
+        if len(media) != 1:
+            raise LayaValidationError("provide exactly one of image, audio or video")
+        kind, value = media[0]
+        if not isinstance(value, bytes) or not value:
+            raise LayaValidationError(kind + " must contain nonempty file bytes")
+        if state is not None and not isinstance(state, (str, dict, list)):
+            raise LayaValidationError("state must be text, a JSON object or an array")
+        body = self._prediction_body(questions, None, None, None, None, max_len, None, min_confidence,
+                                     multimodal=True)
+        if state is not None:
+            body["state"] = state
+        body[kind] = {"base64": base64.b64encode(value).decode("ascii")}
+        result = self._request("/v1/multimodal", body, timeout)
+        prediction(result, questions, multimodal=True)
+        return cast(MultimodalPrediction, result)
+
     @staticmethod
-    def _prediction_body(questions, model, task, lang, lang_guess, max_len, head_max_len, min_confidence):
-        questions_value(questions)
+    def _prediction_body(questions, model, task, lang, lang_guess, max_len, head_max_len, min_confidence,
+                         *, multimodal=False):
+        questions_value(questions, multimodal=multimodal)
         body: dict[str, Any] = {"questions": questions}
         for key, value in (("model", model), ("task", task), ("lang", lang), ("lang_guess", lang_guess)):
             if value is not None:

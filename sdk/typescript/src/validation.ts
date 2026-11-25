@@ -40,7 +40,7 @@ export function validateJson(value: unknown, path = 'request', ancestors = new S
  */
 const QUESTION_FIELDS = new Set(['type', 'instructions', 'criteria', 'option_order', 'labels']);
 
-export function validateQuestions(questions: unknown): void {
+export function validateQuestions(questions: unknown, multimodal = false): void {
   if (!isRecord(questions) || Object.keys(questions).length === 0) {
     throw new LayaValidationError('questions must be an object containing at least one question');
   }
@@ -70,6 +70,13 @@ export function validateQuestions(questions: unknown): void {
         if (criteria !== undefined && criteria !== null &&
             (!isRecord(criteria) || Object.keys(criteria).some(k => k !== 'true' && k !== 'false'))) {
           invalid('noul criteria may only describe true and false');
+        }
+        break;
+      case 'box':
+        if (!multimodal) invalid('type must be choice, score, or noul');
+        if (typeof question.instructions !== 'string' || !question.instructions.trim() ||
+            Object.keys(question).some(key => key !== 'type' && key !== 'instructions')) {
+          invalid('box requires only type and nonempty text instructions');
         }
         break;
       default: invalid('type must be choice, score, or noul');

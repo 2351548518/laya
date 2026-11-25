@@ -16,10 +16,8 @@ python -m pip install ./sdk/python
 This uses setuptools to build the package. The installed SDK has no runtime
 dependencies and supports Python 3.10–3.13.
 
-Run the server in a **separate environment** using the existing
-[self-hosting instructions](https://github.com/NandhaKishorM/laya#self-hosting-http-server-jev-compatible).
-Installing `laya[serve]` in the application environment would install inference
-dependencies again.
+Run the server in a separate environment. [Server settings](https://github.com/2351548518/laya/blob/main/docs/http-api.md) ·
+[Native media setup](https://github.com/2351548518/laya/blob/main/docs/multimodal-clients.md)
 
 ## Predict
 
@@ -103,8 +101,31 @@ HTTP error details can be strings, objects or arrays. Error bodies are read up t
 64 KiB; bodies that cannot be decoded as JSON are returned as text. The SDK does not log requests or credentials;
 applications should handle server diagnostics according to their own logging policy.
 
-The client exposes `predict`, `predict_batch` and `health`. It does not implement
-async, local routing, model loading or Python prediction hooks.
+The client exposes `predict`, `predict_batch`, `predict_multimodal` and `health`.
+
+## Native media predictions
+
+Configure `laya-serve` with `LAYA_MULTIMODAL_MODEL` pointing to a trained checkpoint.
+
+```python
+from pathlib import Path
+from laya_client import LayaClient
+
+client = LayaClient()
+result = client.predict_multimodal(
+    {"target": {"type": "box", "instructions": "the red cup"}},
+    image=Path("scene.jpg").read_bytes(),
+    state="Current tabletop",
+)
+print(result["answers"]["target"]["box"])
+```
+
+`predict_multimodal` sends one `POST /v1/multimodal` request with bytes from exactly one
+image, audio file or video. The configured checkpoint determines supported modalities.
+The optional `state`, `max_len`, `min_confidence` and `timeout` arguments apply to this
+request. `choice`, `score` and `noul` keep their typed fields. A `box` answer includes
+normalized coordinates and localization confidence. `usage.forward_passes` counts the
+questions executed by the server. [Media contract](https://github.com/2351548518/laya/blob/main/docs/multimodal-clients.md)
 
 ## Batch predictions
 

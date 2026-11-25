@@ -18,11 +18,11 @@ The npm package starts at version `0.1.0`, independently of Python releases.
 ```mermaid
 flowchart LR
     A[JavaScript or TypeScript application] --> B[laya-client]
-    B -->|POST /v1/systemone, /v1/systemone/batch or /v1/route| C[Existing Laya server]
+    B -->|Text, media and routing requests| C[Local Laya server]
     C --> E[Router and local checkpoint]
 ```
 
-The SDK exports `predict`, `predictBatch`, `route` and a Laya-only `health` probe. It ships ESM,
+The SDK exports `predict`, `predictBatch`, `predictMultimodal`, `route` and a Laya-only `health` probe. It ships ESM,
 CommonJS and declarations, retaining inferred question IDs and choice labels.
 Use `laya-client` when a JavaScript or TypeScript application talks over HTTP to
 self-hosted Python `laya-serve`. Use `laya-ts` when inference must run directly
@@ -30,8 +30,8 @@ inside JavaScript through its local ONNX runtime, without a Python server.
 
 ## Shared contract
 
-Requests contain `state` and `questions`. Unless configured or supplied for a
-prediction, `laya-client` omits `model`, letting `laya-serve` select a local
+Text requests contain `state` and `questions`. Unless configured or supplied for a
+text prediction, `laya-client` omits `model`, letting `laya-serve` select a local
 checkpoint automatically. A client-wide or per-call `model` can select a local
 checkpoint, as can the other per-request controls in the table below. Choice label
 arrays are normalized to maps with null descriptions before transport.
@@ -64,7 +64,7 @@ This is a snapshot, not a promise that a later prediction will choose the same c
 Older servers without the endpoint preserve their 404/405 errors; no call falls back to prediction
 or local detection. Abort and timeout stop waiting and do not cancel server-side routing or hooks.
 
-The controls shared by both prediction endpoints are
+The controls shared by the two text prediction endpoints are
 per-request, and each is sent only when the caller supplied the option -- an absent option leaves the
 deployment's own `Router(...)` settings in charge instead of overriding them with a client-side default:
 
@@ -113,6 +113,14 @@ an unsupported endpoint's 404/405. A batch fails as a whole. Server limits remai
 the current server's 64-state default is not a client-side cap. Cancellation stops waiting,
 not work already running on the server. See the SDK guide for an example.
 
+## Native media prediction
+
+`predictMultimodal` posts `/v1/multimodal` with one image, audio file or video and a
+question set. It uses the server's configured native checkpoint. `state` supplies optional
+context, `maxLen` maps to `max_len`, and `minConfidence` maps to `min_confidence`.
+The response adds single-box answers and native `usage.forward_passes`.
+[Setup and typed example](multimodal-clients.md#typescript)
+
 ## Verification and release
 
 Unit tests cover request construction, all answer shapes, Laya extensions,
@@ -130,6 +138,6 @@ CI runs the SDK checks on Node.js 22 and 24.
 Tiny random weights verify transport and numerical parity, not pretrained
 quality or performance.
 
-See the [SDK guide](https://github.com/NandhaKishorM/laya/blob/main/sdk/typescript/README.md) for setup, examples, and npm
+See the [SDK guide](https://github.com/2351548518/laya/blob/main/sdk/typescript/README.md) for setup, examples, and npm
 publishing. The package will be published under the `laya-client` name. Python release workflows
 are unchanged.

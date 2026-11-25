@@ -1,5 +1,5 @@
 import { LayaResponseError } from './errors.js';
-import type { Questions } from './types.js';
+import type { MultimodalQuestions, Questions } from './types.js';
 import { isRecord } from './validation.js';
 
 function expect(condition: unknown, field: string): asserts condition {
@@ -60,7 +60,7 @@ export function validateHealth(value: unknown): void {
   expect(isRecord(value) && value.status === 'ok', 'health');
   if (value.device !== undefined) expect(typeof value.device === 'string', 'device');
   if (value.loaded !== undefined) {
-    expect(Array.isArray(value.loaded) && value.loaded.every(model), 'loaded');
+    expect(Array.isArray(value.loaded) && value.loaded.every(name => model(name) || name === 'multimodal'), 'loaded');
   }
 }
 
@@ -111,10 +111,21 @@ export function validateBatchPrediction(value: unknown, questions: Questions, co
   }
 }
 
-export function validatePrediction(value: unknown, questions: Questions): void {
+export function validatePrediction(value: unknown, questions: MultimodalQuestions, multimodal = false): void {
   expect(isRecord(value) && typeof value.model === 'string' && isRecord(value.answers), 'prediction');
   validateUsage(value.usage);
-  if (value.routing !== undefined) validateRoute(value.routing);
+  if (multimodal) {
+    const usage = value.usage;
+    expect(isRecord(usage) && count(usage.forward_passes) && usage.forward_passes >= 0 &&
+      typeof usage.truncated === 'boolean', 'multimodal usage');
+    if (value.routing !== undefined) {
+      validateRouteSnapshot(value.routing, false);
+      expect(isRecord(value.routing) && value.routing.model === 'multimodal' &&
+        value.routing.detection === null && value.routing.workflow === null, 'multimodal routing');
+    }
+  } else if (value.routing !== undefined) {
+    validateRoute(value.routing);
+  }
   for (const [id, question] of Object.entries(questions)) {
     const answer = value.answers[id];
     expect(isRecord(answer) && answer.type === question.type, `answers.${id}.type`);
@@ -148,7 +159,13 @@ export function validatePrediction(value: unknown, questions: Questions): void {
         answer.abstention === 'unevaluated', `answers.${id}.abstention`);
       expect(probability(answer.abstention_threshold), `answers.${id}.abstention_threshold`);
     }
-    if (question.type === 'noul') {
+    if (question.type === 'box') {
+      expect(multimodal && isRecord(answer.box), `answers.${id}.box`);
+      const { left, top, right, bottom } = answer.box;
+      expect(number(left) && number(right) && number(top) && number(bottom) &&
+        0 <= left && left < right && right <= 1 && 0 <= top && top < bottom && bottom <= 1,
+        `answers.${id}.box order`);
+    } else if (question.type === 'noul') {
       expect(probability(answer.noul), `answers.${id}.noul`);
     } else {
       expect(isRecord(answer.probabilities) && Object.values(answer.probabilities).every(probability), `answers.${id}.probabilities`);

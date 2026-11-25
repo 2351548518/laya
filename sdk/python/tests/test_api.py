@@ -41,6 +41,17 @@ class APITests(unittest.TestCase):
         self.assertIs(signature.return_annotation, BatchPrediction)
         self.assertEqual(BatchPrediction.__required_keys__, {"results", "total_usage"})
 
+    def test_predict_multimodal_parameters(self):
+        from laya_client.types import BoxAnswer, MultimodalPrediction
+        signature = inspect.signature(LayaClient.predict_multimodal)
+        self.assertEqual(list(signature.parameters), ["self", "questions", "state", "image", "audio", "video",
+                                                     "max_len", "min_confidence", "timeout"])
+        for param in list(signature.parameters.values())[2:]:
+            self.assertEqual(param.kind, inspect.Parameter.KEYWORD_ONLY)
+            self.assertIsNone(param.default)
+        self.assertIs(signature.return_annotation, MultimodalPrediction)
+        self.assertEqual(BoxAnswer.__required_keys__, {"type", "box", "confidence"})
+
     def test_constructor_defaults(self):
         parameters = inspect.signature(LayaClient).parameters
         self.assertEqual({k: p.default for k, p in parameters.items()},

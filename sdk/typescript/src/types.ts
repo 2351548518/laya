@@ -23,6 +23,16 @@ export interface NoulQuestion {
 }
 export type Question = ChoiceQuestion | ScoreQuestion | NoulQuestion;
 export type Questions = Readonly<Record<string, Question>>;
+export interface BoxQuestion {
+  readonly type: 'box';
+  readonly instructions: string;
+}
+export type MultimodalQuestion = Question | BoxQuestion;
+export type MultimodalQuestions = Readonly<Record<string, MultimodalQuestion>>;
+export type MultimodalMedia =
+  | { image: Uint8Array; audio?: never; video?: never }
+  | { audio: Uint8Array; image?: never; video?: never }
+  | { video: Uint8Array; image?: never; audio?: never };
 export type ModelName = 'english' | 'multilingual' | 'typed-decisions';
 export type ModelAlias = ModelName | 'en' | 'laya' | 'default' | 'multi' | 'ml' | 'laya-multilingual'
   | 'typed' | 'typed_decisions' | 'laya-typed-decisions' | 'decisions';
@@ -72,6 +82,12 @@ export interface BatchPredictOptions extends PredictOptions {
   batchSize?: number;
   /** Let the server group similar lengths; results still follow input order. */
   sortByLength?: boolean;
+}
+
+export interface MultimodalOptions extends RequestOptions {
+  state?: State;
+  maxLen?: number;
+  minConfidence?: MinConfidence;
 }
 
 /** Controls for a routing snapshot, without prediction budgets or abstention. */
@@ -141,6 +157,15 @@ export type Answer<Q extends Question = Question> = Q extends ChoiceQuestion
   ? ChoiceAnswer<ChoiceLabels<Q>> : Q extends ScoreQuestion ? ScoreAnswer : NoulAnswer;
 export type Answers<Q extends Questions> = { -readonly [K in keyof Q]: Answer<Q[K]> };
 
+export interface BoxAnswer {
+  type: 'box';
+  box: { left: number; top: number; right: number; bottom: number };
+  /** Localization quality. Coordinates are normalized to the image. */
+  confidence: number;
+}
+type MultimodalAnswer<Q extends MultimodalQuestion> = Q extends BoxQuestion
+  ? BoxAnswer : Q extends Question ? Answer<Q> : never;
+
 export interface LanguageDetection {
   script: string;
   script_profile: Record<string, number>;
@@ -201,6 +226,13 @@ export interface Prediction<Q extends Questions = Questions> {
   /** Optional routing metadata returned by Laya. */
   routing?: RouteDecision;
 }
+
+export interface MultimodalPrediction<Q extends MultimodalQuestions = MultimodalQuestions> {
+  model: string;
+  answers: { -readonly [K in keyof Q]: MultimodalAnswer<Q[K]> };
+  usage: BatchUsage & { forward_passes: number; truncated: boolean };
+  routing?: { model: 'multimodal'; repo: string | null; reason: string; detection: null; workflow: null };
+}
 /** Aggregate token counts. Per-state truncation metadata stays in each result's usage. */
 export interface BatchUsage {
   input_tokens: number;
@@ -220,7 +252,7 @@ export interface BatchPrediction<Q extends Questions = Questions> {
  */
 export interface Health {
   status: 'ok';
-  loaded?: ModelName[];
+  loaded?: (ModelName | 'multimodal')[];
   device?: string;
 }
 

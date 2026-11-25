@@ -46,6 +46,20 @@ class NoulAnswer(_NoulExtensions):
     noul: float
 
 
+class Box(TypedDict):
+    left: float
+    top: float
+    right: float
+    bottom: float
+
+
+class BoxAnswer(_ConfidenceAnswer):
+    """Normalized coordinates and localization quality for a referred object."""
+
+    type: Literal["box"]
+    box: Box
+
+
 class Usage(TypedDict):
     input_tokens: int
     output_tokens: int
@@ -59,6 +73,17 @@ class Prediction(_PredictionExtensions):
     model: str
     answers: Dict[str, Union[ChoiceAnswer, ScoreAnswer, NoulAnswer]]
     usage: Usage
+
+
+class MultimodalUsage(Usage):
+    forward_passes: int
+    truncated: bool
+
+
+class MultimodalPrediction(_PredictionExtensions):
+    model: str
+    answers: Dict[str, Union[ChoiceAnswer, ScoreAnswer, NoulAnswer, BoxAnswer]]
+    usage: MultimodalUsage
 
 
 class BatchPrediction(TypedDict):

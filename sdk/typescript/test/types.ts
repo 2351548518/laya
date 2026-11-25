@@ -9,6 +9,18 @@ const questions = defineQuestions({
   arrayChoice: { type: 'choice', instructions: 'Pick', criteria: ['a', 'b'] },
 });
 const result = await client.predict('Hello', questions);
+const photo = Uint8Array.of(0, 1, 2);
+const multimodal = await client.predictMultimodal({ image: photo }, {
+  target: { type: 'box', instructions: 'the red cup' },
+  team: questions.team,
+});
+const boxLeft: number = multimodal.answers.target.box.left;
+const mediaLabel: 'billing' | 'support' = multimodal.answers.team.choice;
+const forwardPasses: number = multimodal.usage.forward_passes;
+// @ts-expect-error A request contains one media file.
+await client.predictMultimodal({ image: photo, video: photo }, questions);
+// @ts-expect-error Client methods accept media bytes.
+await client.predictMultimodal({ image: 'scene.jpg' }, questions);
 const label: 'billing' | 'support' = result.answers.team.choice;
 const arrayLabel: 'a' | 'b' = result.answers.arrayChoice.choice;
 const probability: number = result.answers.team.probabilities.billing;

@@ -1,15 +1,15 @@
 # laya-client
 
 A dependency-free HTTP client for self-hosted Laya `laya-serve` predictions and routing snapshots. Supports ESM and
-CommonJS on Node.js 22+, and browsers with `fetch`, `AbortController`, and
-`structuredClone`. TypeScript consumers need TypeScript 5 or newer.
+CommonJS on Node.js 22+, and browsers with `fetch`, `AbortController`, `structuredClone`
+and `btoa`. TypeScript consumers need TypeScript 5 or newer.
 
 Inference runs in your self-hosted `laya-serve` process. JavaScript clients do
 not need Python, PyTorch, or model weights installed; the server does. This
 package does not run models directly in a browser or Node.js.
 
-For native image, audio and video requests, use the server's `/v1/multimodal` endpoint
-with `fetch`. [TypeScript media example](https://github.com/2351548518/laya/blob/main/laya-ts/README.md#native-media-over-http)
+The SDK can send native image, audio and video requests to the local service.
+[Native media predictions](#native-media-predictions)
 
 ## Run from this repository
 
@@ -43,8 +43,7 @@ LAYA_HOST=127.0.0.1 LAYA_MODELS=english,multilingual LAYA_DEVICE=cpu laya-serve
 Set `LAYA_PRELOAD=0` to defer loading until the first prediction. Initial loads
 download weights and need sufficient memory and disk space. The client timeout
 defaults to 120 seconds; the example allows 10 minutes for a cold load. Server
-configuration uses environment variables, not command-line flags. See the
-[server guide](https://github.com/NandhaKishorM/laya/blob/main/README.md#self-hosting-http-server-jev-compatible).
+configuration uses environment variables. [Server settings](https://github.com/2351548518/laya/blob/main/docs/http-api.md)
 
 ## Install in another JavaScript project
 
@@ -92,6 +91,30 @@ const laya = new Laya();
 laya.predict({ message: 'Please refund my order' }, triageQuestions())
   .then(result => console.log(result.answers));
 ```
+
+## Native media predictions
+
+Start `laya-serve` with `LAYA_MULTIMODAL_MODEL` pointing to a trained local checkpoint.
+[Server setup](https://github.com/2351548518/laya/blob/main/docs/multimodal-clients.md)
+
+```ts
+import { readFile } from 'node:fs/promises';
+import { Laya } from 'laya-client';
+
+const laya = new Laya();
+const result = await laya.predictMultimodal(
+  { image: await readFile('scene.jpg') },
+  { target: { type: 'box', instructions: 'the red cup' } },
+  { state: 'Current tabletop' },
+);
+console.log(result.answers.target.box);
+```
+
+`predictMultimodal` sends exactly one nonempty `image`, `audio` or `video` byte array to
+`POST /v1/multimodal`. It accepts `state`, `maxLen`, `minConfidence`, `signal` and
+`timeoutMs` in its options. The configured native checkpoint determines support for
+each media type. The response retains typed decision IDs and candidate labels.
+A `box` answer contains one set of normalized coordinates and localization confidence.
 
 ## Batch predictions
 
@@ -333,6 +356,7 @@ and TLS at your application proxy or gateway.
 | `GET /health` | None for liveness | `{status}`, plus `loaded` and `device` with the bearer |
 | `POST /v1/systemone` | `{state, questions, model?}` | `{model, answers, usage}` plus optional `routing` |
 | `POST /v1/systemone/batch` | `{states, questions, model?, batch_size?, sort_by_length?}` | `{results, total_usage}` in input order |
+| `POST /v1/multimodal` | `{state?, questions, image\|audio\|video, max_len?, min_confidence?}` | `{model, answers, usage, routing?}`, including single-box answers |
 
 Laya errors use FastAPI's `{detail: ...}` body: 400 for malformed requests, 401
 for authentication, 413 for request limits, 422 for invalid questions, and 500

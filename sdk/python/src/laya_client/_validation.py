@@ -52,10 +52,16 @@ def json_value(value: Any, ancestors=None) -> None:
         ancestors.remove(id(value))
 
 
-def questions_value(value: Any) -> None:
+def questions_value(value: Any, *, multimodal=False) -> None:
     if not isinstance(value, dict) or not value:
         raise LayaValidationError("questions must be a nonempty object")
     for question in value.values():
+        if isinstance(question, dict) and multimodal and question.get("type") == "box":
+            instruction = question.get("instructions")
+            if (set(question) != {"type", "instructions"} or
+                    not isinstance(instruction, str) or not instruction.strip()):
+                raise LayaValidationError("box questions require only type and nonempty text instructions")
+            continue
         if not isinstance(question, dict) or question.get("type") not in ("choice", "score", "noul"):
             raise LayaValidationError("each question must have type choice, score or noul")
         if "instructions" not in question:
@@ -83,14 +89,17 @@ def batch_prediction(value: Any, questions: dict, count: int) -> None:
             raise LayaResponseError("Invalid Laya response: results[%d]: %s" % (i, exc)) from exc
 
 
-def prediction(value: Any, questions: dict) -> None:
+def prediction(value: Any, questions: dict, *, multimodal=False) -> None:
     expect(isinstance(value, dict), "prediction object")
     expect(isinstance(value.get("model"), str), "model")
     answers, usage = value.get("answers"), value.get("usage")
     expect(isinstance(answers, dict), "answers")
     expect(isinstance(usage, dict), "usage")
-    for key in ("input_tokens", "output_tokens"):
+    count_fields = ("input_tokens", "output_tokens", "forward_passes") if multimodal else ("input_tokens", "output_tokens")
+    for key in count_fields:
         expect(type(usage.get(key)) is int and usage[key] >= 0, "usage." + key)
+    if multimodal:
+        expect(type(usage.get("truncated")) is bool, "usage.truncated")
     if "routing" in value:
         expect(isinstance(value["routing"], dict), "routing")
     for qid, question in questions.items():
@@ -112,6 +121,12 @@ def prediction(value: Any, questions: dict) -> None:
                 expect(isinstance(answer[key], dict), field + "." + key)
         if kind == "noul":
             expect(probability(answer.get("noul")), field + ".noul")
+            continue
+        if multimodal and kind == "box":
+            box = answer.get("box")
+            corners = ("left", "top", "right", "bottom")
+            expect(isinstance(box, dict) and all(probability(box.get(key)) for key in corners), field + ".box")
+            expect(box["left"] < box["right"] and box["top"] < box["bottom"], field + ".box order")
             continue
         probs = answer.get("probabilities")
         expect(isinstance(probs, dict) and bool(probs) and all(probability(p) for p in probs.values()),

@@ -2,13 +2,14 @@ import {
   LayaAbortError, LayaAPIError, LayaConnectionError, LayaError, LayaResponseError,
   LayaTimeoutError, LayaValidationError,
 } from './errors.js';
-import type { BatchPrediction, BatchPredictOptions, Health, Prediction, PredictOptions, Questions, RequestOptions,
-  RouteOptions, RouteSnapshot, State } from './types.js';
+import type { BatchPrediction, BatchPredictOptions, Health, MultimodalMedia, MultimodalOptions, MultimodalPrediction,
+  MultimodalQuestions, Prediction, PredictOptions, Questions, RequestOptions, RouteOptions, RouteSnapshot, State } from './types.js';
 import { isMinConfidenceKey } from './buckets.js';
 import { isRecord, validateJson, validateQuestions, validateTimeout } from './validation.js';
 import { validateBatchPrediction, validateHealth, validatePrediction, validateRouteSnapshot } from './response.js';
 
 const ROUTE_OPTIONS = new Set(['model', 'task', 'lang', 'langGuess', 'explain', 'signal', 'timeoutMs']);
+const MULTIMODAL_OPTIONS = new Set(['state', 'maxLen', 'minConfidence', 'signal', 'timeoutMs']);
 
 /** One threshold in `[0, 1]`: booleans are not thresholds even though they read as 0/1. */
 function isThreshold(value: unknown): value is number {
@@ -32,7 +33,7 @@ export interface LayaOptions {
   /** Server root URL, optionally including a reverse-proxy path prefix. */
   baseURL?: string;
   apiKey?: string;
-  /** Optional local checkpoint or alias to send with every prediction and routing request. */
+  /** Optional local checkpoint or alias for text predictions and routing requests. */
   model?: string;
   /** Default 120000 ms; cold checkpoint downloads may require more. Zero disables. */
   timeoutMs?: number;
@@ -74,6 +75,46 @@ export class Laya {
     validateQuestions(questions);
     const result = await this.request<Prediction<Q>>('/v1/systemone', this.body(state, questions, options), options);
     validatePrediction(result, questions);
+    return result;
+  }
+
+  /** Send file bytes to the server's configured native multimodal checkpoint. */
+  async predictMultimodal<const Q extends MultimodalQuestions>(media: MultimodalMedia, questions: Q,
+      options: MultimodalOptions = {}): Promise<MultimodalPrediction<Q>> {
+    validateQuestions(questions, true);
+    if (!isRecord(media)) {
+      throw new LayaValidationError('provide exactly one of image, audio or video');
+    }
+    const [entry, extra] = Object.entries(media);
+    if (!entry || extra) throw new LayaValidationError('provide exactly one of image, audio or video');
+    const [kind, bytes] = entry;
+    if (!['image', 'audio', 'video'].includes(kind) || !(bytes instanceof Uint8Array) || !bytes.length) {
+      throw new LayaValidationError('media must contain nonempty image, audio or video bytes');
+    }
+    if (typeof options !== 'object' || options === null || Array.isArray(options) ||
+        Object.keys(options).some(key => !MULTIMODAL_OPTIONS.has(key))) {
+      throw new LayaValidationError('invalid multimodal options');
+    }
+    const { state, maxLen, minConfidence } = options;
+    if (state !== undefined) this.validateState(state);
+    if (maxLen !== undefined && (!Number.isInteger(maxLen) || maxLen < 1)) {
+      throw new LayaValidationError('maxLen must be a positive integer');
+    }
+    if (minConfidence !== undefined) validateMinConfidence(minConfidence);
+    const body = { questions,
+      ...(state !== undefined ? { state } : {}),
+      ...(maxLen !== undefined ? { max_len: maxLen } : {}),
+      ...(minConfidence !== undefined ? { min_confidence: minConfidence } : {}),
+    };
+    validateJson(body);
+    const sentQuestions = structuredClone(questions);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 16384) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + 16384));
+    }
+    const serialized = JSON.stringify({ ...body, questions: sentQuestions, [kind]: { base64: btoa(binary) } });
+    const result = await this.request<MultimodalPrediction<Q>>('/v1/multimodal', serialized, options);
+    validatePrediction(result, sentQuestions, true);
     return result;
   }
 
