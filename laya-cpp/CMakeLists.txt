@@ -10,6 +10,20 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# The JSON encoder uses the floating-point overload for shortest round-trip formatting.
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles([=[
+  #include <charconv>
+  int main() {
+    char buffer[64];
+    auto result = std::to_chars(buffer, buffer + sizeof buffer, 1.25, std::chars_format::scientific);
+    return result.ptr == buffer;
+  }
+]=] LAYA_FLOAT_TO_CHARS)
+if(NOT LAYA_FLOAT_TO_CHARS)
+  message(FATAL_ERROR "laya-cpp needs a C++17 standard library with floating-point std::to_chars.")
+endif()
+
 # Floating point should match the Python reference: no fused multiply-add, no fast math.
 # GCC and Clang get -ffp-contract=off. MSVC gets /fp:precise, which only disables fast-math
 # reassociation and, before VS2022, does not by itself forbid contraction; the MSVC branch is

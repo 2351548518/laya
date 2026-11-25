@@ -7,12 +7,13 @@ results against recorded Python outputs. [Laya text routing and integrations](..
 The `laya` library accepts classic text questions. `LAYA_ONNX=ON` adds `laya_onnx` to run
 exported Laya ONNX checkpoints. A C++ application that needs native Gemma or Qwen media decisions
 can send media to the local Python HTTP service or the matching GGUF server.
-[Native HTTP API](../docs/multimodal.md#router-and-http) · [GGUF runtime](../docs/multimodal-release.md)
+[Native HTTP request](../docs/multimodal-clients.md#http-without-an-sdk) · [GGUF runtime](../docs/multimodal-release.md)
 
 ## Build and test
 
-Needs CMake 3.25+ and a C++17 compiler (gcc 13, clang 18 and Apple clang are exercised). The first
-configure fetches GoogleTest, pinned by commit.
+Needs CMake 3.25+ for the presets and a C++17 standard library with floating-point
+`std::to_chars`. Configuration checks for the required overload. CI exercises GCC 13,
+Clang 18 and Apple Clang. The first test configure fetches GoogleTest, pinned by commit.
 
 ```sh
 cd laya-cpp
