@@ -4,7 +4,6 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from contextlib import nullcontext
 from array import array
-import hashlib
 from itertools import chain
 import json
 import math
@@ -16,6 +15,7 @@ import time
 import torch
 from torch.nn import functional as F
 
+from .evals import file_fingerprint
 from .grounding import box_iou, crowd_overlap, grounding_loss, validate_boxes
 from .multimodal import MultimodalAgent, _active_head
 from .multimodal_distributed import distributed_context
@@ -376,7 +376,7 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
     agent = agent or MultimodalAgent(model, device=ctx.device if ctx.world_size > 1 else device,
                                      grounding_slots=cfg.slots, max_len=cfg.max_len)
     agent.max_len = cfg.max_len
-    agent._video_cache_dir = cfg.video_cache_dir or 'multimodal-data/v3/framecache'
+    agent._video_cache_dir = cfg.video_cache_dir or '.cache/multimodal-video'
     base = agent.model.get_base_model() if hasattr(agent.model, "peft_config") else agent.model
     if not hasattr(base, "grounding_head"):
         raise ValueError("grounding architecture must be installed before training")
@@ -530,8 +530,7 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
         final_score = checkpoint_score(after,cfg.selection_metric)
         if accepted and final_score > best:
             best = final_score;agent.save(output / 'best')
-        with Path(train_data).open('rb') as stream:
-            train_sha256 = hashlib.file_digest(stream, 'sha256').hexdigest()
+        train_sha256 = file_fingerprint(str(train_data))
         report = {'status': 'complete', 'steps': steps, 'config': asdict(cfg), 'train_records': len(rows),
             'dev_records': len(dev), 'before': before, 'after': after, 'selection_history': history,
             'world_size': ctx.world_size, 'train_sha256': train_sha256,

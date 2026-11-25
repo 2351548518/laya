@@ -1,5 +1,6 @@
 """Multimodal decision contracts, media processing, and real gradient updates without weights."""
 import copy
+import errno
 import json
 import os
 from pathlib import Path
@@ -220,6 +221,41 @@ def test_video_overrides_and_persistent_cache_preserve_native_evidence(tmp_path,
         restored.predict(dict(state, video_audio="false"), Q)
     with pytest.raises(ValueError, match="video_frames"):
         restored.predict(dict(state, video_frames=0), Q)
+
+
+@pytest.mark.parametrize('error_number', [errno.ENOSPC, errno.EDQUOT])
+def test_full_video_cache_preserves_decoded_evidence(tmp_path, monkeypatch, error_number):
+    import laya.video as video
+    from PIL import Image
+    from types import SimpleNamespace
+    import laya.multimodal as multimodal
+    path = tmp_path / 'clip.avi'; path.write_bytes(b'video')
+    frames = [Image.new('RGB', (8, 8), 'red')] * 4
+    monkeypatch.setattr(video, 'probe', lambda p: dict(duration_s=4., has_audio=False))
+    monkeypatch.setattr(video, 'sample_frames', lambda *args: (frames, [0., 1., 2., 3.]))
+    monkeypatch.setattr(multimodal.shutil, 'disk_usage', lambda p: SimpleNamespace(free=4 << 30))
+    def full_cache(stream, **data):
+        stream.write(b'incomplete cache')
+        raise OSError(error_number, 'storage exhausted')
+    monkeypatch.setattr(multimodal.np, 'savez_compressed', full_cache)
+    agent = tiny_agent(); agent._video_cache_dir = str(tmp_path / 'cache')
+    answer = agent.predict(video=path, questions={'x': Q['present']})
+    assert answer['answers'] and len(agent.processor.calls[-1]['images']) == 4
+    assert not list((tmp_path / 'cache').iterdir())
+
+
+def test_low_video_cache_space_skips_persistence_before_writing(tmp_path, monkeypatch):
+    import laya.video as video
+    import laya.multimodal as multimodal
+    from PIL import Image
+    from types import SimpleNamespace
+    path = tmp_path / 'clip.avi'; path.write_bytes(b'video')
+    monkeypatch.setattr(video, 'probe', lambda p: dict(duration_s=1., has_audio=False))
+    monkeypatch.setattr(video, 'sample_frames', lambda *args: ([Image.new('RGB', (4, 4))], [0.]))
+    monkeypatch.setattr(multimodal.shutil, 'disk_usage', lambda p: SimpleNamespace(free=0))
+    monkeypatch.setattr(multimodal.tempfile, 'mkstemp', lambda **kwargs: pytest.fail('full cache must not create a temporary file'))
+    agent = tiny_agent(); agent._video_cache_dir = str(tmp_path / 'cache')
+    assert agent.predict(video=path, questions={'x': Q['present']})['answers']
 
 
 def test_ordinal_calibration_guard_rejects_worse_calibration_and_keeps_groups_together(monkeypatch):

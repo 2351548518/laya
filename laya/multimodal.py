@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import inspect
 from collections import OrderedDict
+import errno
 import hashlib
 import io
 import json
@@ -15,6 +16,7 @@ import math
 import os
 from pathlib import Path
 import re
+import shutil
 import string
 import tempfile
 import threading
@@ -422,18 +424,26 @@ class MultimodalAgent(Agent):
         wave = extract_audio(path) if use_audio and info["has_audio"] else None
         value = info, images, times, wave
         if cached_path is not None and images:
-            cached_path.parent.mkdir(parents=True, exist_ok=True)
-            data = {"duration": np.asarray(info["duration_s"]), "has_audio": np.asarray(info["has_audio"]),
-                    "times": np.asarray(times), "wave": np.asarray(wave if wave is not None else [], dtype=np.float32)}
-            data.update({"frame_%d" % i: np.asarray(frame) for i, frame in enumerate(images)})
-            fd, temporary = tempfile.mkstemp(dir=cached_path.parent, suffix=".npz")
+            temporary = None
             try:
-                with os.fdopen(fd, "wb") as stream:
-                    np.savez_compressed(stream, **data)
-                os.replace(temporary, cached_path)
+                cached_path.parent.mkdir(parents=True, exist_ok=True)
+                required = sum(frame.width * frame.height * 3 for frame in images)
+                required += wave.nbytes if wave is not None else 0
+                # Reserve space for other ranks writing to the same volume.
+                if shutil.disk_usage(cached_path.parent).free >= (1 << 30) + required:
+                    data = {"duration": np.asarray(info["duration_s"]), "has_audio": np.asarray(info["has_audio"]),
+                            "times": np.asarray(times), "wave": np.asarray(wave if wave is not None else [], dtype=np.float32)}
+                    data.update({"frame_%d" % i: np.asarray(frame) for i, frame in enumerate(images)})
+                    fd, temporary = tempfile.mkstemp(dir=cached_path.parent, suffix=".npz")
+                    with os.fdopen(fd, "wb") as stream:
+                        np.savez_compressed(stream, **data)
+                    os.replace(temporary, cached_path)
+            except OSError as error:
+                if error.errno not in {errno.ENOSPC, errno.EDQUOT}:
+                    raise
             finally:
-                if os.path.exists(temporary):
-                    os.unlink(temporary)
+                if temporary is not None:
+                    Path(temporary).unlink(missing_ok=True)
         if cache_size:
             if cache is None:
                 cache = self._video_cache = OrderedDict()
