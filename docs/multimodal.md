@@ -58,8 +58,9 @@ rejects audio rather than silently dropping it. Mark visual-only video states wi
 questions are not silently truncated to fit.
 
 The existing hooks, `predict_batch`, `Router(multimodal=...)` and inline-media HTTP endpoint can
-use the same runtime. Identical-media features may be reused within an inference request;
-training does not reuse detached features across parameter updates.
+use the same runtime. All questions about one state share its decoded images, audio and sampled
+video frames. Each question still has its own prompt and forward pass. The Qwen3.5 runtime can
+also reuse identical visual features across questions about that state during inference.
 
 ## From input to answer
 
@@ -117,7 +118,8 @@ and how the media are stored. [Open JEV Omni public data](https://huggingface.co
 
 For joint training, each data directory contains `train.jsonl`, `dev.jsonl` for single-box
 validation, and `decision_dev.jsonl` for decision validation. A head warmup directory can contain
-a smaller training subset with the same protected development files.
+a smaller training subset with the same protected development files. Decision rows in joint
+validation accept either a hard `expected` label or a `gold` probability distribution.
 
 Prepared Qwen exports can carry `training_admission` receipts recording the processor, native
 token count and context budget. Receipts must match the chosen model. For local JSONL without

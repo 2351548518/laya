@@ -13,14 +13,14 @@ inference, the language file is sufficient.
 
 | Selected file | Size | Distillation rows | Original H | Selected H on prior runtime | Selected H after runtime fix |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Q8_0 | 4.811 GiB | 10,496 | 76.80% | 78.22% | Pending |
+| Q8_0 | 4.811 GiB | 10,496 | 76.80% | 78.22% | Not rerun |
 | Q4_K_M, FP32 heads | 2.902 GiB | 10,496 | 75.57% | 77.53% | **77.83%** |
-| Q4_K_M, Q8 heads | 2.897 GiB | 10,496 | 75.57% | 77.19% | Pending |
-| Q4_0 | 2.718 GiB | 10,496 | 77.04% | 77.13% | Pending |
-| Q3_K_M | 2.489 GiB | 744 | 74.37% | 75.77% | Pending |
-| IQ3_XXS / SSM8 | 2.150 GiB | 10,496 | 72.11% | 72.85% | Pending |
+| Q4_K_M, Q8 heads | 2.897 GiB | 10,496 | 75.57% | 77.19% | Not rerun |
+| Q4_0 | 2.718 GiB | 10,496 | 77.04% | 77.13% | Not rerun |
+| Q3_K_M | 2.489 GiB | 744 | 74.37% | 75.77% | Not rerun |
+| IQ3_XXS / SSM8 | 2.150 GiB | 10,496 | 72.11% | 72.85% | Not rerun |
 | IQ2_XS / SSM4 | 1.840 GiB | 744 | 71.41% | 75.58% | **75.92%** |
-| Q1_0, size experiment | 0.624 GiB | 744 | 2.96% | 2.98% | Pending |
+| Q1_0, size experiment | 0.624 GiB | 744 | 2.96% | 2.98% | Not rerun |
 
 The selected GGUF heads use teacher distillation with training-time head QAT disabled.
 H combines decision accuracy and box Acc@IoU ≥ 0.5 with the harmonic mean. The two complete

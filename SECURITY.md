@@ -50,8 +50,12 @@ When deploying Laya in production environments (especially when self-hosting `la
 
 ### 1. Model Weights & Supply Chain Integrity
 - **Safe Weight Deserialization**: Laya checkpoints rely on modern, safe serialization formats (`safetensors` and ONNX). The engine avoids unsafe arbitrary object pickling.
-- **Revision Pinning**: Pass `revision=PINNED_REVISIONS[...]` when loading weights to guarantee that the runtime only downloads and executes reviewed commit revisions from the Hugging Face Hub, protecting against moving branch attacks.
-- **Cryptographic Digest Verification**: Set `LAYA_SHA256_DIGESTS` in the environment or pass `expected_sha256` to loaders to enforce SHA-256 fingerprint verification of every artifact prior to parsing and weight loading. See [docs/security.md](docs/security.md) for detailed instructions.
+- Pin classic Hub checkpoints with `revision=PINNED_REVISIONS[...]` or an explicit commit.
+  Use `LAYA_SHA256_DIGESTS` or `expected_sha256` for the classic checkpoint loader's digest
+  checks. [Classic checkpoint verification](docs/security.md)
+- Verify a merged native release using its published `SHA256SUMS` before loading the local
+  directory. Use its recorded language and projector pair for GGUF deployments.
+  [Native model releases](docs/multimodal-release.md)
 
 ### 2. HTTP Server Hardening (`laya-serve`)
 - **Bearer Token Authentication**:
