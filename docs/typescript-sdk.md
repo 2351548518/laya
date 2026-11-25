@@ -92,7 +92,8 @@ response, and `health()` returns it rather than raising. Prediction never probes
 FastAPI detail strings and validation arrays are preserved as `LayaAPIError`
 messages/details. Structured error envelopes from compatible backends are also
 accepted. Requests have configurable deadlines and caller cancellation, and
-are never retried automatically.
+are never retried automatically. Use the final service URL for `baseURL`.
+The client reports redirects as request errors.
 
 ## Batch predictions
 

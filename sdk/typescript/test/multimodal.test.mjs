@@ -43,6 +43,17 @@ test('native audio and video keep decision questions and normal errors', async (
   await assert.rejects(unavailable.predictMultimodal({ image: Uint8Array.of(1) }, questions), LayaAPIError);
 });
 
+test('native media reports an HTTP redirect as a request error', async () => {
+  const laya = new Laya({ fetch: async (_url, init) => {
+    assert.equal(init.redirect, 'manual');
+    return new Response(null, { status: 307, headers: { Location: '/new-endpoint' } });
+  } });
+  await assert.rejects(
+    laya.predictMultimodal({ image: Uint8Array.of(1) }, questions),
+    error => error instanceof LayaAPIError && error.status === 307,
+  );
+});
+
 test('native request validates media, box questions and response geometry', async () => {
   const image = Uint8Array.of(1);
   const laya = new Laya({ fetch: async () => assert.fail('invalid requests must not reach transport') });

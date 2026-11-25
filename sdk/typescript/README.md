@@ -339,6 +339,7 @@ automatically retried. Other errors extend `LayaError`:
 `LayaResponseError` (invalid JSON or incompatible response structure).
 
 The client accepts custom `headers` and a Fetch-compatible `fetch` implementation.
+Use the final service URL for `baseURL`. HTTP redirects return a `LayaAPIError`.
 Keep API keys on your application's backend. For browser use, put a same-origin
 application proxy in front of a protected server, or configure an appropriate
 authenticated gateway. A shared server key embedded in browser code is public.

@@ -262,7 +262,9 @@ export class Laya {
       controller.signal.throwIfAborted();
       const headers = new Headers(this.headers);
       if (body !== undefined) headers.set('Content-Type', 'application/json');
-      const init: RequestInit = { method: body === undefined ? 'GET' : 'POST', headers, signal: controller.signal };
+      const init: RequestInit = {
+        method: body === undefined ? 'GET' : 'POST', headers, signal: controller.signal, redirect: 'manual',
+      };
       if (body !== undefined) init.body = body;
       // Never retry automatically: repeating an expensive inference request is surprising.
       const response = await this.fetcher.call(globalThis, this.baseURL + path, init);
