@@ -1562,7 +1562,7 @@ def laya_decide(
         raise
     latency_ms = (time.perf_counter() - started) * 1000.0
 
-    answers = _normalize_answers(details.answers)
+    _normalize_answers(details.answers)
     routing = details.routing or {"model": model_name, "repo": None, "reason": "explicit model"}
     device = _reading_device(router, agent, model_name, details.routing)
     out: dict[str, Any] = {
