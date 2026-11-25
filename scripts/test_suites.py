@@ -141,6 +141,7 @@ PYTEST_SUITES = [
     "tests/test_multimodal_objectives.py",
     "tests/test_decision_backbones.py",
     "tests/test_multimodal_cli.py",
+    "tests/test_multimodal_export.py",
 ]
 
 

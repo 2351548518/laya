@@ -39,4 +39,4 @@ jobs:
           tests/test_multimodal_distributed.py
           tests/test_multimodal_readout.py tests/test_multimodal_optimization.py
           tests/test_multimodal_objectives.py tests/test_decision_backbones.py
-          tests/test_multimodal_cli.py
+          tests/test_multimodal_cli.py tests/test_multimodal_export.py
