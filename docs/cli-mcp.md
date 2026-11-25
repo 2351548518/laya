@@ -9,8 +9,8 @@ Laya has two local interfaces for trying the same structured-decision engine:
 
 Choose the CLI when you are the person reading the result. Choose MCP when another process needs
 a stable tool interface. Both use Laya's `Router` to select a checkpoint and return typed
-`choice`, `score`, and `noul` decisions; neither is an open-ended question-answering or text
-generation interface.
+`choice`, `score`, and `noul` decisions. The CLI can also return a single `box` with a
+native grounding checkpoint.
 
 For routing and typed-question examples, see the [Route Mode quickstart](laya-guide.md#quickstart-route-mode-recommended).
 For confidence and built-in workflows, see the README's [confidence gating](https://github.com/NandhaKishorM/laya#automated-confidence-gating) and [workflow presets](https://github.com/NandhaKishorM/laya#built-in-workflow-presets).
@@ -96,6 +96,28 @@ The main controls are:
 laya --image invoice.png --preset triage
 laya --audio call.wav --questions questions.json --json
 ```
+
+### Native multimodal checkpoint
+
+Install the source checkout with `python -m pip install -e '.[multimodal]'` and select a trained
+local checkpoint directory containing `multimodal_config.json`. `--multimodal` runs prediction
+using this checkpoint for text and any supported media. [Download and deployment](multimodal-release.md)
+
+```bash
+cat > locate.json <<'JSON'
+{"target":{"type":"box","instructions":"the red cup"}}
+JSON
+laya --multimodal models/jev-multimodal-qwen3.5-4b --device cpu \
+  --image scene.jpg --questions locate.json "Inspect the tabletop" --json
+```
+
+Pass one media file with optional text context. Use `--video` for a visual clip with Qwen3.5
+or `--audio` with a trained audio-capable Gemma 4 checkpoint. The same selector works with
+text-only inputs and `--batch FILE` for text lines. Native checkpoints score each line
+separately. Use `--max-len` for the native token budget.
+
+For supervised training, use `laya-mm-train` for typed decisions or the repository's joint
+decision and grounding trainer. [Native training guide](multimodal.md#head-warmup-and-lora-training)
 
 ### Use a built-in preset
 

@@ -4,6 +4,7 @@ For text, image, video and audio with a native decision checkpoint, start with t
 [multimodal Notebook](../notebooks/laya_native_multimodal.ipynb). For media requests to a separate
 local process, see [Python and TypeScript SDK examples](../docs/multimodal-clients.md). The
 learning path below uses the classic checkpoints and Vega.
+[Native command-line examples](../docs/cli-mcp.md#native-multimodal-checkpoint)
 
 41 runnable scripts arranged as eight stages. Each stage assumes the one before it and adds one
 idea, so you can stop wherever you already have what you need. Every script runs against the real

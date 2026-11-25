@@ -96,6 +96,8 @@ check_param("Router.__init__", Router.__init__, "default", "multilingual")
 check_param("Router.__init__", Router.__init__, "multimodal", None)
 check_param("load", load, "multimodal", None)
 check_param("load", load, "model_id_or_path", None)
+from laya.cli import build_parser  # noqa: E402
+check("CLI native checkpoint selector", build_parser().parse_args(["--multimodal", "native"]).multimodal, "native")
 check_true("MultimodalAgent is a public lazy export", "MultimodalAgent" in laya.__all__)
 from laya.multimodal import MultimodalAgent  # noqa: E402
 from laya.multimodal import DEFAULT_MULTIMODAL_MODEL, MULTIMODAL_MODELS  # noqa: E402

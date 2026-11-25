@@ -2,9 +2,12 @@
 
 For the native decision model, run the [multimodal Notebook](../notebooks/laya_native_multimodal.ipynb)
 with a trained local checkpoint. It exercises text, image localization, visual video and, for
-Gemma 4, waveform input. The [native CLI and evaluation guide](../docs/multimodal.md#calibration-and-evaluation)
+Gemma 4, waveform input. The [native evaluation guide](../docs/multimodal.md#calibration-and-evaluation)
 covers labelled decision and grounding metrics. For the HTTP path, use the
 [SDK examples](../docs/multimodal-clients.md).
+
+For a terminal smoke test of an installed checkpoint, use
+`laya --multimodal CHECKPOINT --device cpu --preset triage "Please refund the duplicate charge."`.
 
 The Python scripts in this directory test the classic text checkpoints. With the three
 checkpoint directories under `models/`, run from the repository root:

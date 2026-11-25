@@ -36,6 +36,48 @@ def test_cli_help_needs_no_local_datasets_or_weights(script):
     assert '--model' in result.stdout and '--out' in result.stdout
 
 
+def test_prediction_cli_loads_the_native_lane_for_text_and_media(tmp_path, monkeypatch, capsys):
+    from PIL import Image
+    from laya import cli, multimodal
+    from test_multimodal import Q, tiny_agent
+
+    checkpoint = tmp_path / "checkpoint"
+    checkpoint.mkdir()
+    (checkpoint / "multimodal_config.json").write_text("{}", encoding="utf-8")
+    image = tmp_path / "scene.png"
+    Image.new("RGB", (12, 12), "red").save(image)
+    questions = tmp_path / "questions.json"
+    questions.write_text(json.dumps(Q), encoding="utf-8")
+    sources = []
+    agent = tiny_agent()
+
+    def native(source, **kwargs):
+        sources.append(source)
+        return agent
+
+    monkeypatch.setattr(multimodal, "MultimodalAgent", native)
+    args = ["--multimodal", str(checkpoint), "--questions", str(questions), "--json"]
+    for inputs in (["Current scene"], ["--image", str(image), "Current scene"]):
+        assert cli.main([*args, *inputs]) == 0
+        result = json.loads(capsys.readouterr().out)
+        assert result["routing"]["model"] == "multimodal"
+        assert result["usage"]["forward_passes"] == len(Q)
+    batch = tmp_path / "requests.txt"
+    batch.write_text("First scene\nSecond scene\n", encoding="utf-8")
+    assert cli.main([*args, "--batch", str(batch)]) == 0
+    results = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert len(results) == 2 and all(result["routing"]["model"] == "multimodal" for result in results)
+    assert sources == [str(checkpoint)] * 3
+    assert any(call.get("images") for call in agent.processor.calls)
+
+
+def test_prediction_cli_reports_an_unavailable_native_checkpoint(tmp_path, capsys):
+    from laya import cli
+
+    assert cli.main(["--multimodal", str(tmp_path / "missing"), "Text"]) == 2
+    assert "multimodal_config.json" in capsys.readouterr().err
+
+
 def test_portable_recipes_preserve_the_measured_optimizer_settings():
     head = json.loads((ROOT / 'configs/multimodal/head.json').read_text(encoding='utf-8'))
     fit = json.loads((ROOT / 'configs/multimodal/sft.json').read_text(encoding='utf-8'))

@@ -12,10 +12,11 @@
     laya "Where is my card" --questions intents.json    # your own questions, from a JSON file
     laya "Where is my card" --questions intents.json --head-max-len 384
     laya "Where is my card" --questions intents.json --min-confidence 0.7
+    laya --multimodal models/jev-multimodal-qwen3.5-4b --image scene.jpg --questions locate.json
 
 Routing (the default) never downloads a checkpoint, so it works offline and
-returns in milliseconds. --predict loads the routed checkpoint on first use,
-which needs network access to the Hugging Face hub. --preset answers one of the
+returns in milliseconds. --predict loads the routed checkpoint on first use.
+Use --multimodal with a trained local checkpoint. --preset answers one of the
 ready-made question presets from laya.presets and implies --predict.
 --batch scores a whole file (or stdin, with `-`) through Router.predict_batch in one
 process, so the states share checkpoint loads and forward passes; --json prints JSONL.
@@ -29,6 +30,7 @@ import argparse
 import inspect
 import json
 import sys
+from pathlib import Path
 
 import laya
 
@@ -105,6 +107,8 @@ def build_parser():
     parser.add_argument("--model", type=model_name, metavar="NAME",
                         help="force a checkpoint instead of auto-routing: a checkpoint name or any of "
                              "core's aliases, in any casing, or 'auto' to route it (the default)")
+    parser.add_argument("--multimodal", metavar="CHECKPOINT",
+                        help="use a trained local native multimodal checkpoint; implies prediction")
     parser.add_argument("--lang", help="force a language, e.g. en or de, instead of detecting it")
     parser.add_argument("--lang-guess", dest="lang_guess", metavar="CODE",
                         help="a soft language hint that participates in routing instead of skipping "
@@ -127,16 +131,16 @@ def build_parser():
                         metavar="P",
                         help="flag an answer whose calibrated confidence falls below P (0.0-1.0) as"
                              " low-confidence; the answer itself is kept, so this asks for a warning"
-                             " rather than a refusal. Needs --predict, --preset or --questions.")
+                             " rather than a refusal. Requires prediction mode.")
     parser.add_argument("--image", metavar="FILE",
                         help="answer the questions about a picture instead of a text: routes to the vega lane "
-                             "(needs vegaml, which ships with laya); implies --predict")
+                             "by default or to the checkpoint set by --multimodal; implies --predict")
     parser.add_argument("--audio", metavar="FILE",
-                        help="answer the questions about a recording (wav, flac, ogg, mp3): transcribed locally, "
-                             "then decided on the vega lane; implies --predict")
+                        help="answer the questions about a recording (wav, flac, ogg, mp3): transcribed locally "
+                             "on the vega lane or decoded by an audio-capable native checkpoint; implies --predict")
     parser.add_argument("--video", metavar="FILE",
                         help="answer the questions about a clip: its speech if it has any, else sampled frames, "
-                             "on the vega lane; implies --predict")
+                             "on the vega lane, or native frames with --multimodal; implies --predict")
     parser.add_argument("--device", help="torch device, e.g. cpu or cuda")
     parser.add_argument("--json", action="store_true", help="print the raw result as JSON")
     parser.add_argument("--explain", action="store_true",
@@ -156,7 +160,7 @@ def build_parser():
 
 
 def make_router(args):
-    return laya.Router(device=args.device, preload=False)
+    return laya.Router(device=args.device, preload=False, multimodal=getattr(args, "multimodal", None))
 
 
 def load_questions(path):
@@ -307,17 +311,8 @@ def run(text, args, router=None):
     router = router or make_router(args)
     try:
         media = media_override(args)
-        if any(media.values()):
-            questions, _ = resolve_questions(args)
-            result = router.predict(None, questions, model=args.model, task=args.task, lang=args.lang,
-                                    lang_guess=args.lang_guess, **media,
-                                    **budget_overrides(args), **abstention_override(args))
-            if args.json:
-                print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
-            else:
-                show_answers(result)
-            return 0
-        if args.predict or args.preset or args.questions:
+        has_media = any(media.values())
+        if has_media or args.predict or args.preset or args.questions:
             questions, state_key = resolve_questions(args)
             # Each preset's instructions name the field they read -- `` `message` ``,
             # `` `body` ``, `` `prompt` ``, `` `post` ``, `` `request` `` -- and the CLI used to
@@ -327,7 +322,7 @@ def run(text, args, router=None):
             # declares. Routing is not affected either way: `route` reads the state only for
             # language detection, which is key-invariant, so the default path keeps
             # `{"text": ...}`.
-            state = {state_key: text}
+            state = None if has_media and not text else {state_key: text}
             result = router.predict(state, questions,
                                     model=args.model, task=args.task, lang=args.lang,
                                     lang_guess=args.lang_guess, **media,
@@ -350,9 +345,7 @@ def run(text, args, router=None):
         return 2
     except (ImportError, OSError, RuntimeError) as error:
         print("laya: could not run Laya (%s)." % error, file=sys.stderr)
-        print("Check that the dependencies are installed and the checkpoints can be "
-              "downloaded from the Hugging Face hub (network access is needed on first use).",
-              file=sys.stderr)
+        _print_run_hint(args)
         return 2
     return 0
 
@@ -483,11 +476,18 @@ def run_batch(lines, args, router=None):
         return 2
     except (ImportError, OSError, RuntimeError) as error:
         print("laya: could not run Laya (%s)." % error, file=sys.stderr)
+        _print_run_hint(args)
+        return 2
+    return 0
+
+
+def _print_run_hint(args):
+    if getattr(args, "multimodal", None):
+        print("Check the local checkpoint, input files and multimodal dependencies.", file=sys.stderr)
+    else:
         print("Check that the dependencies are installed and the checkpoints can be "
               "downloaded from the Hugging Face hub (network access is needed on first use).",
               file=sys.stderr)
-        return 2
-    return 0
 
 
 def interactive(args):
@@ -524,9 +524,26 @@ def main(argv=None):
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     text = " ".join(args.text).strip()
+    has_media = any(getattr(args, key) for key in ("image", "audio", "video"))
+    if args.multimodal is not None:
+        if any(value is not None for value in (args.model, args.task, args.lang, args.lang_guess, args.head_max_len)):
+            print("laya: --multimodal cannot be combined with --model, --task, --lang, --lang-guess "
+                  "or --head-max-len.", file=sys.stderr)
+            return 2
+        if args.batch_size is not None or args.sort_by_length:
+            print("laya: native checkpoints score each text line separately. Omit --batch-size "
+                  "and --sort-by-length.", file=sys.stderr)
+            return 2
+        checkpoint = Path(args.multimodal).expanduser()
+        if not args.multimodal.strip() or not (checkpoint / "multimodal_config.json").is_file():
+            print("laya: --multimodal needs a trained checkpoint directory containing multimodal_config.json.",
+                  file=sys.stderr)
+            return 2
+        args.multimodal = str(checkpoint)
+        args.model = "multimodal"
+    args.predict = args.predict or has_media or args.multimodal is not None
     if args.explain and (args.predict or args.preset or args.questions):
-        print("laya: --explain is for routing only; omit --predict, --preset and --questions.",
-              file=sys.stderr)
+        print("laya: --explain is for routing only.", file=sys.stderr)
         return 2
     # Routing answers nothing, so there is no confidence to gate: `route` does not take the
     # threshold at all. Accepting the flag there would let `laya --min-confidence 0.9 "..."` exit 0
@@ -539,6 +556,9 @@ def main(argv=None):
         if text:
             print("laya: pass either a text or --batch FILE, not both.", file=sys.stderr)
             return 2
+        if has_media:
+            print("laya: --batch FILE reads text lines and cannot be combined with media flags.", file=sys.stderr)
+            return 2
         try:
             lines = read_batch_lines(args.batch)
         except (OSError, UnicodeDecodeError) as error:
@@ -548,11 +568,11 @@ def main(argv=None):
             print("laya: no requests found in %s." % args.batch, file=sys.stderr)
             return 2
         return run_batch(lines, args)
-    if any(getattr(args, key, None) for key in ("image", "audio", "video")):
-        if text:
+    if has_media:
+        if text and args.multimodal is None:
             print("laya: pass either a text or one of --image, --audio, --video, not both.", file=sys.stderr)
             return 2
-        return run("", args)
+        return run(text, args)
     if not text:
         return interactive(args)
     return run(text, args)

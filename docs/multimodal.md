@@ -31,6 +31,9 @@ checkpoint. Training data, model weights and local run outputs are not shipped i
 
 ## Local prediction
 
+Use the Python runtime below or run the same checkpoint from a terminal.
+[Native CLI](cli-mcp.md#native-multimodal-checkpoint)
+
 ```python
 import laya
 
