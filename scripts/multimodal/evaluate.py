@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from laya.evals import file_fingerprint
 from laya.grounding_train import grounding_metrics, load_grounding_rows
 from laya.multimodal import MultimodalAgent
+from laya.multimodal_data import read_records
 from laya.multimodal_train import collect_records, load_rows, metrics
 
 
@@ -24,18 +25,34 @@ def main(argv=None):
     parser.add_argument('--model', required=True)
     parser.add_argument('--decisions', type=Path)
     parser.add_argument('--grounding', type=Path)
+    parser.add_argument('--suite-manifest', type=Path, help='manifest from prepare_dataset.py')
+    parser.add_argument('--suite', help='named split in --suite-manifest')
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--device')
     parser.add_argument('--max-len', type=int)
     parser.add_argument('--micro-batch', type=int, default=1)
+    parser.add_argument('--grounding-micro-batch', type=int, default=1)
+    parser.add_argument('--max-micro-tokens', type=int, default=4096)
     parser.add_argument('--video-cache')
     args = parser.parse_args(argv)
-    if not args.decisions and not args.grounding:
-        parser.error('Provide --decisions, --grounding, or both')
-    if args.micro_batch < 1 or (args.max_len is not None and args.max_len < 1):
-        parser.error('Batch size and context length must be positive')
+    suite_path = None
+    if args.suite_manifest or args.suite:
+        if not args.suite_manifest or not args.suite or args.decisions or args.grounding:
+            parser.error('Use --suite and --suite-manifest together, or pass individual files')
+        manifest = json.loads(args.suite_manifest.read_text(encoding='utf-8'))
+        entry = manifest.get('splits', {}).get(args.suite)
+        if manifest.get('status') != 'complete' or not entry:
+            parser.error('Suite is missing from the completed manifest')
+        suite_path = args.suite_manifest.parent / entry['file']
+        if file_fingerprint(suite_path) != entry['sha256']:
+            parser.error('Suite contents differ from the manifest')
+    elif not args.decisions and not args.grounding:
+        parser.error('Provide --decisions, --grounding, or a named suite')
+    if min(args.micro_batch, args.grounding_micro_batch, args.max_micro_tokens) < 1 or (
+            args.max_len is not None and args.max_len < 1):
+        parser.error('Batch size, token budget and context length must be positive')
     output = args.out.resolve()
-    for source in (args.decisions, args.grounding):
+    for source in (args.decisions, args.grounding, suite_path, args.suite_manifest):
         if source and (output == source.resolve() or
                        (output.is_file() and source.is_file() and output.samefile(source))):
             parser.error('--out must refer to a separate file from the input datasets')
@@ -46,15 +63,27 @@ def main(argv=None):
         agent._video_cache_dir = args.video_cache
     result = dict(model=args.model, backbone=agent.model_type, revision=agent.revision,
         device=str(agent.device), max_len=agent.max_len, default_video_frames=agent.frames,
-        video_audio=agent.use_audio_in_video, micro_batch=args.micro_batch, output_tokens=0, datasets={})
-    if args.decisions:
-        records = collect_records(agent, load_rows(args.decisions), args.micro_batch)
+        video_audio=agent.use_audio_in_video, micro_batch=args.micro_batch,
+        grounding_micro_batch=args.grounding_micro_batch, max_micro_tokens=args.max_micro_tokens,
+        output_tokens=0, datasets={})
+    decision_rows = load_rows(args.decisions) if args.decisions else []
+    box_rows = load_grounding_rows(args.grounding) if args.grounding else []
+    if suite_path:
+        for row in read_records(suite_path):
+            (box_rows if 'grounding' in row else decision_rows).append(row)
+        result['datasets']['suite'] = dict(name=args.suite, path=str(suite_path.resolve()), sha256=entry['sha256'])
+    if decision_rows:
+        records = collect_records(agent, decision_rows, args.micro_batch,
+                                  max_micro_tokens=args.max_micro_tokens)
         result['decisions'] = metrics(records, agent.temperature, agent.temperature_by_options,
-            agent.modality_calibration, agent.ordinal_calibration)
-        result['datasets']['decisions'] = dict(path=str(args.decisions.resolve()), sha256=file_fingerprint(args.decisions))
-    if args.grounding:
-        result['grounding'] = grounding_metrics(agent, load_grounding_rows(args.grounding), limit=0)
-        result['datasets']['grounding'] = dict(path=str(args.grounding.resolve()), sha256=file_fingerprint(args.grounding))
+                                      agent.modality_calibration, agent.ordinal_calibration, slices=True)
+        if args.decisions:
+            result['datasets']['decisions'] = dict(path=str(args.decisions.resolve()), sha256=file_fingerprint(args.decisions))
+    if box_rows:
+        result['grounding'] = grounding_metrics(agent, box_rows, limit=0,
+                                                micro_batch=args.grounding_micro_batch, max_micro_tokens=args.max_micro_tokens)
+        if args.grounding:
+            result['datasets']['grounding'] = dict(path=str(args.grounding.resolve()), sha256=file_fingerprint(args.grounding))
     combined = harmonic_accuracy(result.get('decisions'), result.get('grounding'))
     if combined is not None:
         result['harmonic_accuracy'] = combined

@@ -153,6 +153,8 @@ check_param("GroundingTrainConfig", GroundingTrainConfig, "max_micro_tokens", 40
 check_param("GroundingTrainConfig", GroundingTrainConfig, "decision_ordinal_weight", 0.0)
 check_param("GroundingTrainConfig", GroundingTrainConfig, "decision_brier_weight", 0.0)
 check_param("GroundingTrainConfig", GroundingTrainConfig, "video_cache_dir", None)
+check_param("GroundingTrainConfig", GroundingTrainConfig, "video_cache_size", 0)
+check_param("GroundingTrainConfig", GroundingTrainConfig, "shuffle_options", False)
 check_param("GroundingTrainConfig", GroundingTrainConfig, "selection_metric", "joint")
 check_param("GroundingTrainConfig", GroundingTrainConfig, "include_initial_selection", False)
 check_param("GroundingTrainConfig", GroundingTrainConfig, "quality_matched_only", False)

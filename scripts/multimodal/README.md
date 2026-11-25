@@ -7,7 +7,9 @@ experiments belong in the ignored `_local/` workbench.
 | --- | --- |
 | `train.py` | Fresh head warmup and joint supervised LoRA/full adaptation |
 | `calibrate.py` | Fit held-out calibration and check it on independent development records |
+| `prepare_dataset.py` | Convert native JSONL and Kev records to a shared request and supervision layout |
 | `evaluate.py` | Evaluate native decisions and single-box geometry |
+| `prepare_systemone.py` | Export frozen text and image benchmarks for System One and Kev |
 | `export.py` | Safely merge native LoRA, save all heads/projectors, and reload-check synthetic fixtures |
 | `export_gguf.py` | Use a compatible local llama.cpp-jev converter and preserve decision tensors in FP32 |
 | `quantize_gguf.py` | Create smaller language GGUFs and a Q8 visual projector; optionally test Q8 head matrices |
@@ -16,6 +18,41 @@ Install the native dependencies with `python -m pip install -e '.[multimodal]'`.
 and training implementation live in `laya/`. Store local checkpoints in `models/` or
 `multimodal-runs/`. Use a compatible `llama.cpp-jev` checkout built in `build-laya/` for GGUF
 conversion and quantization. [Runtime setup](../../docs/multimodal-release.md#run-the-decision-server)
+
+Export a frozen benchmark directory containing `manifest.json` and its verified JSONL files.
+
+~~~bash
+python scripts/multimodal/prepare_systemone.py \
+  --source /path/to/frozen-benchmark --out /path/to/new/systemone
+~~~
+
+`systemone/` contains labelled request envelopes. Send the contained `request` as the JSON
+body for text or the first multipart part for images. `media_files` supplies the image
+parts from local storage. Labels and provenance stay in the envelope. Box targets are
+remapped for images that need padding. Audio and video cases remain available in the
+source benchmark directory.
+
+The `kev/` JSONL files use Kev's `--data` format. For native Qwen text decisions, set
+`LAYA_MULTIMODAL_MODEL` when serving and pass `--remote-model multimodal` to the local Kev
+evaluator. [Image request contract](../../docs/http-api.md#image-assets-and-single-box-questions)
+
+## Prepare and evaluate local splits
+
+```sh
+python scripts/multimodal/prepare_dataset.py --training \
+  --split train=path/to/train.jsonl --split warmup=path/to/warmup.jsonl \
+  --split dev=path/to/grounding-dev.jsonl --split decision_dev=path/to/decision-dev.jsonl \
+  --out multimodal-data/example/native
+python scripts/multimodal/evaluate.py --model path/to/checkpoint --device cuda:0 \
+  --suite-manifest multimodal-data/example/native/manifest.json --suite decision_dev \
+  --out multimodal-runs/example/decision-dev.json
+```
+
+The output manifest records hashes, counts, modalities, supervision types, and content usable
+under the System One wire schema. Media paths are relative to the generated JSONL. The HTTP
+benchmark exporter prepares capped PNG/JPEG assets where required.
+
+## Export checkpoints
 
 Example merged export:
 

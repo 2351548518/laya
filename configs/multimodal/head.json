@@ -21,6 +21,7 @@
   "batch_decisions": true,
   "eval_every": 250,
   "eval_limit": 512,
+  "grounding_eval_micro_batch": 4,
   "video_cache_dir": ".cache/multimodal-video",
   "seed": 105,
   "projector_learning_rate": 2e-05,

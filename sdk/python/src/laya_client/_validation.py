@@ -89,7 +89,7 @@ def batch_prediction(value: Any, questions: dict, count: int) -> None:
             raise LayaResponseError("Invalid Laya response: results[%d]: %s" % (i, exc)) from exc
 
 
-def prediction(value: Any, questions: dict, *, multimodal=False) -> None:
+def prediction(value: Any, questions: dict, *, multimodal=False, image_assets=False) -> None:
     expect(isinstance(value, dict), "prediction object")
     expect(isinstance(value.get("model"), str), "model")
     answers, usage = value.get("answers"), value.get("usage")
@@ -109,7 +109,9 @@ def prediction(value: Any, questions: dict, *, multimodal=False) -> None:
         kind = answer["type"]
         for key in ("confidence", "answer_confidence", "x_jev_confidence", "abstention_threshold"):
             if key in answer or (key == "confidence" and kind != "noul"):
-                expect(probability(answer.get(key)), field + "." + key)
+                nullable = image_assets and kind == "box" and key == "confidence"
+                expect(probability(answer.get(key)) or nullable and key in answer and answer[key] is None,
+                       field + "." + key)
         if "low_confidence" in answer:
             expect(type(answer["low_confidence"]) is bool, field + ".low_confidence")
         if "abstention" in answer or "abstention_threshold" in answer:
@@ -122,7 +124,7 @@ def prediction(value: Any, questions: dict, *, multimodal=False) -> None:
         if kind == "noul":
             expect(probability(answer.get("noul")), field + ".noul")
             continue
-        if multimodal and kind == "box":
+        if (multimodal or image_assets) and kind == "box":
             box = answer.get("box")
             corners = ("left", "top", "right", "bottom")
             expect(isinstance(box, dict) and all(probability(box.get(key)) for key in corners), field + ".box")

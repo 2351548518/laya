@@ -9,7 +9,10 @@ from typing import Any, Optional, cast
 
 from ._validation import batch_prediction, expect, json_value, prediction, probability, questions_value, timeout_value
 from .errors import LayaAPIError, LayaConnectionError, LayaResponseError, LayaTimeoutError, LayaValidationError
-from .types import BatchPrediction, Health, MinConfidence, MultimodalPrediction, Prediction, Questions, State
+from .types import (
+    BatchPrediction, Health, ImageAsset, MinConfidence, MultimodalPrediction, Prediction, Questions,
+    State, SystemOneImagePrediction,
+)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -117,6 +120,24 @@ class LayaClient:
         prediction(result, questions, multimodal=True)
         return cast(MultimodalPrediction, result)
 
+    def predict_image_assets(self, state: State, questions: Questions, assets: dict[str, ImageAsset], *,
+                             model: str = "multimodal", timeout: Optional[float] = None) -> SystemOneImagePrediction:
+        """Evaluate named PNG/JPEG references through the System One JSON endpoint."""
+        if not isinstance(state, (str, dict, list)):
+            raise LayaValidationError("state must be text, a JSON object or an array")
+        if not isinstance(assets, dict) or not assets or any(
+                not isinstance(name, str) or not name.strip() or not isinstance(asset, dict)
+                or set(asset) != {"type", "format", "data_base64"} or asset["type"] != "image"
+                or asset["format"] not in ("png", "jpg", "jpeg")
+                or not isinstance(asset["data_base64"], str) or not asset["data_base64"]
+                for name, asset in assets.items()):
+            raise LayaValidationError("assets must be named PNG/JPEG images with data_base64")
+        body = self._prediction_body(questions, model, None, None, None, None, None, None, multimodal=True)
+        body.update(state=state, assets=assets)
+        result = self._request("/v1/systemone", body, timeout, images_enabled=True)
+        prediction(result, questions, image_assets=True)
+        return cast(SystemOneImagePrediction, result)
+
     @staticmethod
     def _prediction_body(questions, model, task, lang, lang_guess, max_len, head_max_len, min_confidence,
                          *, multimodal=False):
@@ -147,7 +168,7 @@ class LayaClient:
         expect(isinstance(result, dict) and result.get("status") == "ok", "health")
         return cast(Health, result)
 
-    def _request(self, path: str, body: Optional[dict], timeout: Optional[float]) -> Any:
+    def _request(self, path: str, body: Optional[dict], timeout: Optional[float], *, images_enabled=False) -> Any:
         seconds = self._timeout if timeout is None else timeout_value(timeout)
         headers = {"Accept": "application/json"}
         data = None
@@ -160,6 +181,8 @@ class LayaClient:
             headers["Content-Type"] = "application/json"
         if self._api_key is not None:
             headers["Authorization"] = "Bearer " + self._api_key
+        if images_enabled:
+            headers["TypeSafe-Danger-Zone-Images"] = "true"
         req = urllib.request.Request(self._base_url + path, data=data, headers=headers,
                                      method="GET" if body is None else "POST")
         try:

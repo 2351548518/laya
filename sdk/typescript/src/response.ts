@@ -111,7 +111,8 @@ export function validateBatchPrediction(value: unknown, questions: Questions, co
   }
 }
 
-export function validatePrediction(value: unknown, questions: MultimodalQuestions, multimodal = false): void {
+export function validatePrediction(value: unknown, questions: MultimodalQuestions,
+    multimodal = false, imageAssets = false): void {
   expect(isRecord(value) && typeof value.model === 'string' && isRecord(value.answers), 'prediction');
   validateUsage(value.usage);
   if (multimodal) {
@@ -130,7 +131,8 @@ export function validatePrediction(value: unknown, questions: MultimodalQuestion
     const answer = value.answers[id];
     expect(isRecord(answer) && answer.type === question.type, `answers.${id}.type`);
     if (question.type !== 'noul' || answer.confidence !== undefined) {
-      expect(probability(answer.confidence), `answers.${id}.confidence`);
+      expect(probability(answer.confidence) || imageAssets && question.type === 'box' && answer.confidence === null,
+        `answers.${id}.confidence`);
     }
     if (answer.action !== undefined) {
       expect(isRecord(answer.action) && probability(answer.action.act_probability), `answers.${id}.action`);
@@ -160,7 +162,7 @@ export function validatePrediction(value: unknown, questions: MultimodalQuestion
       expect(probability(answer.abstention_threshold), `answers.${id}.abstention_threshold`);
     }
     if (question.type === 'box') {
-      expect(multimodal && isRecord(answer.box), `answers.${id}.box`);
+      expect((multimodal || imageAssets) && isRecord(answer.box), `answers.${id}.box`);
       const { left, top, right, bottom } = answer.box;
       expect(number(left) && number(right) && number(top) && number(bottom) &&
         0 <= left && left < right && right <= 1 && 0 <= top && top < bottom && bottom <= 1,

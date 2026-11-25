@@ -21,6 +21,7 @@ from .common import QTYPES, ece_score, temp_bucket, unpermute_probs
 from .evals import file_fingerprint
 from .multimodal import DEFAULT_MULTIMODAL_MODEL, MultimodalAgent, _active_head, _is_adapter_model
 from .multimodal_calibration import ordinal_probabilities
+from .multimodal_data import can_shuffle_choice, read_records, record_input, record_media, record_modality
 from .multimodal_objectives import decision_loss, expand_lora, grow_lora, learning_rate_factor, lora_target_pattern, optimizer_groups
 from .multimodal_distributed import distributed_context
 from .train import target_from_expected, target_from_gold
@@ -132,35 +133,12 @@ class MultimodalTrainConfig:
 
 
 def load_rows(path):
-    """Read local media JSONL and resolve media paths relative to its location."""
-    path = Path(path).resolve()
-    rows = []
-    # Iterate physical lines so Unicode line separators in JSON strings stay intact.
-    with path.open(encoding="utf-8") as stream:
-        for line_number, line in enumerate(stream, 1):
-            if not line.strip() or line.lstrip().startswith("#"):
-                continue
-            row = json.loads(line)
-            if not isinstance(row, dict) or not isinstance(row.get("questions"), dict):
-                raise ValueError("%s:%d needs a questions object" % (path, line_number))
-            if "state" not in row or not isinstance(row.get("expected", row.get("gold")), dict):
-                raise ValueError("%s:%d needs state and expected (or gold)" % (path, line_number))
-            state = row["state"]
-            if isinstance(state, dict):
-                for key in ("image", "audio", "video"):
-                    if state.get(key) is not None:
-                        values = state[key] if isinstance(state[key], list) else [state[key]]
-                        paths = []
-                        for value in values:
-                            media = Path(value)
-                            media = media if media.is_absolute() else path.parent / media
-                            if not media.is_file():
-                                raise FileNotFoundError("%s:%d missing %s" % (path, line_number, media))
-                            paths.append(str(media.resolve()))
-                        state[key] = paths if isinstance(state[key], list) else paths[0]
-            rows.append(row)
+    """Read native decision JSONL or labelled System One and Kev records."""
+    rows = list(read_records(path))
     if not rows:
         raise ValueError("empty multimodal dataset: %s" % path)
+    if any(not ("expected" in row or "gold" in row) for row in rows):
+        raise ValueError("%s needs expected (or gold) labels" % path)
     return rows
 
 
@@ -178,16 +156,11 @@ def _fingerprints(row):
     keys = set()
     if row.get("group") is not None:
         keys.add(("group", row.get("dataset", ""), str(row["group"])))
-    has_media = False
-    if isinstance(state, dict):
-        for kind in ("image", "audio", "video"):
-            value = state.get(kind)
-            if value is not None:
-                has_media = True
-                for path in value if isinstance(value, list) else [value]:
-                    stat = Path(path).stat()
-                    keys.add(("media", _media_hash(str(path), stat.st_mtime_ns, stat.st_size)))
-    if not has_media:
+    paths = tuple(record_media(row))
+    for path in paths:
+        stat = Path(path).stat()
+        keys.add(("media", _media_hash(str(path), stat.st_mtime_ns, stat.st_size)))
+    if not paths:
         text = json.dumps(state, ensure_ascii=False, sort_keys=True)
         if state in ("", "{}", "[]", "null", None) or state == {} or state == []:
             # An empty shared context is not the problem text: the question carries it.
@@ -226,7 +199,7 @@ def filter_split_overlaps(splits):
 
 def _decision_target(row, qid, question):
     """Read the target in canonical option order, preferring soft labels when supplied."""
-    if "gold" in row:
+    if qid in row.get("gold", {}):
         return target_from_gold(question, row["gold"][qid])
     return target_from_expected(question, row["expected"][qid])
 
@@ -242,7 +215,10 @@ def _items(agent, rows):
 
 
 def example_hash(row, qid, qdef):
-    return hashlib.sha256(json.dumps([row["state"], qid, qdef], ensure_ascii=False).encode()).hexdigest()
+    content = [row["state"], qid, qdef]
+    if row.get("_image_assets"):
+        content.append(row["_image_assets"])
+    return hashlib.sha256(json.dumps(content, ensure_ascii=False).encode()).hexdigest()
 
 
 def _calibration_group(row):
@@ -253,30 +229,52 @@ def _calibration_group(row):
 
 
 @torch.no_grad()
-def collect_records(agent, rows, micro_batch=4):
+def collect_records(agent, rows, micro_batch=4, *, max_micro_tokens=None):
     """Collect unrounded option logits for calibration and held-out evaluation."""
-    records = []
+    if micro_batch < 1 or (max_micro_tokens is not None and max_micro_tokens < 1):
+        raise ValueError("evaluation batch size and token budget must be positive")
     agent.model.eval()
     items = _items(agent, rows)
-    for start in range(0, len(items), micro_batch):
-        prepared, metadata = [], []
-        for row, qid, qdef, target in items[start:start + micro_batch]:
-            request = agent._input(row["state"])
-            inputs, q, _media = agent._prepare(request, qdef)
-            prepared.append(inputs)
-            modality = next((k for k in ("video", "audio", "image") if request.get(k) is not None), "text")
-            metadata.append((row, qid, q, target, modality))
+    records = [None] * len(items)
+    prepared, metadata = [], []
+    finished = 0
+
+    def collect_batch():
+        nonlocal finished
         inputs = collate_multimodal_inputs(prepared, getattr(agent.tok, "pad_token_id", 0) or 0)
-        logits = agent._logits(inputs, max(len(entry[3]) for entry in metadata)).detach().cpu().numpy()
-        for values, (row, qid, q, target, modality) in zip(logits, metadata):
+        logits = agent._logits(inputs, max(len(entry[4]) for entry in metadata)).detach().cpu().numpy()
+        for values, (index, row, qid, q, target, modality) in zip(logits, metadata):
             values = unpermute_probs(values[:len(target)], q.get("option_order"))
-            records.append({"qtype": QTYPES[q["t"]], "logits": values, "target": np.asarray(target),
+            records[index] = {"qtype": QTYPES[q["t"]], "logits": values, "target": np.asarray(target),
                             "k": len(target), "modality": modality, "id": row.get("id"), "qid": qid,
                             "example_hash": example_hash(row, qid, row["questions"][qid]), "group": row.get("group"),
                             "calibration_group": _calibration_group(row),
-                            "source": row.get("source", row.get("dataset", "custom"))})
-        if len(records) % 200 < micro_batch:
-            print("evaluation decisions=%d/%d" % (len(records), len(items)), flush=True)
+                            "source": row.get("source", row.get("dataset", "custom")),
+                            "task": (row.get("quality") or {}).get("decision_task") or row.get("benchmark_task")}
+        old = finished
+        finished += len(metadata)
+        if old // 200 < finished // 200:
+            print("evaluation decisions=%d/%d" % (finished, len(items)), flush=True)
+
+    longest = 0
+    ordered = sorted(enumerate(items), key=lambda item: record_modality(item[1][0])) if micro_batch > 1 else enumerate(items)
+    for index, (row, qid, qdef, target) in ordered:
+        request, question = record_input(agent, row, qid, qdef)
+        inputs, q, _media = agent._prepare(request, question)
+        length = inputs["input_ids"].shape[-1]
+        padded = max(length, longest) * (len(prepared) + 1)
+        if prepared and (len(prepared) >= micro_batch or inputs.keys() != prepared[0].keys()
+                         or (max_micro_tokens and padded > max_micro_tokens)):
+            collect_batch()
+            prepared.clear()
+            metadata.clear()
+            longest = 0
+        prepared.append(inputs)
+        longest = max(longest, length)
+        modality = record_modality(row)
+        metadata.append((index, row, qid, q, target, modality))
+    if prepared:
+        collect_batch()
     return records
 
 
@@ -286,7 +284,8 @@ def _save_records(path, records):
     Path(path).write_text(json.dumps(serializable) + "\n")
 
 
-def metrics(records, temperature=None, temperature_by_options=None, modality_calibration=None, ordinal_calibration=None):
+def metrics(records, temperature=None, temperature_by_options=None, modality_calibration=None,
+            ordinal_calibration=None, *, slices=False):
     """Compute exact-level accuracy, NLL, Brier and ECE with modality slices."""
     temperature = temperature or [1.0] * 3
     temperature_by_options = temperature_by_options or {}
@@ -305,26 +304,42 @@ def metrics(records, temperature=None, temperature_by_options=None, modality_cal
             p = np.exp(z - z.max())
             p /= p.sum()
         target = rec["target"]
-        scores.append({"correct": int(target[p.argmax()] == target.max()), "confidence": float(p.max()),
+        correct = int(target[p.argmax()] == target.max())
+        confidence = float(p.max())
+        ordinal = np.arange(k) @ (p - target) if qt == QTYPES["score"] else None
+        scores.append({"correct": correct, "confidence": confidence,
                        "nll": float(-(target * np.log(np.maximum(p, 1e-12))).sum()),
                        "brier": float(((p - target) ** 2).sum()), "modality": rec["modality"],
-                       "qtype": qt, "score_mae": float(abs(np.arange(k) @ (p - target))) if qt == QTYPES["score"] else None})
+                       "qtype": qt, "source": rec.get("source"), "task": rec.get("task"),
+                       "score_mae": float(abs(ordinal)) if ordinal is not None else None,
+                       "score_normalized_mae": float(abs(ordinal) / max(1, k - 1)) if ordinal is not None else None,
+                       "score_rps": float(np.square(np.cumsum(p - target)[:-1]).sum() / max(1, k - 1))
+                       if ordinal is not None else None})
 
     def summarize(rows):
         if not rows:
             return {"n": 0}
         confidence = np.asarray([r["confidence"] for r in rows])
         correct = np.asarray([r["correct"] for r in rows])
-        ordinal = [r["score_mae"] for r in rows if r["score_mae"] is not None]
+        def mean(field):
+            values = [row[field] for row in rows if row[field] is not None]
+            return float(np.mean(values)) if values else None
         return {"n": len(rows), "accuracy": float(correct.mean()),
                 "ece": ece_score(confidence, correct), "mean_confidence": float(confidence.mean()),
-                "nll": float(np.mean([r["nll"] for r in rows])),
-                "brier": float(np.mean([r["brier"] for r in rows])),
-                "score_mae": float(np.mean(ordinal)) if ordinal else None}
-    return {"overall": summarize(scores),
-            "by_modality": {m: summarize([r for r in scores if r["modality"] == m])
-                            for m in sorted({r["modality"] for r in scores})},
-            "by_type": {name: summarize([r for r in scores if r["qtype"] == qt]) for name, qt in QTYPES.items()}}
+                "nll": mean("nll"), "brier": mean("brier"), "score_mae": mean("score_mae"),
+                "score_normalized_mae": mean("score_normalized_mae"), "score_rps": mean("score_rps")}
+    result = {"overall": summarize(scores),
+              "by_modality": {m: summarize([r for r in scores if r["modality"] == m])
+                              for m in sorted({r["modality"] for r in scores})},
+              "by_type": {name: summarize([r for r in scores if r["qtype"] == qt]) for name, qt in QTYPES.items()}}
+    if slices:
+        for key in ("source", "task"):
+            groups = {}
+            for row in scores:
+                if row[key] is not None:
+                    groups.setdefault(row[key], []).append(row)
+            result["by_" + key] = {name: summarize(group) for name, group in sorted(groups.items())}
+    return result
 
 
 def calibrate_multimodal(agent, records, *, ordinal_guard=False, ordinal_channels=False):
@@ -392,6 +407,7 @@ def configure_training(agent, config):
     agent.temperature, agent.temperature_by_options = [1.0] * 3, {}
     if config.mode == "full":
         agent._checkpoint_mode = "full"
+    candidate = getattr(agent, "readout", "letter") == "candidate"
     if _is_adapter_model(agent.model):
         if config.mode != "lora":
             raise ValueError("an adapter checkpoint must be continued in lora mode, or merged before head/full training")
@@ -401,6 +417,8 @@ def configure_training(agent, config):
             parameter.requires_grad_("lora_" in name or "modules_to_save." in name or "decision_scorer" in name)
         _configure_projectors(agent, config)
         _active_head(agent.model).float()
+        if candidate:
+            _active_head(agent.model).requires_grad_(False)
         if config.gradient_checkpointing:
             agent.model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
         return [p for p in agent.model.parameters() if p.requires_grad]
@@ -410,12 +428,13 @@ def configure_training(agent, config):
         agent.model = get_peft_model(agent.model, LoraConfig(
             r=config.lora_rank, lora_alpha=config.lora_alpha,
             target_modules=lora_target_pattern(config.lora_targets),
-            modules_to_save=["lm_head"], bias="none"))
-    else:
+            modules_to_save=None if candidate else ["lm_head"], bias="none"))
+    elif not candidate:
         agent.model.get_output_embeddings().requires_grad_(True)
     base = agent.model.get_base_model() if _is_adapter_model(agent.model) else agent.model
-    if getattr(agent, "readout", "letter") == "candidate":
+    if candidate:
         base.decision_scorer.requires_grad_(True).float()
+        _active_head(agent.model).requires_grad_(False)
     _configure_projectors(agent, config)
     _active_head(agent.model).float()
     if config.gradient_checkpointing and config.mode != "head":
@@ -452,7 +471,8 @@ def collate_multimodal_inputs(examples, pad_token_id):
         values = [example[key] for example in examples if key in example]
         if key == "_candidate_positions":
             length = max(example["input_ids"].shape[-1] for example in examples)
-            values = [example[key] + length - example["input_ids"].shape[-1] for example in examples]
+            values = [torch.where(example[key] < 0, example[key], example[key] + length - example["input_ids"].shape[-1])
+                      for example in examples]
         if not all(isinstance(value, torch.Tensor) for value in values):
             raise ValueError("cannot batch a non-tensor processor field: " + key)
         if any(value.ndim != values[0].ndim for value in values):
@@ -477,9 +497,7 @@ def _training_order(items, config, rng):
         return indices
     groups = {}
     for index, (row, _qid, qdef, _target) in enumerate(items):
-        state = row["state"]
-        kind = next((key for key in ("video", "audio", "image") if isinstance(state, dict) and state.get(key) is not None), "text")
-        groups.setdefault(kind, []).append(index)
+        groups.setdefault(record_modality(row), []).append(index)
     for indices in groups.values():
         rng.shuffle(indices)
         # Local length buckets preserve shuffle while reducing padding inside native micro-batches.
@@ -565,7 +583,8 @@ def finetune_multimodal(train_data, output_dir, *, model=DEFAULT_MULTIMODAL_MODE
     if distributed.main:
         if test_rows:
             print("Evaluating the initial model on held-out test decisions", flush=True)
-        initial_records = collect_records(agent, test_rows, config.micro_batch) if test_rows else []
+        initial_records = collect_records(agent, test_rows, config.micro_batch,
+                                          max_micro_tokens=config.max_micro_tokens) if test_rows else []
         _save_records(output / "test_before.json", initial_records)
         before = metrics(initial_records) if test_rows else None
     distributed.barrier()
@@ -669,7 +688,8 @@ def finetune_multimodal(train_data, output_dir, *, model=DEFAULT_MULTIMODAL_MODE
         nonlocal best_key, best_step
         if not selection_data:
             return
-        measured = metrics(collect_records(agent, selection_rows, config.micro_batch)) if distributed.main else None
+        measured = metrics(collect_records(agent, selection_rows, config.micro_batch,
+                                           max_micro_tokens=config.max_micro_tokens)) if distributed.main else None
         measured = distributed.broadcast(measured)
         macro = float(np.mean([values["accuracy"] for values in measured["by_modality"].values()]))
         key = macro, -measured["overall"]["nll"]
@@ -696,7 +716,8 @@ def finetune_multimodal(train_data, output_dir, *, model=DEFAULT_MULTIMODAL_MODE
                 row, qid, qdef, target = items[index]
                 question = copy.deepcopy(qdef)
                 order = list(range(len(target)))
-                if config.shuffle_options and question["type"] in ("choice", "noul"):
+                if config.shuffle_options and (can_shuffle_choice(question)
+                        or question["type"] == "noul" and question.get("option_order") is None):
                     rng.shuffle(order)
                     question["option_order"] = order
                 else:
@@ -713,7 +734,8 @@ def finetune_multimodal(train_data, output_dir, *, model=DEFAULT_MULTIMODAL_MODE
             for start in range(0, len(plans), config.micro_batch):
                 examples = []
                 for row, qid, qdef, target, question, order in plans[start:start + config.micro_batch]:
-                    inputs, q, _metadata = agent._prepare(agent._input(row["state"]), question)
+                    request, definition = record_input(agent, row, qid, question)
+                    inputs, q, _metadata = agent._prepare(request, definition)
                     teacher = row.get("teacher_targets", {}).get(qid)
                     teacher = target_from_gold(agent._to_internal(qdef), teacher) if teacher else None
                     accepted = teacher is not None and target[int(np.argmax(teacher))] == max(target)
@@ -814,14 +836,16 @@ def finetune_multimodal(train_data, output_dir, *, model=DEFAULT_MULTIMODAL_MODE
     calibration = None
     if distributed.main and val_rows:
         print("Fitting temperatures on validation decisions", flush=True)
-        validation_records = collect_records(agent, val_rows, config.micro_batch)
+        validation_records = collect_records(agent, val_rows, config.micro_batch,
+                                             max_micro_tokens=config.max_micro_tokens)
         _save_records(output / "validation.json", validation_records)
         calibration = calibrate_multimodal(agent, validation_records, ordinal_guard=config.ordinal_calibration_guard)
     after_uncalibrated, after = None, None
     if distributed.main:
         if test_rows:
             print("Evaluating trained model on held-out test decisions", flush=True)
-        test_records = collect_records(agent, test_rows, config.micro_batch) if test_rows else []
+        test_records = collect_records(agent, test_rows, config.micro_batch,
+                                       max_micro_tokens=config.max_micro_tokens) if test_rows else []
         _save_records(output / "test_after.json", test_records)
         after_uncalibrated = metrics(test_records) if test_rows else None
         after = metrics(test_records, agent.temperature, agent.temperature_by_options,

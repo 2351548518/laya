@@ -200,7 +200,7 @@ test('the endpoint surface the page describes is the one the client declares',
     // A member is public if it is spelled out as a signature; `private body;` collapses to the keyword.
     const declared = [...declaration.matchAll(/^ {4}(?!constructor)(\w+)[<(]/gm)]
       .map(([, name]) => name).sort();
-    assert.deepEqual(declared, ['health', 'predict', 'predictBatch', 'predictMultimodal', 'route'],
+    assert.deepEqual(declared, ['health', 'predict', 'predictBatch', 'predictImageAssets', 'predictMultimodal', 'route'],
       'the client gained or lost a public method; update the endpoint inventory');
     for (const name of declared) {
       assert.ok(page.includes('`' + name + '`'),

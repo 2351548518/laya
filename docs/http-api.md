@@ -1,16 +1,10 @@
 # HTTP API
 
-Native media decisions are available at `POST /v1/multimodal` when the server is configured with
-`LAYA_MULTIMODAL_MODEL` (a backbone name or trained local checkpoint). This route accepts inline
-base64 file bytes and shares the server's authentication and bounded request handling. The
-`/v1/systemone` endpoints retain their text contract. [Media request schema](multimodal.md#router-and-http) ·
-[Python and TypeScript SDKs](multimodal-clients.md)
-
-`laya-serve` exposes Laya over the TypeSafe Jev `/v1/systemone` wire protocol. A client written
-against Jev -- `hs-jev`, `typesafe-sdk`, or your own -- can point its base URL at this server and
-keep working: Laya's `predict()` output is already schema-compatible, and the server adds only the
-HTTP surface: single and batch inference, a routing snapshot, a health probe, an optional bearer
-check and request limits.
+`POST /v1/systemone` uses the TypeSafe System One format for text, image decisions and
+single-box localization. Set `LAYA_MULTIMODAL_MODEL` to enable images and use a trained
+grounding checkpoint for box answers. Send audio and video file bytes to
+`POST /v1/multimodal`. [TypeSafe API](https://docs.typesafe.ai/api/system-one) ·
+[Media examples](multimodal-clients.md)
 
 The Python HTTP client provides synchronous single, batch and media predictions plus health
 checks. Install it from `sdk/python` in the application environment to keep the inference stack
@@ -55,7 +49,7 @@ Everything is environment variables, so one image serves a laptop dev run and a 
 | `LAYA_MAX_CONCURRENT` | requests admitted past auth at once; excess gets `503` | `16` |
 | `LAYA_BODY_READ_TIMEOUT` | seconds a request may spend delivering its body before the server answers `408` and releases the admission slot it was holding. Unparseable, non-positive or infinite input falls back | `10` |
 | `LAYA_MAX_BATCH_TOKENS` | tokens one `/v1/systemone/batch` FORWARD PASS may collate (`states` x questions x row width); a larger batch is split into several passes, not refused | `131072` |
-| `LAYA_JEV_STRICT` | serve the strict Jev wire contract: no root `routing`, no per-answer `action` / `answer_confidence`, no `confidence` on noul answers, and `usage` reduced to `input_tokens` + `output_tokens`. For clients that validate the response against the Jev contract with no extra fields | `0` |
+| `LAYA_JEV_STRICT` | select System One response fields with no per-answer `action` / `answer_confidence`. Set to `0` for the extended Laya text response. Image requests always use the System One response format | `1` for single requests, `0` for batch |
 | `LAYA_TOURNAMENT_GROUP` | answer a `choice` with more options than this by elimination, in groups of this size, on `/v1/systemone` and `/v1/systemone/batch`, and raise their option cap from 100 to 255. See [Large choices](#large-choices-laya_tournament_group). Unset, or outside 2 to 100, is off | `0` |
 
 For a deployment published under a prefix such as `/laya`, set `LAYA_ROOT_PATH=/laya`.
@@ -219,8 +213,9 @@ curl -s localhost:8000/v1/systemone -H 'content-type: application/json' -d '{
 | field | required | meaning |
 |---|---|---|
 | `state` | yes | the one context every question in the request is answered against: text, email, ticket or JSON; a missing or `null` state is a `400` |
-| `questions` | yes | object keyed by question id; each question is `choice` / `score` / `noul` with `instructions` and `criteria` |
+| `questions` | yes | object keyed by question ID. Use `choice`, `score`, `noul`, or `box` with uploaded images |
 | `model` | no | names a checkpoint; a path or unpublished Hub id is a `422`, anything else is ignored (see below) |
+| `assets` | no | image reference map with inline PNG/JPEG data or multipart file part names |
 | `task` | no | forces a checkpoint by workflow name instead of letting routing decide; an unknown name is a `422` naming it |
 | `lang` | no | a language code (`de`, `en-US`) that skips detection when it names a language; a blank or unrecognised code falls through to detection |
 | `lang_guess` | no | a language code from the client's own identifier, consulted after `lang` and before detection; any non-English code routes to the multilingual checkpoint |
@@ -236,10 +231,8 @@ hook arguments `predict` also takes -- `hooks`, `on_predict_start`, `on_predict_
 that runs inside the server process, and the last two say how the hooks a deployment installed
 execute, so no value a caller sends has a meaning here. The same five are refused client-side by a
 LangChain node with a `base_url` (`laya.integrations.langchain`), so a chain and a raw HTTP client
-now get the same answer. `image`, `audio` and `video`, which `predict` takes since 0.4.25 to route a
-picture, a recording or a clip to the vega lane, are refused with a `422` as well: this endpoint
-takes text states only, and media goes through `laya.Agent(vegaml=True)` or a `Router` with the vega
-lane in the process that holds the model.
+now get the same answer. Upload images to System One with `assets`. Requests with
+inline `image`, `audio` or `video` fields go to `/v1/multimodal`.
 
 `model` is accepted so a Jev client can keep sending one. The public Hugging Face ids
 (`convaiinnovations/laya-multilingual`, `convaiinnovations/laya-typed-decisions`), the checkpoint
@@ -254,7 +247,35 @@ what was chosen and why. A value that looks like a filesystem path or an unpubli
 hide that. The detail is the same `unknown model` text core raises, plus the reminder to omit
 `model` to let the router choose.
 
+### Image assets and single-box questions
+
+Send `TypeSafe-Danger-Zone-Images: true` with image or box requests. Put each PNG or JPEG
+under a reference in `assets` and use the reference in a string value in `state`,
+`instructions` or `criteria`. Reusing the reference places the image at each occurrence.
+Use an array of image references followed by a text value to place the images before
+the text in the native model prompt.
+A `box` question needs one distinct referenced image. The response carries `left`, `top`,
+`right` and `bottom` in `[0, 1]` and localization confidence.
+
+~~~bash
+curl -fsS http://127.0.0.1:8000/v1/systemone \
+  -H 'TypeSafe-Danger-Zone-Images: true' \
+  -F 'request={"model":"multimodal","state":{"photo":"scene-ref"},"assets":{"scene-ref":{"type":"image","part":"scene"}},"questions":{"target":{"type":"box","instructions":"Locate the red mug."}}};type=application/json' \
+  -F 'scene=@scene.jpg;type=image/jpeg'
+~~~
+
+For JSON uploads, give the asset `format` and `data_base64` instead of `part`. The
+first multipart part is the JSON request and every file part belongs to one asset. Images
+must have sides between 280 and 1568 pixels and files may be at most 16 MiB. The image
+request body and expanded RGB image buffers each have a 32 MiB limit. The configured
+checkpoint's token budget also applies. [TypeSafe Images](https://docs.typesafe.ai/images)
+
+The Python and TypeScript SDKs accept JSON image assets and set the image header on the
+request. [SDK examples](multimodal-clients.md#system-one-image-assets)
+
 ### Response
+
+This example uses `LAYA_JEV_STRICT=0`.
 
 ```json
 {
@@ -374,30 +395,18 @@ Jev deployment gates differently on Laya's entropy `confidence` (#302); read it 
 
 ### Strict Jev contract: `LAYA_JEV_STRICT`
 
-The payload above is the full Laya payload. The Jev contract a client may hold it to defines
-less: three top-level fields (`model`, `answers`, `usage`), the contracted keys on each answer
-and nothing else, and a `usage` of the two token counts. A client that validates the response
-against that contract with no extra fields -- OpenClaw's TypeSafe provider plugin is one --
-rejects the full payload, so `LAYA_JEV_STRICT=1` projects the response onto the contract before
-answering, on both `/v1/systemone` and `/v1/systemone/batch`:
+Single requests default to `model`, `answers` and `usage` with the two token counts.
 
-- the root keeps `model`, `answers` and `usage` only; `routing` is not sent;
-- a `choice` answer keeps `type`, `choice`, `probabilities` and `confidence`;
-- a `score` answer keeps `type`, `score`, `probabilities`, `confidence` and `legend`;
-- a `noul` answer keeps `type` and `noul`;
-- `usage` keeps `input_tokens` and `output_tokens`; the truncation facts and the collapsed-
-  options ceiling are not sent;
-- `x_jev_confidence` is not sent, like the other additions.
+- a `choice` answer keeps `type`, `choice`, `probabilities` and `confidence`
+- a `score` answer keeps `type`, `score`, `probabilities`, `confidence` and `legend`
+- a `noul` answer keeps `type` and `noul`
+- a `box` answer keeps `type`, `box` and `confidence`
 
-The projection keeps only the contracted keys and recomputes nothing: every value is the one the
-result already carries, so the probabilities and scores a strict client reads are identical to
-the ones the full payload reports. The default stays the full payload, and a deployment that
-turns the flag on loses the truncation visibility `usage` provides. The server has already
-logged the dropped state tokens by then, so a cut state is in the log, where the response no
-longer carries it. Score `criteria` should stay plain strings under the
-strict contract: a strict client compares the returned `legend` against the criteria it sent,
-and Laya renders a structured criterion with Python's JSON, which a JavaScript caller that
-stringifies its own criteria may not match byte for byte.
+Choice and score `confidence` use the TypeSafe formulas applied to the returned probabilities.
+A score's `legend` preserves structured criteria and original image references.
+The server logs text truncation. Use the extended text response for in-band routing and
+truncation details. The batch extension defaults to the full response and its optional strict
+projection retains the batch's Laya confidence values.
 
 Successful responses also carry `Server-Timing: inference;dur=<ms>` and `X-Inference-Time-Ms`.
 

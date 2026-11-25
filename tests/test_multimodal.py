@@ -18,7 +18,7 @@ pytest.importorskip("scipy", reason="audio resampling tests need the multimodal 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from laya.multimodal import MultimodalAgent, install_decision_head, read_audio  # noqa: E402
 from laya.multimodal_train import (  # noqa: E402
-    MultimodalTrainConfig, check_splits, collate_multimodal_inputs, finetune_multimodal, load_rows,
+    MultimodalTrainConfig, check_splits, collate_multimodal_inputs, collect_records, finetune_multimodal, load_rows,
 )
 from laya.router import Router  # noqa: E402
 
@@ -386,6 +386,96 @@ def test_inline_media_http_endpoint_rejects_paths_and_shares_auth(monkeypatch):
         assert client.post("/v1/multimodal", json=body, headers={"Authorization": "Bearer test-key"}).status_code == 422
 
 
+@pytest.mark.parametrize("multipart", [False, True])
+def test_systemone_image_and_box_wire_contract(monkeypatch, multipart):
+    import base64
+    import io
+    from PIL import Image
+    TestClient = pytest.importorskip("fastapi.testclient").TestClient
+    from laya.serve import create_app
+
+    monkeypatch.delenv("LAYA_API_KEY", raising=False)
+    monkeypatch.setenv("LAYA_JEV_STRICT", "0")
+    agent = tiny_agent()
+    agent.grounding_trained = True
+    agent._grounding_outputs = lambda inputs: {
+        "boxes": torch.tensor([[[0.25, 0.25, 0.75, 0.75]]]),
+        "quality_logits": torch.zeros(1, 1),
+    }
+    stream = io.BytesIO()
+    Image.new("RGB", (280, 280), "white").save(stream, format="PNG")
+    payload = stream.getvalue()
+    asset = {"type": "image", "part": "photo"} if multipart else {
+        "type": "image", "format": "png", "data_base64": base64.b64encode(payload).decode(),
+    }
+    body = {"model": "jev-latest", "state": {"photo": "image-ref"}, "assets": {"image-ref": asset},
+            "questions": {"target": {"type": "box", "instructions": {"find": "the white region"}},
+                          "level": {"type": "score", "instructions": "Rate brightness",
+                                    "criteria": [{"val": "dark"}, {"val": "as bright as image-ref"}]}}}
+    files = [("request", (None, json.dumps(body), "application/json")),
+             ("photo", ("photo.png", payload, "image/png"))]
+    request = {"files": files} if multipart else {"json": body}
+    with TestClient(create_app(Router(multimodal=agent, vega=False))) as client:
+        assert client.post("/v1/systemone", **request).status_code == 400
+        response = client.post("/v1/systemone", headers={"TypeSafe-Danger-Zone-Images": "true"}, **request)
+        assert response.status_code == 200, response.text
+    result = response.json()
+    assert set(result) == {"model", "answers", "usage"}
+    assert result["answers"]["target"] == {"type": "box", "box": {
+        "left": 0.25, "top": 0.25, "right": 0.75, "bottom": 0.75}, "confidence": 0.5}
+    assert result["answers"]["level"]["legend"] == {"0": {"val": "dark"}, "1": {"val": "as bright as image-ref"}}
+    assert set(result["usage"]) == {"input_tokens", "output_tokens"}
+    assert len(agent.processor.calls[0]["images"]) == 1
+    assert len(agent.processor.calls[1]["images"]) == 2
+
+
+def test_systemone_reference_expansion_places_each_candidate_after_its_own_image():
+    import base64
+    import io
+    import re
+    from PIL import Image
+    from laya.systemone import prepare_image_request
+
+    class ExpandingProcessor(TinyProcessor):
+        image_token = "<img>"
+
+        def apply_chat_template(self, messages, **kwargs):
+            return "".join(item["text"] if item["type"] == "text" else self.image_token
+                           for item in messages[0]["content"])
+
+        def __call__(self, **kwargs):
+            text = kwargs["text"]
+            edits = []
+            parts, before, delta = [], 0, 0
+            for i, match in enumerate(re.finditer(self.image_token, text), start=1):
+                replacement = self.image_token * (i + 1)
+                start = match.start() + delta
+                parts.extend((text[before:match.start()], replacement))
+                edits.append({"span": match.span(), "new_span": (start, start + len(replacement))})
+                delta += len(replacement) - len(self.image_token)
+                before = match.end()
+            self.expanded = "".join([*parts, text[before:]])
+            n = len(self.expanded)
+            return {"input_ids": torch.ones(1, n, dtype=torch.long),
+                    "offset_mapping": [[(i, i + 1) for i in range(n)]],
+                    "text_replacement_offsets": [edits]}
+
+    agent = tiny_agent()
+    agent.max_len = 2048
+    agent.readout, agent.processor = "candidate", ExpandingProcessor()
+    image = io.BytesIO()
+    Image.new("RGB", (280, 280)).save(image, format="PNG")
+    asset = {"format": "png", "data_base64": base64.b64encode(image.getvalue()).decode()}
+    request, questions = prepare_image_request(
+        "photo-a-ref", {"match": {"type": "choice", "instructions": "Which matches?",
+                                   "criteria": {"A": "first choice", "B": "photo-b-ref", "C": "third choice"}}},
+        {"photo-a-ref": asset, "photo-b-ref": asset}, {}, images_enabled=True,
+    )
+    inputs, _, _ = agent._prepare(request, questions["match"])
+    expected = [match.end() - 2 for match in re.finditer(r" ->\n", agent.processor.expanded)]
+    assert inputs["_candidate_positions"].tolist() == [expected]
+
+
 @pytest.mark.parametrize("selection", [{}, {"model": "multimodal"}, {"task": "MuLTiMoDaL"}])
 def test_http_text_endpoints_require_inline_bytes_for_native_media(monkeypatch, selection):
     from laya.router import Router
@@ -466,6 +556,28 @@ def test_training_builds_optional_targets_only_for_enabled_losses(tmp_path, monk
     assert all((name in observed[0]) == use_kl for name in ("distillation_kl", "reference_kl"))
 
 
+def test_evaluation_respects_padded_token_budget_without_truncating():
+    agent = tiny_agent()
+    lengths = {"short": 2, "medium": 4, "long": 9, "tail": 3}
+    rows = [{"id": name, "state": name, "questions": {"x": Q["present"]},
+             "expected": {"x": True}} for name in lengths]
+    batches = []
+
+    def prepare(request, q):
+        ids = torch.ones(1, lengths[request["text"]], dtype=torch.long)
+        return {"input_ids": ids, "attention_mask": torch.ones_like(ids)}, agent._to_internal(q), {}
+
+    def logits(inputs, count):
+        batches.append(tuple(inputs["input_ids"].shape))
+        return torch.zeros(inputs["input_ids"].shape[0], count)
+
+    agent._prepare = prepare
+    agent._logits = logits
+    records = collect_records(agent, rows, micro_batch=4, max_micro_tokens=8)
+    assert batches == [(2, 4), (1, 9), (1, 3)]
+    assert [item["id"] for item in records] == list(lengths)
+
+
 @pytest.mark.skipif(not os.environ.get("LAYA_MM_MODEL"), reason="set LAYA_MM_MODEL to a local multimodal checkpoint")
 def test_real_backbone_image_audio_and_reload(tmp_path):
     from PIL import Image
@@ -497,15 +609,17 @@ def test_development_selection_restores_best_weights_before_final_save(tmp_path,
         save_file(values, str(path / "decision_head.safetensors"))
     agent.save = save
     calls = []
-    def collect(*args):
-        calls.append(1)
+    def collect(agent, rows, micro_batch, *, max_micro_tokens):
+        calls.append(max_micro_tokens)
         return []
     monkeypatch.setattr(training, "collect_records", collect)
     monkeypatch.setattr(training, "metrics", lambda records: {
         "by_modality": {"text": {"accuracy": 1. if len(calls) == 1 else .5}}, "overall": {"nll": 1.}})
     report = finetune_multimodal(train, tmp_path / "out", selection_data=selection, agent=agent,
-        config=MultimodalTrainConfig(mode="head", epochs=2, learning_rate=.01, gradient_checkpointing=False))
+        config=MultimodalTrainConfig(mode="head", epochs=2, learning_rate=.01, gradient_checkpointing=False,
+                                     max_micro_tokens=32))
     assert report["optimizer_steps"] == 2 and report["selected_step"] == 1
+    assert calls == [32, 32]
     torch.testing.assert_close(saved["out"]["weight"], saved["checkpoint_best"]["weight"], atol=0, rtol=0)
     assert not torch.equal(saved["out"]["weight"], saved["checkpoint_latest"]["weight"])
 

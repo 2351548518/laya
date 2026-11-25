@@ -32,6 +32,7 @@ from .confidence import apply_confidence_gate, check_min_confidence
 from .hooks import PredictContext, aggregate_usage, compose_hooks, dispatch, normalise_hooks, validate_timeout
 from .multimodal_readout import CandidateScorer, candidate_positions
 from .multimodal_calibration import ordinal_probabilities, validate_ordinal_calibration
+from .systemone import ImageReferences
 
 DEFAULT_MULTIMODAL_MODEL = "google/gemma-4-E2B-it"
 MULTIMODAL_MODELS = {
@@ -476,10 +477,15 @@ class MultimodalAgent(Agent):
         if len(options) > capacity:
             raise ValueError("multimodal questions support at most %d options; shortlist or split the question" % capacity)
         order = q.get("option_order", list(range(len(options))))
-        content, images, audios, metadata = self._media(request) if load_media is None else load_media()
+        image_refs = request.get("image")
+        image_refs = image_refs if isinstance(image_refs, ImageReferences) else None
+        if image_refs is not None:
+            content, images, audios, metadata = [], [], [], {}
+        else:
+            content, images, audios, metadata = self._media(request) if load_media is None else load_media()
         spans = []
         if is_box:
-            if len(images) != 1 or request.get("video") is not None:
+            if image_refs is None and (len(images) != 1 or request.get("video") is not None):
                 raise ValueError("Box currently requires exactly one image; select a video frame or image explicitly")
             prompt = "State: %s\nLocate in the image: %s\nReturn the target bounding box." % (request.get("text", ""), q["ins"])
         elif candidate:
@@ -501,10 +507,33 @@ class MultimodalAgent(Agent):
             prompt = "%s question: %s\n" % (q["t"], q["ins"])
             prompt += "\n".join("%s: %s" % (self.symbols[slot], options[index]) for slot, index in enumerate(order))
             prompt += "\nState: %s\nSelect exactly one option. Answer with its letter or digit only." % request.get("text", "")
-        content = [*content, {"type": "text", "text": prompt}]
+        if image_refs is not None:
+            # Locate the candidate suffixes after the chat template inserts its image tokens.
+            # The markers are removed before the text reaches the processor/tokenizer.
+            for start, end in reversed(spans):
+                prompt = prompt[:start] + image_refs.candidate_marker + prompt[end:]
+            content, image_ids = image_refs.split_prompt(prompt)
+            if is_box and len(set(image_ids)) != 1:
+                raise ValueError("each box question requires a single referenced image")
+            images = [read_image(image_refs.images[i]) if isinstance(image_refs.images[i], (str, os.PathLike))
+                      else image_refs.images[i] for i in image_ids]
+            metadata["images"] = len(images)
+        else:
+            content = [*content, {"type": "text", "text": prompt}]
         messages = [{"role": "user", "content": content}]
         text = self.processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True,
                                                    enable_thinking=False)
+        if candidate and image_refs is not None:
+            parts = text.split(image_refs.candidate_marker)
+            if len(parts) != len(spans) + 1:
+                raise ValueError("processor template changed the candidate suffix")
+            spans = []
+            offset = 0
+            for part in parts[:-1]:
+                start = offset + len(part)
+                offset = start + len(" ->")
+                spans.append((start, offset))
+            text = " ->".join(parts)
         kwargs = {"text": text, "return_tensors": "pt", "padding": False}
         metadata = metadata.copy()
         native_frames = metadata.pop("_native_video_frames", None)
@@ -522,6 +551,8 @@ class MultimodalAgent(Agent):
                 kwargs['videos_kwargs']['cap_pixels_per_frame'] = True
         if candidate:
             kwargs["return_offsets_mapping"] = True
+            if image_refs is not None and images:
+                kwargs["return_text_replacement_offsets"] = True
         if images:
             kwargs["images"] = images
         if audios:
@@ -530,12 +561,31 @@ class MultimodalAgent(Agent):
                 kwargs["padding"] = True
         inputs = self.processor(**kwargs)
         if candidate:
-            start = text.rfind(prompt)
-            if start < 0:
-                raise ValueError("processor template changed the candidate suffix")
+            text_length = len(text)
+            if image_refs is None:
+                start = text.rfind(prompt)
+                if start < 0:
+                    raise ValueError("processor template changed the candidate suffix")
+                spans = [(start + a, start + b) for a, b in spans]
+            elif images:
+                replacements = inputs.pop("text_replacement_offsets", [])
+                if replacements and replacements[0]:
+                    ends = [(item["span"][1], item["new_span"][1] - item["span"][1])
+                            for item in replacements[0]]
+                    text_length += ends[-1][1]
+                    shifted, index, shift = [], 0, 0
+                    for start, end in spans:
+                        while index < len(ends) and ends[index][0] <= start:
+                            _, shift = ends[index]
+                            index += 1
+                        shifted.append((start + shift, end + shift))
+                    spans = shifted
+                else:
+                    token = getattr(self.processor, "image_token", None)
+                    if token is None or text.rfind(token) >= spans[0][0]:
+                        raise ValueError("inline option images require processor image replacement offsets")
             offsets = inputs.pop("offset_mapping")[0]
-            inputs["_candidate_positions"] = candidate_positions(offsets, len(text),
-                [(start + a, start + b) for a, b in spans])
+            inputs["_candidate_positions"] = candidate_positions(offsets, text_length, spans)
         length = inputs["input_ids"].shape[-1]
         limit = self.max_len if max_len is None else _positive("max_len", max_len)
         if length > limit:
@@ -599,10 +649,7 @@ class MultimodalAgent(Agent):
                 values = {key: value for key, value in inputs.items() if key != "_candidate_positions"}
                 base = self.model.get_base_model() if _is_adapter_model(self.model) else self.model
                 out = base.model(**values, use_cache=False, return_dict=True)
-                hidden = out.last_hidden_state
-                if torch.is_grad_enabled():
-                    hidden = hidden.float()
-                logits = base.decision_scorer(hidden, inputs["_candidate_positions"])[:, :count].float()
+                logits = base.decision_scorer(out.last_hidden_state, inputs["_candidate_positions"])[:, :count].float()
             else:
                 out = self.model(**inputs, use_cache=False, return_dict=True, **self._forward_options)
                 logits = out.logits[:, -1, :count].float()
@@ -683,11 +730,42 @@ class MultimodalAgent(Agent):
 
     system_one = predict
 
+    def _answer_text_questions(self, request, questions, max_len, batch_size):
+        from .multimodal_train import collate_multimodal_inputs
+
+        answers, pending = {}, []
+        tokens, forwards, longest = 0, 0, 0
+        budget = min(self.max_len if max_len is None else max_len, 8192)
+
+        def flush():
+            values = [item[1] for item in pending]
+            inputs = values[0] if len(values) == 1 else collate_multimodal_inputs(
+                values, getattr(self.tok, "pad_token_id", 0) or 0)
+            logits = self._logits(inputs, max(item[3] for item in pending))
+            for scores, (qid, _, q, count) in zip(logits, pending):
+                answers[qid] = self._decode(scores[:count], q)
+
+        for qid, qdef in questions.items():
+            inputs, q, _ = self._prepare(request, qdef, max_len=max_len)
+            length = inputs["input_ids"].shape[-1]
+            if pending and (len(pending) >= batch_size or max(longest, length) * (len(pending) + 1) > budget):
+                flush()
+                forwards += 1
+                pending.clear()
+                longest = 0
+            pending.append((qid, inputs, q, len(render_options(q))))
+            tokens += length
+            longest = max(longest, length)
+        if pending:
+            flush()
+            forwards += 1
+        return answers, tokens, forwards
+
     @torch.no_grad()
     def predict_batch(self, states, questions, batch_size=None, lang=None, hooks=None,
                       on_predict_start=None, on_predict_end=None, hooks_raise=None, hooks_timeout=None,
                       max_len=None, head_max_len=None, sort_by_length=False, min_confidence=None):
-        """Score states sequentially; each question takes one bounded multimodal forward pass."""
+        """Score states sequentially, with isolated rows for batches of native text questions."""
         from .common import check_batch_size
         check_batch_size(batch_size)
         if isinstance(states, (str, bytes, dict)):
@@ -716,6 +794,17 @@ class MultimodalAgent(Agent):
                         request = self._input(state)
                         modality = next((k for k in ("video", "audio", "image") if request.get(k) is not None), "text")
                         answers, tokens, metadata = {}, 0, {}
+                        if (modality == "text" and self.model_type == "qwen3_5"
+                                and getattr(self, "readout", "letter") == "candidate"
+                                and batch_size is not None and batch_size > 1 and len(ctx.questions) > 1
+                                and all(q.get("type") != "box" for q in ctx.questions.values())):
+                            answers, tokens, forwards = self._answer_text_questions(
+                                request, ctx.questions, ctx.max_len, min(batch_size, 4))
+                            results.append({"model": self.model_id, "answers": answers,
+                                            "usage": {"input_tokens": tokens, "output_tokens": 0,
+                                                      "forward_passes": forwards, "truncated": False},
+                                            "modality": modality, "media": metadata})
+                            continue
                         vision_cache = {}
                         load_media = cache(partial(self._media, request))
                         for qid, qdef in ctx.questions.items():
@@ -731,7 +820,10 @@ class MultimodalAgent(Agent):
                                 answers[qid] = box_answer(out["boxes"][0, 0], out["quality_logits"][0, 0].sigmoid())
                             else:
                                 logits = self._logits(inputs, len(render_options(q)))[0]
-                                answers[qid] = self._decode(logits, q, modality)
+                                question_modality = modality
+                                if isinstance(request.get("image"), ImageReferences) and not metadata["images"]:
+                                    question_modality = "text"
+                                answers[qid] = self._decode(logits, q, question_modality)
                             tokens += inputs["input_ids"].shape[-1]
                         results.append({"model": self.model_id, "answers": answers,
                                         "usage": {"input_tokens": tokens, "output_tokens": 0,

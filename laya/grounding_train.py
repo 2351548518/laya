@@ -4,7 +4,6 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from contextlib import nullcontext
 from array import array
-from itertools import chain
 import json
 import math
 import os
@@ -18,6 +17,7 @@ from torch.nn import functional as F
 from .evals import file_fingerprint
 from .grounding import box_iou, crowd_overlap, grounding_loss, validate_boxes
 from .multimodal import MultimodalAgent, _active_head, _is_adapter_model
+from .multimodal_data import can_shuffle_choice, normalize_record, read_records, record_input
 from .multimodal_distributed import distributed_context
 from .multimodal_train import (
     MultimodalTrainConfig, configure_training, collate_multimodal_inputs, _train_mode, _decision_target,
@@ -45,6 +45,8 @@ class GroundingTrainConfig:
     max_decision_regression: float = .05
     eval_every: int = 500
     eval_limit: int = 256
+    decision_eval_micro_batch: int = 1
+    grounding_eval_micro_batch: int = 1
     seed: int = 42
     micro_batch: int = 4
     max_micro_tokens: int = 4096
@@ -62,13 +64,16 @@ class GroundingTrainConfig:
     min_lr_ratio: float = .1
     length_bucketing: bool = False
     activation_offload_min_tokens: int | None = None
+    video_cache_size: int = 0
+    shuffle_options: bool = False
 
     def validate(self):
         if self.mode not in {"head", "lora", "full"}:
             raise ValueError("grounding mode must be head, lora or full")
         if self.lora_targets not in {'qv', 'attention', 'all-linear'}:
             raise ValueError('invalid grounding LoRA target scope')
-        for key in ["epochs", "global_batch_size", "micro_batch", "max_micro_tokens", "slots", "max_len", "eval_limit", "lora_rank", "lora_alpha"]:
+        for key in ("epochs", "global_batch_size", "micro_batch", "max_micro_tokens", "slots", "max_len",
+                    "eval_limit", "lora_rank", "lora_alpha", "decision_eval_micro_batch", "grounding_eval_micro_batch"):
             value = getattr(self, key)
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ValueError(key + " must be a positive integer")
@@ -98,7 +103,11 @@ class GroundingTrainConfig:
                 raise ValueError(key+' must be finite and nonnegative')
         if self.video_cache_dir is not None and (not isinstance(self.video_cache_dir,str) or not self.video_cache_dir):
             raise ValueError('video_cache_dir must be a nonempty local path or None')
-        if self.selection_metric not in {'joint','decision_macro'} or not isinstance(self.include_initial_selection,bool) or not isinstance(self.quality_matched_only,bool):
+        if isinstance(self.video_cache_size, bool) or not isinstance(self.video_cache_size, int) or self.video_cache_size < 0:
+            raise ValueError('video_cache_size must be a nonnegative integer')
+        if not isinstance(self.shuffle_options, bool):
+            raise ValueError('shuffle_options must be boolean')
+        if self.selection_metric not in {'joint', 'decision_macro', 'harmonic'} or not isinstance(self.include_initial_selection,bool) or not isinstance(self.quality_matched_only,bool):
             raise ValueError('invalid checkpoint selection configuration')
         if not isinstance(self.retention_tagged_only,bool):raise ValueError('retention_tagged_only must be boolean')
         if not isinstance(self.batch_decisions,bool):raise ValueError('batch_decisions must be boolean')
@@ -115,38 +124,48 @@ def _validate_grounding_row(row):
         raise ValueError("grounding training rows require exactly one question")
     for qid, qdef in row["questions"].items():
         MultimodalAgent._check_question(qid, qdef)
-    if "grounding" in row:
-        if qdef['type'] != 'box':
+    if qdef["type"] != "box":
+        _decision_target(row, qid, MultimodalAgent._to_internal(qdef))
+        if "grounding" in row:
             raise ValueError("geometric supervision requires a Box question")
-        truth = row["grounding"]
-        validate_boxes(truth["boxes"])
-        validate_boxes(truth.get("ignored", []))
-        if truth["task"] not in {"single", "multiple"}:
-            raise ValueError("unknown geometric supervision task")
-        if truth["task"] == "single" and len(truth["boxes"]) > 1:
-            raise ValueError("an official Box target contains at most one box")
+        return
+    if "grounding" not in row:
+        raise ValueError("Box question needs geometric supervision")
+    truth = row["grounding"]
+    validate_boxes(truth["boxes"])
+    validate_boxes(truth.get("ignored", []))
+    if truth["task"] not in {"single", "multiple"}:
+        raise ValueError("unknown geometric supervision task")
+    if truth["task"] == "single" and len(truth["boxes"]) > 1:
+        raise ValueError("an official Box target contains at most one box")
 
 
 def load_grounding_rows(path):
-    rows = []
-    with Path(path).open(encoding="utf-8") as stream:
-        for line in stream:
-            row = json.loads(line)
-            _validate_grounding_row(row)
-            rows.append(row)
+    rows = list(read_records(path))
+    for row in rows:
+        _validate_grounding_row(row)
     if not rows:
         raise ValueError("empty grounding dataset: " + str(path))
     return rows
 
 
 class _IndexedGroundingRows:
-    def __init__(self, path):
-        self.path = Path(path)
-        self.offsets = array('Q', [0])
+    def __init__(self, path, validate_split):
+        self.path = Path(path).resolve()
+        self.offsets = array('Q')
+        offset = 0
         with self.path.open('rb') as stream:
-            for line in stream:
-                _validate_grounding_row(json.loads(line))
-                self.offsets.append(self.offsets[-1] + len(line))
+            for line_number, line in enumerate(stream, 1):
+                if line.strip() and not line.lstrip().startswith(b"#"):
+                    try:
+                        row = normalize_record(json.loads(line), self.path.parent, verify_media=False)
+                        _validate_grounding_row(row)
+                        validate_split(row)
+                    except (ValueError, KeyError, TypeError) as error:
+                        raise ValueError("%s:%d: %s" % (self.path, line_number, error)) from error
+                    self.offsets.append(offset)
+                offset += len(line)
+        self.offsets.append(offset)
         if len(self.offsets) == 1:
             raise ValueError('empty grounding dataset: ' + str(path))
         self.stream = self.path.open('rb')
@@ -158,11 +177,12 @@ class _IndexedGroundingRows:
         if index < 0: index += len(self)
         if not 0 <= index < len(self): raise IndexError(index)
         start, end = self.offsets[index], self.offsets[index + 1]
-        return json.loads(os.pread(self.stream.fileno(), end - start, start))
+        line = os.pread(self.stream.fileno(), end - start, start).partition(b"\n")[0]
+        return normalize_record(json.loads(line),
+                                self.path.parent, verify_media=False)
 
     def __iter__(self):
-        with self.path.open('rb') as stream:
-            for line in stream: yield json.loads(line)
+        yield from read_records(self.path, verify_media=False)
 
 
 def decision_retained(current, baseline, margin):
@@ -181,14 +201,18 @@ def checkpoint_score(metrics, selection_metric="joint"):
     geometry = sum(geometric) / len(geometric) if geometric else 0.
 
     decisions = metrics.get('decisions')
-    if selection_metric == 'decision_macro' and (not decisions or not decisions['by_modality']):
-        raise ValueError('decision_macro selection requires decision development data')
-    if selection_metric not in ('joint', 'decision_macro'):
+    if selection_metric in ('decision_macro', 'harmonic') and (not decisions or not decisions['by_modality']):
+        raise ValueError(selection_metric + ' selection requires decision development data')
+    if selection_metric not in ('joint', 'decision_macro', 'harmonic'):
         raise ValueError('unknown checkpoint selection metric')
     if not decisions:
         return geometry
     modalities = decisions['by_modality']
     macro_accuracy = sum(values['accuracy'] for values in modalities.values()) / len(modalities)
+    if selection_metric == 'harmonic':
+        if not geometric:
+            raise ValueError('harmonic selection requires geometry development data')
+        return 2 * geometry * macro_accuracy / (geometry + macro_accuracy) if geometry + macro_accuracy else 0.
     return macro_accuracy if selection_metric == 'decision_macro' else (geometry + macro_accuracy) / 2
 
 
@@ -202,9 +226,10 @@ def grounding_retained(current, baseline, margin):
     return all(current[key] >= baseline[key] - margin for key in keys)
 
 
-def _decision_development(agent,rows,tagged_only=False):
+def _decision_development(agent,rows,tagged_only=False,*,micro_batch=4,max_micro_tokens=None):
     from .multimodal_train import collect_records,example_hash,metrics
-    records=collect_records(agent,rows);result={'decisions':metrics(records)}
+    records=collect_records(agent,rows,micro_batch,max_micro_tokens=max_micro_tokens)
+    result={'decisions':metrics(records)}
     if tagged_only:
         keys={example_hash(row,qid,qdef) for row in rows if row.get('retention_reference')
               for qid,qdef in row['questions'].items()}
@@ -221,7 +246,7 @@ def _development_retained(current,baseline,margin):
 
 def _geometry_microbatches(agent, rows, config):
     """Batch same-head image requests while preserving every original target and its weight."""
-    buckets = {'single': [], 'multiple': []}
+    buckets = {}
     def pack(task, items):
         examples = [item[1] for item in items]
         inputs = examples[0] if len(examples) == 1 else collate_multimodal_inputs(
@@ -230,21 +255,32 @@ def _geometry_microbatches(agent, rows, config):
     for row in rows:
         if 'grounding' not in row:
             continue
-        qdef = next(iter(row['questions'].values()))
-        inputs, _, _ = agent._prepare(agent._input(row['state']), qdef)
-        task = row['grounding']['task'];items = buckets[task]
+        qid, qdef = next(iter(row['questions'].items()))
+        request, question = record_input(agent, row, qid, qdef)
+        inputs, _, _ = agent._prepare(request, question)
+        task = row['grounding']['task']
+        key = task, tuple(sorted(inputs))
+        items = buckets.setdefault(key, [])
         length = inputs['input_ids'].shape[-1]
         longest = max([length] + [entry[1]['input_ids'].shape[-1] for entry in items])
         if items and (len(items) >= config.micro_batch or longest * (len(items) + 1) > config.max_micro_tokens):
-            buckets[task] = []
+            buckets[key] = []
             yield pack(task, items)
-        buckets[task].append((row, inputs))
-    for task, items in buckets.items():
+        buckets[key].append((row, inputs))
+    for (task, _fields), items in buckets.items():
         if items:
             yield pack(task, items)
 
 
-def _decision_microbatches(agent, rows, config):
+def _training_question(qdef, option_rng):
+    if option_rng is None or not can_shuffle_choice(qdef):
+        return qdef
+    order = list(range(len(qdef["criteria"])))
+    option_rng.shuffle(order)
+    return {**qdef, "option_order": order}
+
+
+def _decision_microbatches(agent, rows, config, *, option_rng=None):
     """Pack native decision inputs by media fields and the actual padded token budget."""
     buckets = {}
 
@@ -259,7 +295,8 @@ def _decision_microbatches(agent, rows, config):
         if 'grounding' in row:
             continue
         qid, qdef = next(iter(row['questions'].items()))
-        inputs, q, _ = agent._prepare(agent._input(row['state']), qdef)
+        request, question = record_input(agent, row, qid, _training_question(qdef, option_rng))
+        inputs, q, _ = agent._prepare(request, question)
         target = _decision_target(row, qid, q)
         input_fields = tuple(sorted(inputs))
         items = buckets.setdefault(input_fields, [])
@@ -319,36 +356,47 @@ def _grounding_train_mode(agent, config):
 
 
 @torch.no_grad()
-def grounding_metrics(agent, rows, limit=256, threshold=.25):
+def grounding_metrics(agent, rows, limit=256, threshold=.25, *, micro_batch=1, max_micro_tokens=4096):
     """Held-out single-box accuracy and score-thresholded set precision/recall, not COCO AP."""
+    if micro_batch < 1 or max_micro_tokens < 1:
+        raise ValueError("grounding batch size and token budget must be positive")
     rng = random.Random(0)
     chosen = rng.sample(rows, min(len(rows), limit)) if limit else rows
     stats = {"single_n": 0, "single_iou": 0., "single_iou50": 0, "set_tp": 0, "set_pred": 0,
              "set_gold": 0, "set_n": 0, "presence_n": 0, "presence_correct": 0}
     agent.model.eval()
     for row in chosen:
-        qid, qdef = next(iter(row["questions"].items()))
-        inputs, q, _ = agent._prepare(agent._input(row["state"]), qdef)
-        if "grounding" not in row:
-            target = _decision_target(row, qid, q)
-            probabilities = agent._logits(inputs, len(target))[0].softmax(-1)
-            if q.get('option_order') is not None:
-                probabilities = probabilities[torch.argsort(torch.as_tensor(q['option_order'],device=agent.device))]
-            stats["presence_n"] += 1
-            expected_index = max(range(len(target)), key=lambda i: target[i])
-            stats["presence_correct"] += int(int(probabilities.argmax()) == expected_index)
+        if "grounding" in row:
             continue
-        spec = row["grounding"]; multiple = spec["task"] == "multiple"
+        qid, qdef = next(iter(row["questions"].items()))
+        request, question = record_input(agent, row, qid, qdef)
+        inputs, q, _ = agent._prepare(request, question)
+        target = _decision_target(row, qid, q)
+        logits = agent._logits(inputs, len(target))[0]
+        order = q.get('option_order')
+        if order is not None:
+            logits = logits[torch.argsort(torch.as_tensor(order, device=agent.device))]
+        selected = int(logits.argmax())
+        stats["presence_n"] += 1
+        stats["presence_correct"] += int(target[selected] == max(target))
+    config = GroundingTrainConfig(micro_batch=micro_batch, max_micro_tokens=max_micro_tokens)
+    for chunk, inputs, multiple in _geometry_microbatches(agent, chosen, config):
         out = agent._grounding_outputs(inputs, multiple=multiple)
-        truth = validate_boxes(spec["boxes"]).to(agent.device)
-        boxes = out["boxes"][0]
         if not multiple:
-            if len(truth):
-                iou = float(box_iou(boxes, truth)[0, 0])
-                stats["single_n"] += 1; stats["single_iou"] += iou; stats["single_iou50"] += int(iou >= .5)
-        else:
+            positive = [i for i, row in enumerate(chunk) if row["grounding"]["boxes"]]
+            if positive:
+                truth = validate_boxes([chunk[i]["grounding"]["boxes"][0] for i in positive]).to(agent.device)
+                ious = box_iou(out["boxes"][positive, 0], truth).diag().tolist()
+                stats["single_n"] += len(ious)
+                stats["single_iou"] += sum(ious)
+                stats["single_iou50"] += sum(iou >= .5 for iou in ious)
+            continue
+        for index, row in enumerate(chunk):
+            spec = row["grounding"]
+            truth = validate_boxes(spec["boxes"]).to(agent.device)
+            boxes = out["boxes"][index]
             stats['set_n'] += 1
-            scores = out["object_logits"][0].sigmoid() * out["quality_logits"][0].sigmoid()
+            scores = out["object_logits"][index].sigmoid() * out["quality_logits"][index].sigmoid()
             predicted = boxes[scores >= threshold]
             ignore = validate_boxes(spec.get("ignored", [])).to(agent.device)
             if len(ignore) and len(predicted):
@@ -372,9 +420,11 @@ def grounding_metrics(agent, rows, limit=256, threshold=.25):
 
 
 def _evaluate_development(agent, geometry_rows, decision_rows, config):
-    result = grounding_metrics(agent, geometry_rows, config.eval_limit)
+    result = grounding_metrics(agent, geometry_rows, config.eval_limit,
+                               micro_batch=config.grounding_eval_micro_batch, max_micro_tokens=config.max_micro_tokens)
     if decision_rows:
-        result.update(_decision_development(agent, decision_rows, config.retention_tagged_only))
+        result.update(_decision_development(agent, decision_rows, config.retention_tagged_only,
+            micro_batch=config.decision_eval_micro_batch, max_micro_tokens=config.max_micro_tokens))
     return result
 
 
@@ -384,22 +434,47 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
     cfg = config or GroundingTrainConfig()
     cfg.validate()
     ctx = distributed_context()
-    if cfg.selection_metric == 'decision_macro' and not decision_dev_data:
-        raise ValueError('decision_macro selection requires decision_dev_data')
+    if cfg.selection_metric in ('decision_macro', 'harmonic') and not decision_dev_data:
+        raise ValueError(cfg.selection_metric + ' selection requires decision_dev_data')
     torch.manual_seed(cfg.seed)
-    # Keep million-row corpora off the Python heap on each independent GPU rank.
-    # The index is eight bytes per row; full schema validation still runs first.
-    rows = _IndexedGroundingRows(train_data) if Path(train_data).stat().st_size >= 128 * 1024**2 else load_grounding_rows(train_data)
     dev = load_grounding_rows(dev_data)
-    if cfg.slots == 1 and any(row.get('grounding',{}).get('task')=='multiple' for row in chain(rows, dev)):
-        raise ValueError('single-box training requires a single-target view; never relabel multi-object annotations as one box')
-    dev_groups = {row["group"] for row in dev}
-    if any(row["group"] in dev_groups for row in rows):
-        raise ValueError("grounding train/dev image groups overlap")
+    from .multimodal_train import load_rows
+    decision_dev = load_rows(decision_dev_data) if decision_dev_data else []
+    dev_groups = {row["group"] for row in dev if row.get("group") is not None}
+    decision_groups = set()
+    for row in decision_dev:
+        group = row.get("group")
+        if group is not None:
+            source = None if str(group).startswith(("toolace:", "coco:")) else row.get("source", row.get("dataset"))
+            decision_groups.add((source, group))
+
+    def check_single_box(row):
+        if cfg.slots == 1 and row.get("grounding", {}).get("task") == "multiple":
+            raise ValueError("single-box training requires a single-target view; never relabel multi-object annotations as one box")
+
+    def validate_split(row):
+        check_single_box(row)
+        group = row.get("group")
+        if group in dev_groups:
+            raise ValueError("grounding train/dev image groups overlap")
+        source = None if str(group).startswith(("toolace:", "coco:")) else row.get("source", row.get("dataset"))
+        if (source, group) in decision_groups:
+            raise ValueError("grounding train/decision development groups overlap: " + str(group))
+
+    for row in dev:
+        check_single_box(row)
+    # Validate the split while indexing, with eight bytes per row on each GPU rank.
+    if Path(train_data).stat().st_size >= 128 * 1024**2:
+        rows = _IndexedGroundingRows(train_data, validate_split)
+    else:
+        rows = load_grounding_rows(train_data)
+        for row in rows:
+            validate_split(row)
     agent = agent or MultimodalAgent(model, device=ctx.device if ctx.world_size > 1 else device,
                                      grounding_slots=cfg.slots, max_len=cfg.max_len)
     agent.max_len = cfg.max_len
-    agent._video_cache_dir = cfg.video_cache_dir or '.cache/multimodal-video'
+    agent._video_cache_dir = cfg.video_cache_dir
+    agent._video_cache_size = cfg.video_cache_size
     base = agent.model.get_base_model() if _is_adapter_model(agent.model) else agent.model
     if not hasattr(base, "grounding_head"):
         raise ValueError("grounding architecture must be installed before training")
@@ -410,8 +485,8 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
         raise ValueError('training slots differ from the installed grounding architecture')
     if cfg.mode == "head":
         agent.model.requires_grad_(False)
-        _active_head(agent.model).float().requires_grad_(cfg.train_readout_in_warmup)
-        if hasattr(base, "decision_scorer"):base.decision_scorer.float().requires_grad_(cfg.train_readout_in_warmup)
+        readout = base.decision_scorer if getattr(agent, 'readout', 'letter') == 'candidate' else _active_head(agent.model)
+        readout.float().requires_grad_(cfg.train_readout_in_warmup)
     else:
         configure_training(agent, MultimodalTrainConfig(mode=cfg.mode, lora_rank=cfg.lora_rank,
             lora_alpha=cfg.lora_alpha, lora_targets=cfg.lora_targets, train_projectors=agent.model_type == 'gemma4'))
@@ -429,17 +504,13 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
         {'parameters': sum(parameter.numel() for parameter in group['params'])} for group in optimizer.param_groups]
     ctx.synchronize_parameters(params)
     replay = []
-    decision_dev = []
-    if decision_dev_data:
-        from .multimodal_train import load_rows
-        decision_dev = load_rows(decision_dev_data)
     if replay_data:
-        from .multimodal_train import load_rows
         replay = load_rows(replay_data)
         replay = [r for r in replay if r.get("group") not in dev_groups]
         if agent.model_type not in {"gemma4", "qwen2_5_omni", "qwen2_5_omni_thinker", "gemma3n"}:
             replay = [r for r in replay if not (isinstance(r["state"], dict) and r["state"].get("audio") is not None)]
     rng = random.Random(cfg.seed)
+    option_rng = random.Random(cfg.seed + 1009 * (ctx.rank + 1)) if cfg.shuffle_options else None
     order = list(range(len(rows)))
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
@@ -494,7 +565,8 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
                 if cfg.batch_decisions or not train_decisions or 'grounding' in row:
                     continue
                 qid, qdef = next(iter(row["questions"].items()))
-                inputs, q, _ = agent._prepare(agent._input(row["state"]), qdef)
+                request, question = record_input(agent, row, qid, _training_question(qdef, option_rng))
+                inputs, q, _ = agent._prepare(request, question)
                 values = _decision_target(row, qid, q)
                 with _activation_context(inputs, cfg):
                     logits = agent._logits(inputs, len(values))
@@ -523,7 +595,7 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
                 (loss / window_size).backward()
                 loss_sum += float(loss.detach())
             if cfg.batch_decisions and train_decisions:
-                for chunk, inputs in _decision_microbatches(agent, local_rows, cfg):
+                for chunk, inputs in _decision_microbatches(agent, local_rows, cfg, option_rng=option_rng):
                     with _activation_context(inputs, cfg):
                         loss = _decision_batch_loss(agent, chunk, inputs, cfg)
                         decision_forwards += 1

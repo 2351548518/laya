@@ -29,6 +29,11 @@ export interface BoxQuestion {
 }
 export type MultimodalQuestion = Question | BoxQuestion;
 export type MultimodalQuestions = Readonly<Record<string, MultimodalQuestion>>;
+export interface ImageAsset {
+  readonly type: 'image';
+  readonly format: 'png' | 'jpg' | 'jpeg';
+  readonly data_base64: string;
+}
 export type MultimodalMedia =
   | { image: Uint8Array; audio?: never; video?: never }
   | { audio: Uint8Array; image?: never; video?: never }
@@ -111,10 +116,8 @@ export interface RouteSnapshot {
 interface AnswerBase {
   /** Optional action metadata returned by Laya. */
   action?: { act_probability: number };
-  /** The probability mass on the answer actually reported (`max(p)`). Unlike `confidence`, which
-   *  means normalized entropy on `choice` and `score` and `max(p_yes, p_no)` on `noul`, this is
-   *  the same quantity on all three types, so one threshold gates across them. */
-  answer_confidence: number;
+  /** Probability of the selected answer when supplied by the Laya abstention extension. */
+  answer_confidence?: number;
   /** Set by the abstention gate on the answers that fell below `minConfidence`, and only then:
    *  `flag_low_confidence` writes `True` and never writes the key otherwise. */
   low_confidence?: true;
@@ -205,17 +208,17 @@ export interface OptionCollapse {
 export interface Usage {
   /** Non-pad tokens of the state's rows, one row per question, so it grows with the questions. */
   input_tokens: number;
-  /** Always 0: the head answers in one pass and generates nothing. */
+  /** Output tokens reported by the server. Local typed decisions generate zero. */
   output_tokens: number;
   /** Tokens the whole serialized state needs. */
-  state_tokens: number;
+  state_tokens?: number;
   /** Tokens of it at least one question did not get: the worst case over the questions, since
    *  each leaves the state a different room. */
-  state_tokens_dropped: number;
+  state_tokens_dropped?: number;
   /** Whether that worst case dropped anything. */
-  truncated: boolean;
+  truncated?: boolean;
   /** The ids whose own window was cut, empty when none was. */
-  truncated_questions: string[];
+  truncated_questions?: string[];
   /** Present only when some question's options were collapsed, keyed by question id. */
   options?: Record<string, OptionCollapse>;
 }
@@ -232,6 +235,12 @@ export interface MultimodalPrediction<Q extends MultimodalQuestions = Multimodal
   answers: { -readonly [K in keyof Q]: MultimodalAnswer<Q[K]> };
   usage: BatchUsage & { forward_passes: number; truncated: boolean };
   routing?: { model: 'multimodal'; repo: string | null; reason: string; detection: null; workflow: null };
+}
+export interface SystemOneImagePrediction<Q extends MultimodalQuestions = MultimodalQuestions> {
+  model: string;
+  answers: { -readonly [K in keyof Q]: Q[K] extends BoxQuestion
+    ? Omit<BoxAnswer, 'confidence'> & { confidence: number | null } : MultimodalAnswer<Q[K]> };
+  usage: BatchUsage;
 }
 /** Aggregate token counts. Per-state truncation metadata stays in each result's usage. */
 export interface BatchUsage {

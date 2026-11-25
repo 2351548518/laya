@@ -19,6 +19,21 @@ BOX_RESULT = {
 
 
 class MultimodalTests(unittest.TestCase):
+    def test_systemone_image_assets_send_the_header_and_allow_null_box_confidence(self):
+        result = copy.deepcopy(BOX_RESULT)
+        result.pop("routing")
+        result["usage"] = {"input_tokens": 96, "output_tokens": 0}
+        result["answers"]["target"]["confidence"] = None
+        assets = {"photo": {"type": "image", "format": "png", "data_base64": "aW1hZ2U="}}
+        with Server(result) as server:
+            client = LayaClient(base_url=server.url)
+            self.assertEqual(client.predict_image_assets("photo", BOX_QUESTIONS, assets), result)
+            method, path, headers, wire = server.requests[0]
+            self.assertEqual((method, path), ("POST", "/v1/systemone"))
+            self.assertEqual({key.lower(): val for key, val in headers.items()}["typesafe-danger-zone-images"], "true")
+            self.assertEqual(json.loads(wire), {"state": "photo", "model": "multimodal",
+                                                "questions": BOX_QUESTIONS, "assets": assets})
+
     def test_sends_readable_box_and_exact_media_bytes(self):
         with Server(BOX_RESULT) as server:
             client = LayaClient(base_url=server.url + "/api", api_key="test-key")

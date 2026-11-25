@@ -144,6 +144,23 @@ def test_example_verifier_and_benchmark_execute_the_native_contract(tmp_path, mo
     assert report["grounding"]["acc_iou50"] == 1
     assert "harmonic_accuracy" in report and len(report["datasets"]["grounding"]["sha256"]) == 64
 
+    from scripts.multimodal.prepare_dataset import main as prepare_dataset
+    mixed = tmp_path / "mixed.jsonl"
+    mixed.write_bytes(decisions.read_bytes() + boxes.read_bytes())
+    suite = tmp_path / "suite"
+    prepare_dataset(["--split", "mixed=" + str(mixed), "--out", str(suite)])
+    manifest = suite / "manifest.json"
+    args = ["--model", str(checkpoint), "--suite-manifest", str(manifest), "--suite", "mixed",
+            "--out", str(evaluation_output)]
+    evaluate.main(args)
+    frozen = json.loads(evaluation_output.read_text(encoding="utf-8"))
+    assert frozen["decisions"] == report["decisions"] and frozen["grounding"] == report["grounding"]
+    assert frozen["datasets"]["suite"]["name"] == "mixed"
+    (suite / "mixed.jsonl").write_bytes(b"changed\n")
+    with pytest.raises(SystemExit) as exc:
+        evaluate.main(args)
+    assert exc.value.code == 2
+
 
 def test_harmonic_accuracy_requires_both_metrics_with_samples():
     decisions = {"overall": {"n": 10, "accuracy": 0.9}}
@@ -181,12 +198,13 @@ def test_portable_recipes_preserve_the_measured_optimizer_settings():
 def test_allowing_unadmitted_inputs_never_discards_audio_or_wrong_processor(tmp_path):
     model = tmp_path / 'model'
     model.mkdir()
+    questions = {'check': {'type': 'noul', 'instructions': 'Is the context relevant?'}}
     for name in ['train', 'dev', 'decision_dev']:
-        (tmp_path / (name + '.jsonl')).write_text(json.dumps(dict(state='context')) + '\n')
+        (tmp_path / (name + '.jsonl')).write_text(json.dumps(dict(state='context', questions=questions)) + '\n')
     with pytest.raises(ValueError, match='processor admission'):
         validate_visual_training(tmp_path, model, 16384)
     validate_visual_training(tmp_path, model, 16384, require_admission=False)
-    (tmp_path / 'train.jsonl').write_text(json.dumps(dict(state={'audio': 'voice.wav'})) + '\n')
+    (tmp_path / 'train.jsonl').write_text(json.dumps(dict(state={'audio': 'voice.wav'}, questions=questions)) + '\n')
     with pytest.raises(ValueError, match='audio cannot be discarded'):
         validate_visual_training(tmp_path, model, 16384, require_admission=False)
 
@@ -200,3 +218,41 @@ def test_calibration_rejects_an_aggregate_gain_hiding_a_modality_regression():
     assert not calibration_passes(raw, changed)[0]
     changed['by_modality']['image']['nll'] = .3
     assert calibration_passes(raw, changed) == (True, [])
+
+
+def test_request_shaped_dataset_preserves_media_labels_and_option_order(tmp_path):
+    from laya.grounding_train import load_grounding_rows
+    from laya.multimodal_data import can_shuffle_choice, record_input
+    from scripts.multimodal.prepare_dataset import main
+    from test_multimodal import tiny_agent
+
+    image = tmp_path / "photo.png"
+    image.touch()
+    source = tmp_path / "source.jsonl"
+    box = [.1, .2, .5, .6]
+    box_row = {"state": {"text": "Tabletop", "image": str(image)}, "id": "box-1",
+               "questions": {"cup": {"type": "box", "instructions": "Find the cup"}},
+               "grounding": {"task": "single", "boxes": [box], "ignored": []}}
+    choice = {"type": "choice", "instructions": "Pick a response",
+              "criteria": {"A": "accept", "B": "reject", "C": "none of the above"}, "option_order": [1, 0, 2]}
+    choice_row = {"state": "Refund request", "id": "pick-1", "questions": {"action": choice},
+                  "gold": {"action": {"probabilities": {"A": .75, "B": .25, "C": 0.}}}}
+    source.write_text("\n".join(map(json.dumps, [box_row, choice_row])) + "\n")
+    output = tmp_path / "dataset"
+    main(["--training", "--split", "train=" + str(source), "--out", str(output)])
+    saved, saved_choice = [json.loads(line) for line in (output / "train.jsonl").read_text().splitlines()]
+    assert saved["expected"]["cup"] == {"type": "box", "confidence": None,
+                                         "box": dict(left=.1, top=.2, right=.5, bottom=.6)}
+    assert saved["request"]["assets"]
+    wire_choice = saved_choice["request"]["questions"]["action"]
+    assert "option_order" not in wire_choice and list(wire_choice["criteria"]) == ["B", "A", "C"]
+    assert not Path(next(iter(saved["media_files"].values()))).is_absolute()
+    box_record, choice_record = load_grounding_rows(output / "train.jsonl")
+    assert box_record["grounding"] == box_row["grounding"]
+    request, _ = record_input(tiny_agent(), box_record, "cup", box_row["questions"]["cup"])
+    assert request["text"] == "Tabletop" and Path(request["image"][0]).resolve() == image
+    assert choice_record["gold"] == choice_row["gold"]
+    assert choice_record["questions"]["action"] == choice
+    assert not can_shuffle_choice(choice)
+    assert not can_shuffle_choice({key: value for key, value in choice.items() if key != "option_order"})
+    assert can_shuffle_choice({"type": "choice", "instructions": "Pick a response", "criteria": ["accept", "reject"]})

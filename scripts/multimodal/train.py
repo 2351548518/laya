@@ -10,34 +10,36 @@ import torch
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 from laya.grounding_train import GroundingTrainConfig,finetune_grounding
 from laya.multimodal import MultimodalAgent
+from laya.multimodal_data import read_records
 from laya.multimodal_distributed import distributed_context
 
 
-def validate_visual_training(root, model, max_len=None, require_admission=True):
+def validate_visual_training(root, model, max_len=None, require_admission=True, *, train_split='train'):
     # Never silently drop the audio part of a trajectory to make a VLM fit.
     expected_processor=Path(model).resolve();verified_processors=set()
-    for name in ('train.jsonl','dev.jsonl','decision_dev.jsonl'):
-        with (root/name).open() as stream:
-            for line in stream:
-                row=json.loads(line);state=row['state']
-                if isinstance(state,dict) and (state.get('audio') is not None or
-                        (state.get('video') is not None and state.get('video_audio') is not False)):
-                    raise ValueError('Qwen3.5 requires an admitted visual-only view; audio cannot be discarded: '+str(row.get('id')))
-                admitted=row.get('training_admission',{}).get('processor')
-                if name=='train.jsonl' and not admitted and require_admission:
-                    raise ValueError('Qwen3.5 training requires native processor admission for every training row')
-                if admitted and admitted not in verified_processors:
-                    if Path(admitted).resolve()!=expected_processor:
-                        raise ValueError('Training view was admitted using a different backbone processor: '+str(admitted))
-                    verified_processors.add(admitted)
-                if max_len is not None and admitted and row['training_admission'].get('max_len')!=max_len:
-                    raise ValueError('Native admission and training context budgets must match')
+    for split in (train_split, 'dev', 'decision_dev'):
+        name = split + '.jsonl'
+        for row in read_records(root/name, verify_media=False):
+            state=row['state']
+            if isinstance(state,dict) and (state.get('audio') is not None or
+                    (state.get('video') is not None and state.get('video_audio') is not False)):
+                raise ValueError('Qwen3.5 requires an admitted visual-only view; audio cannot be discarded: '+str(row.get('id')))
+            admitted=row.get('training_admission',{}).get('processor')
+            if split == train_split and not admitted and require_admission:
+                raise ValueError('Qwen3.5 training requires native processor admission for every training row')
+            if admitted and admitted not in verified_processors:
+                if Path(admitted).resolve()!=expected_processor:
+                    raise ValueError('Training view was admitted using a different backbone processor: '+str(admitted))
+                verified_processors.add(admitted)
+            if max_len is not None and admitted and row['training_admission'].get('max_len')!=max_len:
+                raise ValueError('Native admission and training context budgets must match')
 
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--model',required=True);parser.add_argument('--data',required=True)
     parser.add_argument('--out',required=True);parser.add_argument('--config',required=True)
+    parser.add_argument('--train-split', choices=['train', 'warmup'], default='train')
     parser.add_argument('--require-original-base',action='store_true')
     parser.add_argument('--visual-only',action='store_true')
     parser.add_argument('--allow-unadmitted',action='store_true',
@@ -54,7 +56,9 @@ def main():
     if args.visual_only!=(model_type=='qwen3_5'):
         raise ValueError('Qwen3.5 requires --visual-only; Gemma4 keeps the full-omni recipe')
     root=Path(args.data)
-    if args.visual_only:validate_visual_training(root,source,config.max_len,not args.allow_unadmitted)
+    if args.visual_only:
+        validate_visual_training(root, source, config.max_len, not args.allow_unadmitted,
+                                 train_split=args.train_split)
     if args.require_original_base:
         if (Path(args.model)/'multimodal_config.json').exists() or (Path(args.model)/'adapter_config.json').exists():
             raise ValueError('fresh-base training must not load a decision checkpoint or adapter')
@@ -75,7 +79,7 @@ def main():
             'readout':agent.readout,'prompt_version':agent.prompt_version,'grounding_architecture':'single-v1',
             'inherited_adapters':hasattr(agent.model,'peft_config'),
             'fresh_optimizer':True,'world_size':ctx.world_size,'text_attention':args.text_attention},indent=2)+'\n')
-    finetune_grounding(root/'train.jsonl',root/'dev.jsonl',args.out,model=args.model,
+    finetune_grounding(root/(args.train_split+'.jsonl'),root/'dev.jsonl',args.out,model=args.model,
         decision_dev_data=root/'decision_dev.jsonl',config=config,agent=agent)
 
 

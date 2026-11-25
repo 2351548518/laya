@@ -91,32 +91,49 @@ result = router.predict("Current scene", questions, image="scene.jpg")
 ```
 
 For the HTTP server, install `.[multimodal,serve]`, set `LAYA_MULTIMODAL_MODEL` to the same
-checkpoint, and start `laya-serve`. Send `questions`, exactly one of `image`, `audio` or
-`video`, and any optional `state`, `max_len` or `min_confidence` fields to `POST /v1/multimodal`.
-Supply the media as `{"base64": "..."}` containing the original file bytes. The configured
-backbone determines which modalities and video audio the service can process. The request
-obeys the server's authentication, body size and token limits. [HTTP API](http-api.md) ·
-[Python and TypeScript media examples](multimodal-clients.md)
+checkpoint and start `laya-serve`. Use `POST /v1/systemone` for text and image questions.
+The `assets` map places pictures in the state, instructions or criteria. Set
+`"model": "multimodal"` for native text decisions. Use `POST /v1/multimodal` for inline audio
+and video file bytes. The configured backbone determines which modalities and video audio
+the service can process. [HTTP API](http-api.md) · [Media examples](multimodal-clients.md)
+
+Set `batch_size=4` on a native Qwen3.5 Python text request to batch its questions as
+independent rows within a padded token budget.
 
 ## Local JSONL data loading
 
-`laya.multimodal_train.load_rows` reads one JSON object per line and resolves relative media
-paths from the JSONL directory. The joint trainer's `laya.grounding_train.load_grounding_rows`
-requires exactly one question per row and passes its media paths to the runtime as written.
-Use absolute paths or run from the directory those paths are relative to.
+`load_rows` accepts local JSONL with a System One `request` and labels stored next to it.
+The joint trainer accepts the same envelope with one question per row. Both readers resolve
+local media relative to the JSONL file. Existing flat native JSONL and Kev text records with
+a `label` on each question also load directly.
 
-Use `expected` to label the correct decision.
+Image placeholders in `request.state` reference `request.assets`. The `media_files` map resolves
+each named part on disk. An array of image placeholders followed by a text string uses the
+same image-first prompt layout as the original native dataset. For HTTP multipart calls,
+attach those files as the named parts and send the image header.
 
 ```json
-{"id":"scene-1","group":"episode-1","state":{"image":"images/scene.jpg","text":"Current scene"},"questions":{"action":{"type":"choice","instructions":"Choose the next action.","criteria":{"continue":"continue normally","inspect":"inspect the situation"}}},"expected":{"action":"inspect"}}
+{"id":"scene-1","group":"episode-1","request":{"model":"multimodal","state":["scene","Current scene"],"assets":{"scene":{"type":"image","part":"picture"}},"questions":{"action":{"type":"choice","instructions":"Choose the next action.","criteria":{"continue":"continue normally","inspect":"inspect the situation"}}}},"media_files":{"picture":"images/scene.jpg"},"expected":{"action":"inspect"}}
 ```
 
-Use `gold` to supply a probability distribution over the same answer options. Both trainers
-use `gold` when a row contains both fields.
+Use `expected` for a choice label, a Boolean answer, a zero-based score, or a typed Box target.
+Use `gold` when the source supplies a probability distribution, which takes precedence for
+that question. Keep a Box target's `confidence` null because localization quality is learned.
 
 ```json
 {"gold":{"action":{"probabilities":{"continue":0.2,"inspect":0.8}}}}
 ```
+
+```json
+{"expected":{"target":{"type":"box","box":{"left":0.1,"top":0.2,"right":0.5,"bottom":0.6},"confidence":null}}}
+```
+
+The converter stores fixed option orders in `option_orders` outside the HTTP request. A
+Choice's criteria appear in the same display order on the wire. Noul and Score keep their
+official ordering on the wire and recover the original order when loaded for native training.
+Audio, video and rubrics exceeding 10 levels use the local format, which preserves the
+annotation and media controls. Prepare a text and image benchmark for external HTTP calls
+with `prepare_systemone.py`. [Dataset commands](https://github.com/2351548518/laya/tree/main/scripts/multimodal)
 
 Preserve the original source and group identifiers. Use distinct training, validation, calibration
 and test groups, including their media identities. Store dataset preparation in `_local/`.
@@ -124,9 +141,8 @@ The public dataset provides a separate, source-attributed export. See its card f
 and how the media are stored. [Open JEV Omni public data](https://huggingface.co/datasets/ZeeoRe/open-jev-omni-public)
 
 For joint training, each data directory contains `train.jsonl`, `dev.jsonl` for single-box
-validation, and `decision_dev.jsonl` for decision validation. A head warmup directory can contain
-a smaller training subset with the same protected development files. Decision rows in joint
-validation accept either a hard `expected` label or a `gold` probability distribution.
+validation, and `decision_dev.jsonl` for decision validation. Choose `--train-split warmup` to
+use `warmup.jsonl` with the same development files.
 
 Prepared Qwen exports can record the processor, native token count and context budget in
 `training_admission`. Match the processor and budget to the run configuration. For local
@@ -175,11 +191,17 @@ The starter recipes use supervised losses in `laya/grounding_train.py`.
 - A box annotation supplies four coordinates. L1 penalizes coordinate errors, generalized IoU
   (GIoU) penalizes poor overlap, and the quality loss uses the predicted box's IoU with the target.
 
-Readout calculations use FP32. The LoRA recipe uses gradient checkpointing, length bucketing,
+Candidate readouts project only the selected hidden states in FP32. The LoRA recipe uses gradient checkpointing, length bucketing,
 per-module learning rates, and cosine decay after warmup. Set `activation_offload_min_tokens`
-to offload saved activations to CPU for long inputs. Joint checkpoint selection uses the
-average of the available grounding score and macro decision accuracy across modalities.
+to offload saved activations to CPU for long inputs. The LoRA recipe selects by the harmonic
+mean of the single-box IoU≥0.5 accuracy and decision accuracy averaged across modalities.
 Retention checks can reject a checkpoint that exceeds its allowed development-set regression.
+Set `video_cache_dir` to `null` to disable disk caching and use `video_cache_size` to cap the
+number of decoded clips retained in memory on each rank.
+Set `shuffle_options` in the joint configuration to permute Choice options without a fixed
+order or references to option positions. The loss aligns logits to the original labels and replay
+distributions. Development inference uses one request per decision forward pass by default.
+The recipes allow four compatible image requests per grounding evaluation forward pass.
 
 Use `laya-mm-train --help` for the decision-only trainer's JSONL, checkpoint selection,
 calibration and resume options.
@@ -202,7 +224,9 @@ levels. If the channel is missing, the score uses the modality's fitted temperat
 distribution when the modality has no score fit.
 
 Evaluate the frozen checkpoint on local typed decisions and single-box targets. The benchmark
-guide gives the commands, metric denominators and latency protocol.
+guide gives the commands, metric denominators and latency protocol. Native evaluation supports a
+named suite from a checked manifest. It reports accuracy and calibration by modality, question type,
+source and task when provided, and includes normalized score MAE and RPS.
 [Native accuracy and latency](benchmarks.md#native-multimodal-checkpoints)
 
 ## Source and local workspace layout

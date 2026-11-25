@@ -37,14 +37,14 @@ const requiredJevConfidence: number = result.answers.team.x_jev_confidence;
 result.answers.refund.x_jev_confidence;
 // @ts-expect-error Jev confidence is numeric when present.
 const textJevConfidence: ChoiceAnswer['x_jev_confidence'] = '0.6';
-const stateTokens: number = result.usage.state_tokens;
-const stateTokensDropped: number = result.usage.state_tokens_dropped;
-const truncated: boolean = result.usage.truncated;
-const truncatedQuestions: string[] = result.usage.truncated_questions;
+const stateTokens: number | undefined = result.usage.state_tokens;
+const stateTokensDropped: number | undefined = result.usage.state_tokens_dropped;
+const truncated: boolean | undefined = result.usage.truncated;
+const truncatedQuestions: string[] | undefined = result.usage.truncated_questions;
 const collapsedSpans: number | null | undefined = result.usage.options?.refund?.tokens_per_option;
 const mixedSegment: string | null | undefined = result.routing?.detection?.mixed_segment;
-const answerConfidence: number = result.answers.team.answer_confidence;
-const noulAnswerConfidence: number = result.answers.refund.answer_confidence;
+const answerConfidence: number | undefined = result.answers.team.answer_confidence;
+const noulAnswerConfidence: number | undefined = result.answers.refund.answer_confidence;
 const gateState: 'passed' | 'abstained' | 'unevaluated' | undefined = result.answers.priority.abstention;
 const gateThreshold: number | undefined = result.answers.priority.abstention_threshold;
 const flagged: true | undefined = result.answers.refund.low_confidence;
@@ -60,8 +60,7 @@ const clearedAnswer: ChoiceAnswer = { ...gatedAnswer, low_confidence: false };
 // An ungated call is the ordinary answer shape: no flag, no gate state, no threshold echo.
 const ungatedReport: ChoiceAnswer = { type: 'choice', confidence: 0.5, answer_confidence: 0.42,
   choice: 'a', probabilities: { a: 0.42 } };
-// @ts-expect-error An answer must carry the calibrated confidence it was gated on.
-const uncalibratedAnswer: ChoiceAnswer = { type: 'choice', confidence: 0.5, choice: 'a',
+const strictAnswer: ChoiceAnswer = { type: 'choice', confidence: 0.5, choice: 'a',
   probabilities: { a: 0.5 } };
 // @ts-expect-error Routing metadata is optional.
 result.routing.model;
@@ -155,7 +154,7 @@ const batchArrayLabel: 'a' | 'b' = batch.results[0]!.answers.arrayChoice.choice;
 const batchScore: number = batch.results[0]!.answers.priority.score;
 const batchNoul: number = batch.results[0]!.answers.refund.noul;
 const totalTokens: number = batch.total_usage.input_tokens;
-const perStateTruncated: boolean = batch.results[0]!.usage.truncated;
+const perStateTruncated: boolean | undefined = batch.results[0]!.usage.truncated;
 // @ts-expect-error Aggregate token counts do not claim per-state truncation metadata.
 batch.total_usage.truncated;
 // @ts-expect-error Unknown question IDs stay invalid inside a batch.

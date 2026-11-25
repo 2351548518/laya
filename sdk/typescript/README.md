@@ -355,7 +355,7 @@ and TLS at your application proxy or gateway.
 | Endpoint | Request | Response |
 | --- | --- | --- |
 | `GET /health` | None for liveness | `{status}`, plus `loaded` and `device` with the bearer |
-| `POST /v1/systemone` | `{state, questions, model?}` | `{model, answers, usage}` plus optional `routing` |
+| `POST /v1/systemone` | `{state, questions, model?, assets?}` | `{model, answers, usage}` plus optional `routing` |
 | `POST /v1/systemone/batch` | `{states, questions, model?, batch_size?, sort_by_length?}` | `{results, total_usage}` in input order |
 | `POST /v1/multimodal` | `{state?, questions, image\|audio\|video, max_len?, min_confidence?}` | `{model, answers, usage, routing?}`, including single-box answers |
 

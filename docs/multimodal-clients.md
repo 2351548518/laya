@@ -1,7 +1,7 @@
 # Native media from Python and TypeScript
 
 Run `laya-serve` with a trained native checkpoint. The Python and TypeScript SDKs send file
-bytes to `POST /v1/multimodal`, where the server decodes the media and runs the model.
+bytes to `POST /v1/multimodal`. Their image asset methods use `POST /v1/systemone`.
 
 ## Start the service
 
@@ -84,6 +84,36 @@ with the target. `usage.forward_passes` counts the executed questions.
 For pure text, use the SDK's `predict` or `predictBatch`/`predict_batch` on the text endpoints.
 For in-process text and media inference with the same native checkpoint, use
 `MultimodalAgent`. [Native Python usage](multimodal.md#local-prediction)
+
+## System One image assets
+
+Use `predict_image_assets` in Python or `predictImageAssets` in TypeScript when a decision
+references one or more named images in the state, instructions or criteria. Both methods
+attach `TypeSafe-Danger-Zone-Images: true` and return named answers with token counts.
+
+```python
+import base64
+from pathlib import Path
+
+scene = base64.b64encode(Path("scene.jpg").read_bytes()).decode("ascii")
+prediction = client.predict_image_assets(
+    ["scene-photo", "Current tabletop"],
+    {"target": {"type": "box", "instructions": "Locate the red cup."}},
+    {"scene-photo": {"type": "image", "format": "jpeg", "data_base64": scene}},
+)
+```
+
+```ts
+const scene = (await readFile("scene.jpg")).toString("base64");
+const result = await client.predictImageAssets(
+  ["scene-photo", "Current tabletop"],
+  { target: { type: "box", instructions: "Locate the red cup." } },
+  { "scene-photo": { type: "image", format: "jpeg", data_base64: scene } },
+);
+```
+
+Use PNG or JPEG images with each side between 280 and 1,568 pixels. A Box answer can carry
+null confidence when the server does not report localization quality. [System One HTTP contract](http-api.md)
 
 ## HTTP without an SDK
 

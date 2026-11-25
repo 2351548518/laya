@@ -22,7 +22,7 @@ flowchart LR
     C --> E[Router and local checkpoint]
 ```
 
-The SDK exports `predict`, `predictBatch`, `predictMultimodal`, `route` and a Laya-only `health` probe. It ships ESM,
+The SDK exports `predict`, `predictBatch`, `predictImageAssets`, `predictMultimodal`, `route` and a Laya-only `health` probe. It ships ESM,
 CommonJS and declarations, retaining inferred question IDs and choice labels.
 Use `laya-client` when a JavaScript or TypeScript application talks over HTTP to
 self-hosted Python `laya-serve`. Use `laya-ts` when inference must run directly

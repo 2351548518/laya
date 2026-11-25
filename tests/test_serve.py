@@ -219,11 +219,11 @@ def test_jev_strict_projects_the_full_payload(monkeypatch):
     assert set(body) == {"model", "answers", "usage"}
     assert body["model"] == "laya-rl-agent"
     assert body["answers"]["queue"] == {"type": "choice", "choice": "billing",
-                                        "confidence": 0.797,
+                                        "confidence": 0.9278,
                                         "probabilities": {"billing": 0.9519, "tech": 0.0327,
                                                           "other": 0.0154}}
     assert body["answers"]["urgency"] == {"type": "score", "score": 1.6994,
-                                          "confidence": 0.1925,
+                                          "confidence": 0.475,
                                           "probabilities": {"0": 0.0249, "1": 0.65, "2": 0.3251},
                                           "legend": {"0": "calm", "1": "firm", "2": "angry"}}
     assert body["answers"]["threat"] == {"type": "noul", "noul": 0.9148}
@@ -231,14 +231,13 @@ def test_jev_strict_projects_the_full_payload(monkeypatch):
     assert body["usage"] == {"input_tokens": 83, "output_tokens": 0}
 
 
-def test_jev_strict_is_off_by_default(monkeypatch):
-    """No flag: the full payload, additions and all, byte for byte."""
+def test_jev_strict_single_response_is_on_by_default(monkeypatch):
     client, _ = _strict_client(monkeypatch, None)
     body = client.post("/v1/systemone", json=REQ).json()
-    assert set(body) == {"model", "answers", "usage", "routing"}
-    assert "action" in body["answers"]["queue"]
-    assert "confidence" in body["answers"]["threat"]
-    assert body["usage"] == FULL_USAGE
+    assert set(body) == {"model", "answers", "usage"}
+    assert body["answers"]["queue"]["confidence"] == 0.9278
+    assert body["answers"]["threat"] == {"type": "noul", "noul": 0.9148}
+    assert body["usage"] == {"input_tokens": 83, "output_tokens": 0}
 
 
 def test_jev_strict_rejects_falsy_spellings(monkeypatch):
@@ -326,7 +325,7 @@ def _state_truncated_logs(caplog):
 def test_truncated_state_is_logged_on_systemone(monkeypatch, caplog):
     """A result that dropped state tokens warns once, and the JSON payload stays the result's."""
     monkeypatch.delenv("LAYA_API_KEY", raising=False)
-    monkeypatch.delenv("LAYA_JEV_STRICT", raising=False)
+    monkeypatch.setenv("LAYA_JEV_STRICT", "0")
     client = TestClient(create_app(router=ScriptedUsageRouter([dict(CUT_USAGE)])))
 
     with caplog.at_level(logging.WARNING, logger="laya.serve"):
@@ -351,7 +350,7 @@ def test_truncated_state_is_logged_on_systemone(monkeypatch, caplog):
 
 def test_intact_responses_do_not_log_truncation(monkeypatch, caplog):
     """An uncut result keeps today's payload and does not warn, on either decision route."""
-    monkeypatch.delenv("LAYA_JEV_STRICT", raising=False)
+    monkeypatch.setenv("LAYA_JEV_STRICT", "0")
     client, _ = _client(monkeypatch)
     with caplog.at_level(logging.WARNING, logger="laya.serve"):
         single = client.post("/v1/systemone", json=REQ)
@@ -453,7 +452,7 @@ def test_strict_mode_logs_truncation_before_projection(monkeypatch, caplog):
 def test_missing_or_malformed_usage_stays_a_success(monkeypatch, caplog, usage):
     """A router that omits the truncation report, or fills it with junk, still answers 200."""
     monkeypatch.delenv("LAYA_API_KEY", raising=False)
-    monkeypatch.delenv("LAYA_JEV_STRICT", raising=False)
+    monkeypatch.setenv("LAYA_JEV_STRICT", "0")
     client = TestClient(create_app(router=ScriptedUsageRouter([usage, usage, usage])))
 
     with caplog.at_level(logging.WARNING, logger="laya.serve"):
@@ -475,7 +474,7 @@ def test_missing_or_malformed_usage_stays_a_success(monkeypatch, caplog, usage):
 
 def test_choice_and_score_answers_carry_jev_confidence(monkeypatch):
     """Each choice and score answer reports Jev's `confidence` beside Laya's own (#302)."""
-    client, _ = _strict_client(monkeypatch, None)
+    client, _ = _strict_client(monkeypatch, "0")
     answers = client.post("/v1/systemone", json=REQ).json()["answers"]
     # choice: (max(p) - 1/n) / (1 - 1/n) over billing 0.9519 / tech 0.0327 / other 0.0154
     assert answers["queue"]["x_jev_confidence"] == 0.9278
@@ -556,7 +555,7 @@ def _tournament_client(monkeypatch, group, strict=False):
     if strict:
         monkeypatch.setenv("LAYA_JEV_STRICT", "1")
     else:
-        monkeypatch.delenv("LAYA_JEV_STRICT", raising=False)
+        monkeypatch.setenv("LAYA_JEV_STRICT", "0")
     fake = EliminationRouter()
     return TestClient(create_app(router=fake)), fake
 
@@ -3130,7 +3129,8 @@ def test_http_api_page_documents_exactly_the_forwarded_controls():
         if not line.strip():
             break
         rows.append(line.split("|")[1].strip().strip("`"))
-    documented = set(rows) - {"state", "questions"}
+    assert "assets" in rows
+    documented = set(rows) - {"state", "questions", "assets"}
     assert documented == set(BODY_CONTROLS), "table says %s, serve forwards %s" % (
         sorted(documented), sorted(BODY_CONTROLS))
 
@@ -4513,6 +4513,7 @@ def test_extra_models_refuse_the_names_router_refuses(monkeypatch):
 def test_extra_models_pin_over_http_and_do_not_leak_into_routing(monkeypatch):
     # The end-to-end contract: `model=my-ckpt` reaches `predict` as the pin, a
     # Jev id still means "let the router choose", and a path is still a 422.
+    monkeypatch.setenv("LAYA_JEV_STRICT", "0")
     router, built = _server_router(monkeypatch, LAYA_EXTRA_MODELS='{"my-ckpt": "/tmp/ckpt"}')
     client = TestClient(create_app(router=router))
 

@@ -89,6 +89,7 @@ def test_single_training_rejects_multi_target_rows_before_loading_a_backbone(tmp
     from laya.grounding_train import finetune_grounding
     row={'group':'a','state':{'image':'unused.jpg'},'questions':{'q':{'type':'box','instructions':'the mug'}},
         'grounding':{'task':'multiple','boxes':[[.1,.1,.2,.3],[.5,.5,.7,.8]]}}
+    (tmp_path / 'unused.jpg').touch()
     train=tmp_path/'train.jsonl';dev=tmp_path/'dev.jsonl'
     train.write_text(json.dumps(row)+'\n');dev.write_text(json.dumps(dict(row,group='b'))+'\n')
     with pytest.raises(ValueError,match='never relabel'):
@@ -245,7 +246,7 @@ def test_grounding_rows_cannot_silently_discard_extra_questions(tmp_path):
     from laya.grounding_train import load_grounding_rows
     path=tmp_path/'rows.jsonl'
     q={'type':'box','instructions':'the mug'}
-    path.write_text(json.dumps({'questions':{'a':q,'b':q}})+'\n')
+    path.write_text(json.dumps({'state': '', 'questions':{'a':q,'b':q}})+'\n')
     with pytest.raises(ValueError,match='exactly one'):load_grounding_rows(path)
 
 
@@ -288,9 +289,11 @@ def test_permuted_decision_replay_preserves_training_epoch_order(tmp_path):
         'gold':{'x':{'probabilities':{'false':0.,'true':1.}}}})+'\n')
     output=tmp_path/'out'
     finetune_grounding(train,dev,output,agent=agent,config=GroundingTrainConfig(epochs=3,max_steps=3,
-        global_batch_size=1,learning_rate=.01,train_readout_in_warmup=True,eval_every=0))
+        global_batch_size=1,learning_rate=.01,train_readout_in_warmup=True,eval_every=0,
+        video_cache_dir=None,video_cache_size=5))
     report=json.loads((output/'training_report.json').read_text())
     assert report['steps']==3
     assert report['forward_passes']=={'geometry':0,'decisions':3}
+    assert agent._video_cache_dir is None and agent._video_cache_size == 5
     assert {group['base_lr'] for group in report['optimizer_groups'] if group['name']=='head'}=={.0002}
     assert not torch.equal(original,agent.model.get_output_embeddings().weight)

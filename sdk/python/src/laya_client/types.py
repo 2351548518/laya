@@ -60,6 +60,18 @@ class BoxAnswer(_ConfidenceAnswer):
     box: Box
 
 
+class ImageAsset(TypedDict):
+    type: Literal["image"]
+    format: Literal["png", "jpg", "jpeg"]
+    data_base64: str
+
+
+class SystemOneBoxAnswer(TypedDict):
+    type: Literal["box"]
+    box: Box
+    confidence: Union[float, None]
+
+
 class Usage(TypedDict):
     input_tokens: int
     output_tokens: int
@@ -72,6 +84,12 @@ class _PredictionExtensions(TypedDict, total=False):
 class Prediction(_PredictionExtensions):
     model: str
     answers: Dict[str, Union[ChoiceAnswer, ScoreAnswer, NoulAnswer]]
+    usage: Usage
+
+
+class SystemOneImagePrediction(TypedDict):
+    model: str
+    answers: Dict[str, Union[ChoiceAnswer, ScoreAnswer, NoulAnswer, SystemOneBoxAnswer]]
     usage: Usage
 
 

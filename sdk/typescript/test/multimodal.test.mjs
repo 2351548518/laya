@@ -11,6 +11,20 @@ const prediction = {
   routing: { model: 'multimodal', repo: null, reason: 'explicit model', detection: null, workflow: null },
 };
 
+test('System One image assets use the image header and accept nullable box confidence', async () => {
+  const result = { model: 'native-qwen', usage: { input_tokens: 96, output_tokens: 0 },
+    answers: { target: { ...prediction.answers.target, confidence: null } } };
+  const assets = { photo: { type: 'image', format: 'png', data_base64: 'aW1hZ2U=' } };
+  const state = ['photo', 'Locate the cup.'];
+  const client = new Laya({ fetch: async (url, init) => {
+    assert.match(url, /\/v1\/systemone$/);
+    assert.equal(init.headers.get('typesafe-danger-zone-images'), 'true');
+    assert.deepEqual(JSON.parse(init.body), { model: 'multimodal', state, questions, assets });
+    return Response.json(result);
+  } });
+  assert.deepEqual(await client.predictImageAssets(state, questions, assets), result);
+});
+
 test('native image request preserves subarray bytes and returns normalized box', async () => {
   const bytes = Buffer.alloc(20006);
   for (let i = 0; i < bytes.length; i++) bytes[i] = i % 256;

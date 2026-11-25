@@ -93,7 +93,6 @@ Testing/
 /research/configs
 /research/results/
 /research/scripts/*.py
-/laya/multimodal_data.py
 /laya/multimodal_corpus.py
 /laya/multimodal_curate.py
 /laya/multimodal_mix.py

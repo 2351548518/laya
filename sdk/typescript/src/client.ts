@@ -2,8 +2,9 @@ import {
   LayaAbortError, LayaAPIError, LayaConnectionError, LayaError, LayaResponseError,
   LayaTimeoutError, LayaValidationError,
 } from './errors.js';
-import type { BatchPrediction, BatchPredictOptions, Health, MultimodalMedia, MultimodalOptions, MultimodalPrediction,
-  MultimodalQuestions, Prediction, PredictOptions, Questions, RequestOptions, RouteOptions, RouteSnapshot, State } from './types.js';
+import type { BatchPrediction, BatchPredictOptions, Health, ImageAsset, MultimodalMedia, MultimodalOptions,
+  MultimodalPrediction, MultimodalQuestions, Prediction, PredictOptions, Questions, RequestOptions, RouteOptions,
+  RouteSnapshot, State, SystemOneImagePrediction } from './types.js';
 import { isMinConfidenceKey } from './buckets.js';
 import { isRecord, validateJson, validateQuestions, validateTimeout } from './validation.js';
 import { validateBatchPrediction, validateHealth, validatePrediction, validateRouteSnapshot } from './response.js';
@@ -75,6 +76,25 @@ export class Laya {
     validateQuestions(questions);
     const result = await this.request<Prediction<Q>>('/v1/systemone', this.body(state, questions, options), options);
     validatePrediction(result, questions);
+    return result;
+  }
+
+  /** Evaluate named PNG/JPEG references through the System One JSON endpoint. */
+  async predictImageAssets<const Q extends MultimodalQuestions>(state: Exclude<State, null>, questions: Q,
+      assets: Readonly<Record<string, ImageAsset>>, options: RequestOptions & { model?: string } = {}):
+      Promise<SystemOneImagePrediction<Q>> {
+    validateQuestions(questions, true);
+    this.validateState(state);
+    if (state === null || !isRecord(assets) || !Object.keys(assets).length ||
+        Object.entries(assets).some(([name, asset]) => !name.trim() || !isRecord(asset) ||
+          Object.keys(asset).length !== 3 || asset.type !== 'image' ||
+          !['png', 'jpg', 'jpeg'].includes(asset.format) || typeof asset.data_base64 !== 'string' || !asset.data_base64)) {
+      throw new LayaValidationError('assets must be named PNG/JPEG images with data_base64');
+    }
+    const body = { state, ...this.routingBody(questions, { model: options.model ?? 'multimodal' }), assets };
+    validateJson(body);
+    const result = await this.request<SystemOneImagePrediction<Q>>('/v1/systemone', JSON.stringify(body), options, true);
+    validatePrediction(result, questions, false, true);
     return result;
   }
 
@@ -214,7 +234,7 @@ export class Laya {
     return body;
   }
 
-  private routingBody(questions: Questions, options: RouteOptions) {
+  private routingBody(questions: MultimodalQuestions, options: RouteOptions) {
     if (options.task !== undefined && (typeof options.task !== 'string' || !options.task.trim())) {
       throw new LayaValidationError('task must be a nonempty string');
     }
@@ -247,7 +267,8 @@ export class Laya {
     return body;
   }
 
-  private async request<T>(path: string, body: string | undefined, options: RequestOptions): Promise<T> {
+  private async request<T>(path: string, body: string | undefined, options: RequestOptions,
+      imagesEnabled = false): Promise<T> {
     const timeoutMs = options.timeoutMs ?? this.timeoutMs;
     validateTimeout(timeoutMs);
     const controller = new AbortController();
@@ -262,6 +283,7 @@ export class Laya {
       controller.signal.throwIfAborted();
       const headers = new Headers(this.headers);
       if (body !== undefined) headers.set('Content-Type', 'application/json');
+      if (imagesEnabled) headers.set('TypeSafe-Danger-Zone-Images', 'true');
       const init: RequestInit = {
         method: body === undefined ? 'GET' : 'POST', headers, signal: controller.signal, redirect: 'manual',
       };

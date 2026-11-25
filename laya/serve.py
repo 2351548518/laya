@@ -8,11 +8,10 @@ working unchanged. All this module adds is the HTTP surface Laya itself does not
 ship: a ``POST /v1/systemone`` route and its ``POST /v1/systemone/batch`` sibling,
 ``POST /v1/route`` for routing without inference, an optional bearer check, and a health probe.
 
-Each ``choice`` and ``score`` answer also carries ``x_jev_confidence``: the
-``confidence`` Jev's own formula gives for the same probabilities. Laya's
-``confidence`` is normalized entropy and keeps that meaning; a client porting a
-threshold from Jev reads ``x_jev_confidence`` instead (#302). ``LAYA_JEV_STRICT``
-leaves it out with the other additions.
+Single System One requests use TypeSafe's answer fields and confidence formulas
+by default. Image assets and box questions use the same endpoint. Set
+``LAYA_JEV_STRICT=0`` for the extended Laya text response, where choice and
+score include Jev's confidence under ``x_jev_confidence``.
 
 Configuration is entirely via environment variables so the same entry point
 serves a laptop dev run and a systemd unit:
@@ -54,11 +53,8 @@ env var                    meaning                                        defaul
 ``LAYA_BODY_READ_TIMEOUT`` seconds a request may spend delivering its body   10
                            before the server answers 408 and releases its
                            admission slot (see below)
-``LAYA_JEV_STRICT``        if set, serve the strict Jev wire contract: no   0
-                           root `routing`, no per-answer `action` /
-                           `answer_confidence`, no `confidence` on noul
-                           answers, and `usage` reduced to
-                           `input_tokens` + `output_tokens`
+``LAYA_JEV_STRICT``        use the contracted text response fields          1 (single)
+                           (images always use the System One format)       0 (batch)
 ``LAYA_TOURNAMENT_GROUP``  answer a choice with more options than this   0 (off)
                            by elimination in groups of this size, on
                            both decision routes; raises their option
@@ -235,22 +231,14 @@ def _env_bool(name: str, default: bool) -> bool:
     return v.strip().lower() in ("1", "true", "yes", "on")
 
 
-def _project_jev_strict(result: Dict[str, Any]) -> Dict[str, Any]:
-    """Project a result onto the strict Jev wire contract (`LAYA_JEV_STRICT`).
+def _project_jev_strict(result: Dict[str, Any], questions: Optional[Dict] = None) -> Dict[str, Any]:
+    """Project System One answers onto the wire contract.
 
-    The Jev `/v1/systemone` response defines exactly three top-level fields
-    (`model`, `answers`, `usage`), and each answer carries its discriminator plus its type's
-    fields: choice = `type` + `choice` + `probabilities` + `confidence`, score = `type` +
-    `score` + `probabilities` + `confidence` + `legend`, noul = `type` + `noul`, and `usage`
-    the two token counts. Laya's full payload adds more: a root `routing` report, a
-    per-answer `action` head plus the calibrated `answer_confidence`, a
-    `confidence` on noul answers, and a usage report extended with the truncation
-    facts and the collapsed-options ceiling. Those additions are what a client
-    validating the response against the contract with no extra fields may reject,
-    so this keeps only the contracted keys. Nothing is recomputed: every value is
-    the one the result already carries, and an answer of an unknown shape passes
-    through unchanged so a caller still sees what it would have seen before.
+    With the original questions, use TypeSafe confidence and preserve structured
+    score legends and image references. The legacy batch projection keeps its values.
     """
+    from .confidence import jev_confidence
+
     answers: Dict[str, Any] = {}
     for qid, answer in (result.get("answers") or {}).items():
         kind = answer.get("type") if isinstance(answer, dict) else None
@@ -265,8 +253,21 @@ def _project_jev_strict(result: Dict[str, Any]) -> Dict[str, Any]:
                             "legend": answer["legend"]}
         elif kind == "noul":
             answers[qid] = {"type": "noul", "noul": answer["noul"]}
+        elif kind == "box":
+            answers[qid] = {"type": "box", "box": answer["box"], "confidence": answer["confidence"]}
         else:
             answers[qid] = answer
+        if questions is not None and kind in ("choice", "score"):
+            confidence = jev_confidence(answer)
+            if confidence is not None:
+                answers[qid]["confidence"] = round(confidence, 4)
+            if kind == "score":
+                criteria = questions.get(qid, {}).get("criteria")
+                if isinstance(criteria, list) and len(criteria) == len(answer["legend"]):
+                    answers[qid]["legend"] = {
+                        str(i): v if isinstance(v, (str, list, dict)) else answer["legend"][str(i)]
+                        for i, v in enumerate(criteria)
+                    }
     usage = result.get("usage") or {}
     return {"model": result["model"], "answers": answers,
             "usage": {"input_tokens": usage.get("input_tokens", 0),
@@ -1220,7 +1221,7 @@ def _has_lone_surrogate(value: Any) -> bool:
     return False
 
 
-async def _read_body_capped(request: Any, timeout: Optional[float] = None) -> bytes:
+async def _read_body_capped(request: Any, timeout: Optional[float] = None, *, max_bytes=None) -> bytes:
     """Read the request body, refusing to buffer more than ``MAX_BODY_BYTES``.
 
     ``Content-Length`` cannot be the only gate. It is a value the client chooses,
@@ -1244,6 +1245,14 @@ async def _read_body_capped(request: Any, timeout: Optional[float] = None) -> by
 
     from fastapi import HTTPException
 
+    limit = MAX_BODY_BYTES if max_bytes is None else max_bytes
+    if request.headers.get("content-length"):
+        try:
+            if int(request.headers["content-length"]) > limit:
+                raise HTTPException(status_code=413, detail="request body too large")
+        except ValueError:
+            pass
+
     async def collect() -> bytes:
         total = 0
         chunks = []
@@ -1251,7 +1260,7 @@ async def _read_body_capped(request: Any, timeout: Optional[float] = None) -> by
             if not chunk:
                 continue
             total += len(chunk)
-            if total > MAX_BODY_BYTES:
+            if total > limit:
                 # Stop reading rather than draining the rest: the peer is already over
                 # the limit and nothing further can make the request acceptable.
                 raise HTTPException(status_code=413, detail="request body too large")
@@ -1272,15 +1281,12 @@ async def _read_body_capped(request: Any, timeout: Optional[float] = None) -> by
 
 async def _read_json_body(request: Any, timeout: Optional[float] = None) -> Any:
     """Read the request body and decode JSON, enforcing size caps and parse error guards."""
+    return _parse_json_body(await _read_body_capped(request, timeout))
+
+
+def _parse_json_body(raw: bytes) -> Any:
     from fastapi import HTTPException
 
-    if request.headers.get("content-length"):
-        try:
-            if int(request.headers["content-length"]) > MAX_BODY_BYTES:
-                raise HTTPException(status_code=413, detail="request body too large")
-        except ValueError:
-            pass
-    raw = await _read_body_capped(request, timeout)
     try:
         return json.loads(raw)
     except (ValueError, RecursionError):
@@ -1624,13 +1630,35 @@ def create_app(router: Optional[Any] = None):
 
     async def _systemone_inner(request: Request):
         nonlocal gate
+        from .systemone import (
+            IMAGE_HEADER, MAX_IMAGE_REQUEST_BYTES, ImageRequestError, image_form_parts, prepare_image_request,
+        )
+
         _mark_request()
-        body = await _read_json_body(request, body_read_timeout)
+        content_type = request.headers.get("content-type", "")
+        multipart = content_type.partition(";")[0].strip().lower() == "multipart/form-data"
+        images_enabled = request.headers.get(IMAGE_HEADER, "").strip().lower() == "true"
+        files = {}
+        if multipart or images_enabled:
+            raw = await _read_body_capped(request, body_read_timeout,
+                                          max_bytes=MAX_IMAGE_REQUEST_BYTES if images_enabled else None)
+            if multipart:
+                try:
+                    raw, files = image_form_parts(content_type, raw)
+                except ImageRequestError as error:
+                    raise HTTPException(status_code=error.status, detail=str(error)) from None
+            body = _parse_json_body(raw)
+        else:
+            body = await _read_json_body(request, body_read_timeout)
         if not isinstance(body, dict) or "questions" not in body:
             raise HTTPException(status_code=400, detail="request body must be an object with a 'questions' field")
         state = body.get("state")
         questions = body["questions"]
-        _check_request_limits(state, questions, MAX_TOURNAMENT_CHOICE_OPTIONS if tournament_group
+        model_hint = body.get("model") or body.get("task")
+        native_options = getattr(router, "_multimodal_spec", None) is not None and (
+            bool(body.get("assets")) or isinstance(model_hint, str) and model_hint.strip().lower() == "multimodal"
+        )
+        _check_request_limits(state, questions, MAX_TOURNAMENT_CHOICE_OPTIONS if tournament_group or native_options
                               else MAX_CHOICE_OPTIONS)
         _refuse_body_refusals(body)
         # After the size checks, so an oversized body is refused before anything walks it, and
@@ -1646,7 +1674,26 @@ def create_app(router: Optional[Any] = None):
         # that cannot resolve names falls back to the built-in table, which is the
         # registry such a fake is asserting anyway.
         model = _resolve_model(body.get("model"), getattr(router, "resolve", None))
-        _require_inline_media(router, state, model, body.get("task"))
+        assets = body.get("assets", {})
+        if not isinstance(assets, dict):
+            raise HTTPException(status_code=400, detail="'assets' must be an object")
+        has_box = any(isinstance(q, dict) and q.get("type") == "box" for q in questions.values())
+        image_request = bool(assets or files or has_box)
+        if image_request:
+            from .router import MULTIMODAL_MODEL, canonical_name
+
+            if not images_enabled:
+                raise HTTPException(status_code=400, detail="set " + IMAGE_HEADER + ": true for assets or box questions")
+            if not assets:
+                raise HTTPException(status_code=400, detail="image and box requests need an assets object")
+            if (model not in (None, MULTIMODAL_MODEL)
+                    or body.get("task") and canonical_name(body["task"]) != MULTIMODAL_MODEL):
+                raise HTTPException(status_code=422, detail="the selected model cannot read image assets")
+            if getattr(router, "_multimodal_spec", None) is None:
+                raise HTTPException(status_code=503, detail="configure LAYA_MULTIMODAL_MODEL to enable image assets")
+            model = MULTIMODAL_MODEL
+        else:
+            _require_inline_media(router, state, model, body.get("task"))
         max_budget_cap = _resolve_max_token_budget()
         max_len = _validate_budget_param(body, "max_len", max_budget_cap)
         head_max_len = _validate_budget_param(body, "head_max_len", max_budget_cap)
@@ -1673,23 +1720,26 @@ def create_app(router: Optional[Any] = None):
         if gate is None:
             gate = asyncio.Lock()
         try:
-            # Laya's result is already Jev-shaped: {model, answers, usage, routing}.
-            # hs-jev decodes `answers` and `usage` and ignores the rest.
             async with gate:
                 loop = asyncio.get_running_loop()
+                inference_questions = questions
+                if image_request:
+                    prepare = partial(prepare_image_request, state, questions, assets, files,
+                                      images_enabled=images_enabled)
+                    state, inference_questions = await loop.run_in_executor(pool, prepare)
                 t0 = time.perf_counter()
-                if tournament_group:
-                    run = partial(_predict_with_tournament, router, state, questions, tournament_group,
+                if tournament_group and not image_request:
+                    run = partial(_predict_with_tournament, router, state, inference_questions, tournament_group,
                                   model=model, **predict_kwargs)
                 else:
-                    run = partial(router.predict, state, questions, model=model, **predict_kwargs)
+                    run = partial(router.predict, state, inference_questions, model=model, **predict_kwargs)
                 result = await loop.run_in_executor(pool, _run_inference, run)
                 infer_ms = (time.perf_counter() - t0) * 1000.0
                 # Log while `usage` still carries the truncation report. `_project_jev_strict`
                 # drops it, and a strict client then has no other signal (#1425).
                 _warn_state_truncated(result, route="/v1/systemone", model=model, questions=questions)
-                if _env_bool("LAYA_JEV_STRICT", False):
-                    result = _project_jev_strict(result)
+                if image_request or _env_bool("LAYA_JEV_STRICT", True):
+                    result = _project_jev_strict(result, questions)
                 else:
                     result = _add_jev_confidence(result)
                 from fastapi.responses import JSONResponse
@@ -1702,6 +1752,8 @@ def create_app(router: Optional[Any] = None):
                 )
         except HTTPException:
             raise
+        except ImageRequestError as error:
+            raise HTTPException(status_code=error.status, detail=str(error)) from None
         except ValueError as e:
             # Question validation errors name the question and what to fix: safe for clients.
             raise HTTPException(status_code=422, detail=str(e))

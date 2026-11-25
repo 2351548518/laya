@@ -102,6 +102,9 @@ HTTP error details can be strings, objects or arrays. Error bodies are read up t
 applications should handle server diagnostics according to their own logging policy.
 
 The client exposes `predict`, `predict_batch`, `predict_multimodal` and `health`.
+Use `predict_image_assets(state, questions, assets)` for System One PNG/JPEG references
+and named Box answers. The client adds the required image header.
+[System One SDK example](https://github.com/2351548518/laya/blob/main/docs/multimodal-clients.md#system-one-image-assets)
 
 ## Native media predictions
 
