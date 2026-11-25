@@ -5,12 +5,21 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from laya.evals import file_fingerprint
 from laya.grounding_train import grounding_metrics, load_grounding_rows
 from laya.multimodal import MultimodalAgent
 from laya.multimodal_train import collect_records, load_rows, metrics
 
 
-def main():
+def harmonic_accuracy(decisions, grounding):
+    if not decisions or not grounding or not decisions['overall']['n'] or not grounding['single_n']:
+        return None
+    accuracy, box_accuracy = decisions['overall']['accuracy'], grounding['acc_iou50']
+    total = accuracy + box_accuracy
+    return 2 * accuracy * box_accuracy / total if total else 0.0
+
+
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--model', required=True)
     parser.add_argument('--decisions', type=Path)
@@ -20,26 +29,39 @@ def main():
     parser.add_argument('--max-len', type=int)
     parser.add_argument('--micro-batch', type=int, default=1)
     parser.add_argument('--video-cache')
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if not args.decisions and not args.grounding:
         parser.error('Provide --decisions, --grounding, or both')
     if args.micro_batch < 1 or (args.max_len is not None and args.max_len < 1):
         parser.error('Batch size and context length must be positive')
+    output = args.out.resolve()
+    for source in (args.decisions, args.grounding):
+        if source and (output == source.resolve() or
+                       (output.is_file() and source.is_file() and output.samefile(source))):
+            parser.error('--out must refer to a separate file from the input datasets')
     agent = MultimodalAgent(args.model, device=args.device)
     if args.max_len is not None:
         agent.max_len = args.max_len
     if args.video_cache:
         agent._video_cache_dir = args.video_cache
-    result = dict(model=args.model, max_len=agent.max_len, output_tokens=0)
+    result = dict(model=args.model, backbone=agent.model_type, revision=agent.revision,
+        device=str(agent.device), max_len=agent.max_len, default_video_frames=agent.frames,
+        video_audio=agent.use_audio_in_video, micro_batch=args.micro_batch, output_tokens=0, datasets={})
     if args.decisions:
         records = collect_records(agent, load_rows(args.decisions), args.micro_batch)
         result['decisions'] = metrics(records, agent.temperature, agent.temperature_by_options,
             agent.modality_calibration, agent.ordinal_calibration)
+        result['datasets']['decisions'] = dict(path=str(args.decisions.resolve()), sha256=file_fingerprint(args.decisions))
     if args.grounding:
         result['grounding'] = grounding_metrics(agent, load_grounding_rows(args.grounding), limit=0)
+        result['datasets']['grounding'] = dict(path=str(args.grounding.resolve()), sha256=file_fingerprint(args.grounding))
+    combined = harmonic_accuracy(result.get('decisions'), result.get('grounding'))
+    if combined is not None:
+        result['harmonic_accuracy'] = combined
+    report = json.dumps(result, ensure_ascii=False, indent=2)
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    args.out.write_text(report + '\n', encoding='utf-8')
+    print(report)
 
 
 if __name__ == '__main__':

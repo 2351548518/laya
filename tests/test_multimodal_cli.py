@@ -9,6 +9,7 @@ import sys
 import pytest
 
 from laya.grounding_train import GroundingTrainConfig
+from scripts.multimodal import evaluate
 from scripts.multimodal.calibrate import calibration_passes
 from scripts.multimodal.train import validate_visual_training
 
@@ -76,6 +77,93 @@ def test_prediction_cli_reports_an_unavailable_native_checkpoint(tmp_path, capsy
 
     assert cli.main(["--multimodal", str(tmp_path / "missing"), "Text"]) == 2
     assert "multimodal_config.json" in capsys.readouterr().err
+
+
+def test_example_verifier_and_benchmark_execute_the_native_contract(tmp_path, monkeypatch, capsys):
+    from PIL import Image
+    import torch
+    from benchmarks import bench_multimodal
+    from examples import native_multimodal
+    from verify import multimodal_smoke_test
+    from test_multimodal import Q, tiny_agent
+
+    checkpoint = tmp_path / "checkpoint"
+    checkpoint.mkdir()
+    (checkpoint / "multimodal_config.json").write_text("{}", encoding="utf-8")
+    image = tmp_path / "scene.png"
+    Image.new("RGB", (112, 112), "red").save(image)
+    agent = tiny_agent()
+    agent.modality_calibration, agent.ordinal_calibration = {}, {}
+    agent.grounding_trained = True
+
+    def grounding_outputs(inputs, *, multiple=False):
+        assert not multiple
+        return {"boxes": torch.tensor([[[0.2, 0.2, 0.8, 0.8]]]), "quality_logits": torch.zeros(1, 1)}
+
+    agent._grounding_outputs = grounding_outputs
+
+    for module in (native_multimodal, multimodal_smoke_test, bench_multimodal, evaluate):
+        monkeypatch.setattr(module, "MultimodalAgent", lambda *args, **kwargs: agent)
+    native_multimodal.main([str(checkpoint), "--image", str(image)])
+    example = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert [result["modality"] for result in example] == ["text", "image"]
+    assert example[1]["answers"]["target"]["type"] == "box"
+
+    multimodal_smoke_test.main([str(checkpoint)])
+    check = json.loads(capsys.readouterr().out)
+    assert check["status"] == "passed"
+    assert check["checks"]["text"]["types"] == ["choice", "noul", "score"]
+    assert check["checks"]["image"]["types"] == ["noul", "box"]
+    with pytest.raises(ValueError, match="token accounting"):
+        multimodal_smoke_test.validate_prediction(example[0], "image", {"route": Q["category"]})
+
+    workload = tmp_path / "requests.json"
+    workload.write_text(json.dumps([{"id": "test", "state": "Current scene", "questions": Q}]), encoding="utf-8")
+    output = tmp_path / "reports/latency.json"
+    bench_multimodal.main(["--model", str(checkpoint), "--requests", str(workload),
+                           "--repeats", "2", "--warmup", "0", "--out", str(output)])
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert json.loads(capsys.readouterr().out) == report
+    measured = report["cases"][0]
+    assert measured["usage"]["forward_passes"] == len(Q)
+    assert measured["usage"]["output_tokens"] == 0
+    assert measured["median_ms"] <= measured["p95_ms"] == max(measured["samples_ms"])
+
+    decisions, boxes = tmp_path / "decisions.jsonl", tmp_path / "boxes.jsonl"
+    decisions.write_text(json.dumps({"state": "Current scene", "questions": {"present": Q["present"]},
+                                     "expected": {"present": True}}) + "\n", encoding="utf-8")
+    boxes.write_text(json.dumps({
+        "state": {"image": str(image)}, "questions": {"target": {"type": "box", "instructions": "the square"}},
+        "grounding": {"task": "single", "boxes": [[0.2, 0.2, 0.8, 0.8]]},
+    }) + "\n", encoding="utf-8")
+    evaluation_output = tmp_path / "reports/accuracy.json"
+    evaluate.main(["--model", str(checkpoint), "--decisions", str(decisions), "--grounding", str(boxes),
+                   "--out", str(evaluation_output)])
+    report = json.loads(evaluation_output.read_text(encoding="utf-8"))
+    assert report["decisions"]["overall"]["n"] == report["grounding"]["single_n"] == 1
+    assert report["grounding"]["acc_iou50"] == 1
+    assert "harmonic_accuracy" in report and len(report["datasets"]["grounding"]["sha256"]) == 64
+
+
+def test_harmonic_accuracy_requires_both_metrics_with_samples():
+    decisions = {"overall": {"n": 10, "accuracy": 0.9}}
+    assert evaluate.harmonic_accuracy(decisions, {"single_n": 8, "acc_iou50": 0.6}) == pytest.approx(0.72)
+    assert evaluate.harmonic_accuracy(decisions, {"single_n": 0, "acc_iou50": 0.0}) is None
+    assert evaluate.harmonic_accuracy({"overall": {"n": 1, "accuracy": 0}},
+                                      {"single_n": 1, "acc_iou50": 0}) == 0.0
+
+
+@pytest.mark.parametrize("dataset_flag", ["--decisions", "--grounding"])
+def test_evaluation_output_cannot_replace_an_input_dataset(tmp_path, capsys, dataset_flag):
+    dataset = tmp_path / "input.jsonl"
+    dataset.write_bytes(b'{"state":"sample"}\n')
+    output = tmp_path / "report.json"
+    output.hardlink_to(dataset)
+    for path in (dataset, output):
+        with pytest.raises(SystemExit) as exc:
+            evaluate.main(["--model", "unused", dataset_flag, str(dataset), "--out", str(path)])
+        assert exc.value.code == 2 and "--out must refer to a separate file" in capsys.readouterr().err
+    assert dataset.read_bytes() == b'{"state":"sample"}\n'
 
 
 def test_portable_recipes_preserve_the_measured_optimizer_settings():
