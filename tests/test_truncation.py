@@ -172,8 +172,8 @@ import ast  # noqa: E402
 import re  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-EX15 = "examples/15_truncation_basics.py"
-EX37 = "examples/37_long_document.py"
+EX15 = "examples/classic/input_truncation.py"
+EX37 = "examples/classic/long_documents.py"
 EXAMPLES = (("15", EX15), ("37", EX37))
 
 

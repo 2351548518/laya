@@ -19,7 +19,7 @@ pydantic-side claims -- `Literal[...]` renders to `enum`, `Optional[...]` to `an
 `model_json_schema()` putting a `title` on every field -- are prose rationale here, checked locally
 against pydantic in the PR's witness log.
 
-The same page also hands a reader `result.usage` as a shape, and `examples/03_reading_the_result.py`
+The same page also hands a reader `result.usage` as a shape, and `examples/classic/inspect_prediction.py`
 is where beginners are pointed for it. Both showed two keys, which is what a call with *no*
 questions returns, while every answered result carries six (#174) and a seventh when the head budget
 collapses a question's options (#538). So the shapes are compared against the one `usage = {...}`
@@ -113,7 +113,7 @@ def run_cell(text: str, extra: Optional[Dict[str, Any]] = None) -> Any:
 
 # ------------------------------------------------------------- what an answered `usage` really is
 #
-# `docs/structured.md` hands a reader `result.usage` as a shape, and `examples/03_reading_the_result.py`
+# `docs/structured.md` hands a reader `result.usage` as a shape, and `examples/classic/inspect_prediction.py`
 # is the page beginners are sent to for that shape. Both said two keys -- the shape of a call with no
 # questions -- while the agents put six in every answered result (#174's truncation report) and a
 # seventh only when the head budget collapsed a question's options (#538). So the shapes are compared
@@ -122,7 +122,7 @@ def run_cell(text: str, extra: Optional[Dict[str, Any]] = None) -> Any:
 
 AGENT_PY = os.path.join("laya", "agent.py")
 ONNX_PY = os.path.join("laya", "onnx_agent.py")
-EXAMPLE03 = os.path.join("examples", "03_reading_the_result.py")
+EXAMPLE03 = os.path.join("examples", "classic", "inspect_prediction.py")
 README = "docs/laya-guide.md"
 
 

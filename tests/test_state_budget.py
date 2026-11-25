@@ -17,7 +17,7 @@ This suite pins the relationship, and — when the checkpoints are present — r
 back out of `README.md` and checks them against a live measurement, so the renderer, the
 documentation and this file cannot drift apart silently.
 
-`examples/33_high_cardinality_choice.py` is the page that teaches this budget, and it taught three
+`examples/classic/high_cardinality_choice.py` is the page that teaches this budget, and it taught three
 things the code does not do: that the cut waits for the options to *overflow* `head_max_len` (it
 fires on the spare budget, while they still fit), that 16 is a minimum *reserved for the instruction*
 (the instruction is held to 8), and that the option block *lives in* `head_max_len` (past ~4 tokens
@@ -245,7 +245,7 @@ def test_readme_quotes_the_measured_figures():
 # ---------------------------------------------------- example 33: the page against the budget it teaches
 
 EXAMPLE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                       "examples", "33_high_cardinality_choice.py")
+                       "examples", "classic", "high_cardinality_choice.py")
 
 # The two formulas, in the symbolic form the page has to teach them in.
 PER_FORMULA = re.compile(r"per\s*=\s*max\(\s*(\d+)\s*,\s*\(\s*head_max_len\s*-\s*(\d+)\s*\)"
@@ -276,7 +276,7 @@ def _page_prose():
     can read as one sentence, which would let a true sentence vouch for a false neighbour.
     """
     if not os.path.exists(EXAMPLE):
-        raise AssertionError("examples/33_high_cardinality_choice.py is not where this suite looks "
+        raise AssertionError("examples/classic/high_cardinality_choice.py is not where this suite looks "
                              "for it (%s)" % EXAMPLE)
     with open(EXAMPLE, encoding="utf-8") as fh:
         tree = ast.parse(fh.read())

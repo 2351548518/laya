@@ -1,5 +1,5 @@
 // Package gateway is the policy half of the router sample: it turns the answers of
-// presets.Router into a model tier and prints them as examples/29_presets_model_router.py does.
+// presets.Router into a model tier and prints them as examples/classic/model_routing_preset.py does.
 package gateway
 
 import (

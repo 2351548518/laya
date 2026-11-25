@@ -1,6 +1,6 @@
 """Residency cap: what `Router` holds, and what the residency page tells readers about it.
 
-`examples/24_preload_and_memory.py` is the page a reader copies a `max_loaded` setting from. Its
+`examples/classic/checkpoint_residency.py` is the page a reader copies a `max_loaded` setting from. Its
 banner used to open with "At the default `max_loaded=1`", a number `laya/router.py` retired in #180
 and README.md documents as 2. So the page taught the retired cap while demonstrating eviction, and
 a reader who believed it thought they had to raise the cap to stop the churn the page was showing.
@@ -27,7 +27,7 @@ class MockAgent:
         self.name = name
 
 
-EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "24_preload_and_memory.py"
+EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "classic" / "checkpoint_residency.py"
 TREE = ast.parse(EXAMPLE.read_text(encoding="utf-8"))
 CODE_DEFAULT = Router().max_loaded
 
@@ -199,10 +199,10 @@ class ExampleResidencyPageTests(unittest.TestCase):
         names = derived_default(TREE)
         self.assertTrue(names, "nothing in the page assigns from `Router(...).max_loaded`")
         banners = [n for n in ast.walk(TREE)
-                   if isinstance(n, ast.Call) and callee(n) == "banner" and len(n.args) > 2]
+                   if isinstance(n, ast.Call) and callee(n) == "banner" and len(n.args) > 1]
         self.assertTrue(banners, "the page calls banner() with no blurb to hold the default")
         for call in banners:
-            referenced = {n.id for n in ast.walk(call.args[2]) if isinstance(n, ast.Name)}
+            referenced = {n.id for n in ast.walk(call.args[1]) if isinstance(n, ast.Name)}
             self.assertTrue(referenced & names,
                             "the banner states a default it did not read: %r vs %r"
                             % (sorted(referenced), sorted(names)))
@@ -239,7 +239,7 @@ class ExampleResidencyPageTests(unittest.TestCase):
 
 
 # ------------------------------------------------------------------ examples/21: route() cost page
-# `examples/21_routing_without_running.py` measures `median_ms` and `total_ms` from real
+# `examples/classic/route_without_loading.py` measures `median_ms` and `total_ms` from real
 # `perf_counter`/`timed()` calls, prints both, and then used to close with:
 #     "Ten routing decisions cost well under a millisecond in total, and the router still
 #      holds zero checkpoints."
@@ -250,7 +250,7 @@ class ExampleResidencyPageTests(unittest.TestCase):
 # verdict through two pure helpers, `cost_verdict(total_ms, threshold_ms)` and
 # `resident_state(r)`, and interpolates the raw measurement into the sentence, so a slower
 # machine or a longer `CASES` list rephrases the claim instead of silently contradicting it.
-EXAMPLE_21 = Path(__file__).resolve().parents[1] / "examples" / "21_routing_without_running.py"
+EXAMPLE_21 = Path(__file__).resolve().parents[1] / "examples" / "classic" / "route_without_loading.py"
 TREE_21 = ast.parse(EXAMPLE_21.read_text(encoding="utf-8"))
 HELPERS_21 = ("cost_verdict", "resident_state")
 

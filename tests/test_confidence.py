@@ -761,7 +761,7 @@ for _fn in (test_no_page_calls_confidence_one_formula,
         PASS.append("doc-pages/%s" % _fn.__name__)
 
 # ------------------------------------------------- a preset page's conclusions follow their numbers
-# `examples/28_presets_moderation.py` prints a summary over `laya.moderation_questions()` answers,
+# `examples/classic/moderation_preset.py` prints a summary over `laya.moderation_questions()` answers,
 # and the version this section replaces hardcoded three of its conclusions:
 #   * `benign -> every flag 0.000, severity 0.24 / 3` printed `toxic` alone, while the same page's
 #     table showed the benign post reading 0.066 on `spam`;
@@ -778,7 +778,7 @@ import builtins  # noqa: E402
 import re  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-EXAMPLE_28 = os.path.join(ROOT, "examples", "28_presets_moderation.py")
+EXAMPLE_28 = os.path.join(ROOT, "examples", "classic", "moderation_preset.py")
 HELPERS_28 = ("noul_flags", "score_ceiling", "flag_line", "past_half", "gaps", "rank_by_severity")
 
 # The page as it ships on main: the banner's universality claim and the three conclusions, as
@@ -952,7 +952,7 @@ def test_page_qualifies_the_banner_and_derives_its_numbers():
 
 
 # ------------------------------- example 03 must give `confidence` separately per question type
-# `examples/03_reading_the_result.py` is the page a reader comes back to "when writing your own
+# `examples/classic/inspect_prediction.py` is the page a reader comes back to "when writing your own
 # glue code", and its field tour closed with "`confidence` is 1 minus normalised entropy -- a scale
 # that moves with the option count on the same answer". `Agent._decode_answers` runs two formulas
 # and picks by question type (`laya/agent.py:1498-1530`):
@@ -965,7 +965,7 @@ def test_page_qualifies_the_banner_and_derives_its_numbers():
 # 40/18/30 and as `DecisionResult`'s docstring, on the page a beginner reads first. The two pages
 # that still carry the blanket sentence (`docs/structured.md`, `docs/questions-and-answers.md`) are
 # left for a follow-up.
-EXAMPLE_03 = os.path.join(ROOT, "examples", "03_reading_the_result.py")
+EXAMPLE_03 = os.path.join(ROOT, "examples", "classic", "inspect_prediction.py")
 AGENT_PY = os.path.join(ROOT, "laya", "agent.py")
 ONNX_PY = os.path.join(ROOT, "laya", "onnx_agent.py")
 
@@ -984,7 +984,7 @@ NAMES_NOUL_FORMULA = re.compile(r"max\(p\[1\],\s*1\s*-\s*p\[1\]\)")
 ATTRIBUTES_NOUL = re.compile(r"-- on a `noul`\.")
 CALLS_SCALES_INCOMPARABLE = re.compile(r"scales are not comparable", re.I)
 NAMES_ANSWER_MAXP = re.compile(r"`answer_confidence` is max\(p\),")
-GATES_ON_ANSWER = re.compile(r"field to gate on \(example 18", re.I)
+GATES_ON_ANSWER = re.compile(r"field to gate on \(`confidence_gating\.py`", re.I)
 NAMES_BINNING_SCOPE = re.compile(
     r"`binning_map` remaps `answer_confidence` and leaves `confidence` alone", re.I)
 
@@ -1166,7 +1166,7 @@ for _fn in (test_preset_is_four_flags_and_one_rubric, test_helpers_are_live_and_
 
 
 # --------------------------------------------- example 40 must not call a raw softmax calibrated
-# `examples/40_caching_and_monitoring.py` gates 15 tickets on `answer_confidence`. On main it calls
+# `examples/classic/cache_and_monitor.py` gates 15 tickets on `answer_confidence`. On main it calls
 # that field "the calibrated probability of the answer Laya reports" in both its banner and its
 # closing paragraph, and its `bucket()` docstring reads "application policy over a calibrated
 # number". `answer_confidence` is max(p) -- the quantity temperature scaling fits and ECE measures
@@ -1181,7 +1181,7 @@ for _fn in (test_preset_is_four_flags_and_one_rubric, test_helpers_are_live_and_
 # gate drives the code the page runs instead of re-reading its prose.
 from laya.common import QTYPES as _QTYPES40, temp_bucket as _temp_bucket  # noqa: E402
 
-EXAMPLE_40 = os.path.join(ROOT, "examples", "40_caching_and_monitoring.py")
+EXAMPLE_40 = os.path.join(ROOT, "examples", "classic", "cache_and_monitor.py")
 HELPERS_40 = ("option_count", "scale_for", "clamped_buckets", "entropy_confidence")
 # Names a helper may read from the page's world: the two core symbols it must defer to, and `math`
 # for the entropy. Any other non-builtin free name means this gate cannot drive that helper.
@@ -1410,7 +1410,7 @@ check("gate/live None adds no abstention key", "abstention" in _witness["answers
 
 
 # --------------------------------------------- example 18 must not call the threshold a measurement
-# `examples/18_confidence_gating.py` is the intro-level gating pattern: it picks a 0.85 cutoff on
+# `examples/classic/confidence_gating.py` is the intro-level gating pattern: it picks a 0.85 cutoff on
 # `answer_confidence` and acts on it. On main it calls the field "the calibrated probability Laya
 # puts on the answer it reports" and its module docstring says it "branches on Laya's calibrated
 # confidence". The README's Calibration section (line 1586) says the opposite about the shipped
@@ -1423,7 +1423,7 @@ check("gate/live None adds no abstention key", "abstention" in _witness["answers
 # applies to each of its two questions and states the calibration claim as conditional.
 from laya.common import QTYPES as _QTYPES18, temp_bucket as _temp_bucket18  # noqa: E402
 
-EXAMPLE_18 = os.path.join(ROOT, "examples", "18_confidence_gating.py")
+EXAMPLE_18 = os.path.join(ROOT, "examples", "classic", "confidence_gating.py")
 HELPERS_18 = ("option_count", "scale_for")
 CORE_GLOBALS_18 = {"temp_bucket", "QTYPES", "math"}
 
@@ -1551,7 +1551,7 @@ for _fn in (test_page18_helpers_are_live_and_defer_to_core,
         PASS.append("page-18/%s" % _fn.__name__)
 
 # ------------------------------------------ example 30's score confidence recomputation
-# `examples/30_custom_schema_design.py` teaches the `score` answer type on the page. Main's
+# `examples/classic/custom_questions.py` teaches the `score` answer type on the page. Main's
 # version asserted -- in prose, with nothing to check it against -- that "`confidence` on a
 # score is normalised entropy, so a wide-but-ordered distribution looks unconfident". That is
 # the inverse of the repo's own definition: `laya.common.confidence_from_probs` returns
@@ -1564,7 +1564,7 @@ for _fn in (test_page18_helpers_are_live_and_defer_to_core,
 # `answer["severity"]["confidence"]` for both records, so the reader sees 1 - H/log(k) produce
 # the reported 0.2314 / 0.2019 to within rounding. No weights are loaded here; the gate execs
 # the helper from the example's own AST and drives it against `confidence_from_probs`.
-EXAMPLE_30 = os.path.join(ROOT, "examples", "30_custom_schema_design.py")
+EXAMPLE_30 = os.path.join(ROOT, "examples", "classic", "custom_questions.py")
 HELPERS_30 = ("entropy_confidence",)
 
 # The page as it ships on main: the sentence this PR replaces, verbatim. The ban below must
@@ -1905,14 +1905,14 @@ for _fn in (test_abstention_wording_bans_have_teeth,
         PASS.append("evals-abstention/%s" % _fn.__name__)
 
 # ------------------------------------------ example 26's banner must count the primitives triage_questions() returns
-# `examples/26_presets_triage.py` opened with "`triage_questions()` is a ready-made schema for
+# `examples/classic/triage_preset.py` opened with "`triage_questions()` is a ready-made schema for
 # inbound support: five questions ... a multi-way choice, two yes/no probabilities, and an ordinal
 # score". `laya.triage_questions()` ships three `noul` fields -- `is_urgent`, `refund_requested`,
 # `churn_risk` -- plus the choice and the score, so the banner's own arithmetic read 1 + 2 + 1 = 4
 # against its stated "five questions", and the example's own print block already prints all three
 # `noul` values two paragraphs later. A reader counting primitives against the schema could not
 # reconcile them.
-EXAMPLE_26 = os.path.join(ROOT, "examples", "26_presets_triage.py")
+EXAMPLE_26 = os.path.join(ROOT, "examples", "classic", "triage_preset.py")
 OLD_BANNER_26 = '''
     `triage_questions()` is a ready-made schema for inbound support: five questions, one
     forward pass. It mixes all three primitives -- a multi-way choice, two yes/no

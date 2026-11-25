@@ -2143,7 +2143,7 @@ def predict_golden():
 # family rather than leave it asserting a workflow name the router no longer returns.
 
 # `invoice_processing` is the one workflow whose TRAINED schema is in this repository, in
-# `examples/32_typed_decisions_workflow.py` (dataset `LocalLLaMA/typed-decisions`, config
+# `examples/classic/typed_decision_workflow.py` (dataset `LocalLLaMA/typed-decisions`, config
 # `invoice_processing`). It is duplicated here rather than imported because that example has a
 # module-level `agent = load("typed-decisions")`, so importing it would download 846 MB and run
 # the model; `_typed_questions` below fails the generator if the ids ever stop matching the
@@ -2337,7 +2337,7 @@ TYPED_AGENT_TRACE_QUESTIONS = {
     },
 }
 
-# The two states from `examples/32_typed_decisions_workflow.py`: one with a 40% unit-price
+# The two states from `examples/classic/typed_decision_workflow.py`: one with a 40% unit-price
 # variance against the purchase order, one that reconciles exactly. They are a pair on purpose --
 # the same schema on two states that differ only in the numbers is what shows the forward pass is
 # reading the state rather than the questions.

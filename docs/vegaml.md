@@ -76,8 +76,8 @@ right on its own rows: calibrating there rails the temperature to its floor and 
 confidence at 1.000. When the calibration rows cannot certify the review line at
 `target_precision`, the band is reported `None` for that question and the conformal set routes
 its answers, with `route_reason` saying so. The full measured loop, before and after on held-out
-rows with an ablation over the number of fitting rows, is `examples/42_fit_and_calibrate_vegaml.py`
-and its output is in the README. A head is kept only if it beats chance
+rows with an ablation over the number of fitting rows, is `examples/fit_and_calibrate_vega.py`.
+Pass `--reader /path/to/vega-checkpoint` to run with local weights. A head is kept only if it beats chance
 under cross-validation and served only if it also beats the engine on the same rows:
 `report["heads"][qid]["used_by_auto"]` is the fact to read, not `fitted`.
 

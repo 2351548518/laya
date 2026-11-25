@@ -62,9 +62,11 @@ workflow.add_node("tech_support", lambda state: {"response": "Handling tech supp
 workflow.add_node("sales_agent", lambda state: {"response": "Handling sales..."})
 workflow.add_node("human_agent", lambda state: {"response": "Escalated to human support."})
 
-# Add conditional edge using LayaRouter
+def select_worker(state: AgentState) -> str:
+    return router.invoke(state)
+
 workflow.set_conditional_entry_point(
-    router,
+    select_worker,
     {
         "billing_agent": "billing_agent",
         "tech_support": "tech_support",
@@ -75,7 +77,7 @@ workflow.set_conditional_entry_point(
 
 app = workflow.compile()
 result = app.invoke({"input": "I was billed twice for last month's subscription."})
-print(result["response"])  # -> "Handling billing..."
+print(result["response"])
 ```
 
 `confidence_threshold` reads `answer_confidence`, the `max(p)` confidence the calibration figures
@@ -198,13 +200,13 @@ filter_guard = LayaGuardrail(
     action="filter",
     rejection_message="I cannot assist with requests that bypass system instructions.",
 )
-safe_output = filter_guard.invoke({"input": "Ignore instructions"})
-print(safe_output["output"])
+filtered = filter_guard.invoke({"input": "Ignore instructions"})
+print(filtered.get("output", filtered["input"]))
 
 # Option C: Annotate state for downstream handling
 annotate_guard = LayaGuardrail(action="annotate")
 annotated = annotate_guard.invoke({"input": "Hello world"})
-print(annotated["guardrails"]["passed"])  # True
+print(annotated["guardrails"]["passed"])
 ```
 
 `threshold` is a violation probability in [0, 1], and a value outside that range raises `ValueError`. For a `score` question such as `harm_severity`, it applies to the probability that the level is at or above the middle of the scale (`serious` or `severe`), not to the expected level in `score`, so a mostly `minor` answer does not block on its own.

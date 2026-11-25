@@ -8,7 +8,7 @@ too large, so a regression in one is a regression in the only diagnostic they ge
 No network: the checkpoint is a tiny local one built here, the same shape
 `tests/test_download.py` uses.
 
-Section 7 spends that same tiny agent on `examples/39_error_handling.py`: it runs the page and holds
+Section 7 spends that same tiny agent on `examples/classic/handle_errors.py`: it runs the page and holds
 what it promises to what it prints.
 
 Run: python tests/test_load_errors.py
@@ -239,7 +239,7 @@ check_true("short temperature/says the shape", "list of 3" in str(err), str(err)
 #
 #   * The file stopped at case 2 in a checkout without a vendored `models/` directory -- which is
 #     every checkout, since `models/` is not in the repository. `os.path.dirname` was handed
-#     `MODELS["english"]`, a `Router` spec, and `examples/_common.py`'s `checkpoint` returns that as
+#     `MODELS["english"]`, a `Router` spec, and `examples/classic/_common.py`'s `checkpoint` returns that as
 #     the tuple `(repo, subfolder)` when the directory is missing: `TypeError: expected str, bytes
 #     or os.PathLike object, not tuple`, with cases 3, 4 and 5 never reached -- under a docstring
 #     that says "Every case below is executed".
@@ -251,10 +251,10 @@ check_true("short temperature/says the shape", "list of 3" in str(err), str(err)
 # So the page is run here on the tiny checkpoint built above, and its own output is the witness: for
 # each numbered case, the exception types the banner lists must be exactly the types that case's own
 # section prints.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "examples"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "examples" / "classic"))
 import _common  # noqa: E402 -- the helpers the example imports
 
-EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "39_error_handling.py"
+EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "classic" / "handle_errors.py"
 SOURCE = EXAMPLE.read_text(encoding="utf-8")
 TREE = ast.parse(SOURCE)
 AGENT_SRC = (Path(__file__).resolve().parents[1] / "laya" / "agent.py").read_text(encoding="utf-8")
@@ -274,7 +274,7 @@ def _types(text):
 def _banner_blurb():
     for node in ast.walk(TREE):
         if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "banner":
-            for arg in node.args[2:]:
+            for arg in node.args[1:]:
                 if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                     return arg.value
     return ""

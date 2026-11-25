@@ -1,4 +1,4 @@
-# Fast backends
+# Classic accelerator checks
 
 ## TileLang portability
 
@@ -147,29 +147,6 @@ No multilingual or typed-decisions checkpoint comparison is claimed here.
 | fp16 | choice | 48 | 0.0069 | 48/48 |
 | fp16 | noul | 180 | 0.0092 | 180/180 |
 | fp16 | score | 60 | 0.0040 | 60/60 |
-
-
-### Repository checks
-
-All commands used `/home/ckl/projects/S/laya/.venv/bin/python`; `ruff` and
-`zensical` came from that virtualenv's `bin` directory.
-
-| Command | Result |
-| --- | --- |
-| `ruff check laya/ --select=E9,F63,F7,F82,F401,F811 --line-length=120` | `All checks passed!` |
-| `python -m compileall -q laya/ tests/` | Exit 0, no output |
-| `python tests/test_router.py` | 703 passed, 0 failed |
-| `python tests/test_criteria.py` | 198 passed, 0 failed |
-| `python tests/test_hooks.py` | 240 passed, 0 failed |
-| `python tests/test_hooks_api.py` | 415 passed, 0 failed |
-| `python tests/test_packaging.py` | 131 passed, 0 failed |
-| `uv pip install --python /home/ckl/projects/S/laya/.venv/bin/python -r requirements-docs.txt` | Checked 3 packages (already installed); virtualenv has no pip |
-| `zensical build --strict --clean` | `No issues found`; no `griffe:` lines |
-
-The new suite is registered as requiring the optional TileLang extra and a C++
-compiler in the packaging test's existing exemptions. The API contract test pins
-the additive keyword-only CPU selector, unchanged GPU dtype default, and
-`compile_cpu` signature without importing TileLang into the base CI environment.
 
 
 ## AOTInductor

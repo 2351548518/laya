@@ -34,7 +34,7 @@ The checks ran on the CPU and on an AMD GPU using Metal Performance Shaders (MPS
 | `verify/edge_sweep.py` | inference paths the other suites miss: 12 questions in one pass, 20/77/120-option choice, odd input shapes, truncation, router lifecycle, CPU-vs-MPS agreement |
 | `verify/checkpoints.py` + `verify/checkpoints.json` | checks the weights against recorded sha256 hashes (a truncated download is otherwise silently wrong) |
 | `verify/soak_check.py` | 200 repeated calls for drift and RSS growth, reload/eviction cycles, concurrent calls from several threads. Uses `psutil` if installed and falls back to peak RSS otherwise |
-| `examples/` | 41 worked examples as an eight-stage learning path, plus `run_all.sh` and the path doc |
+| `examples/classic/` | Classic decision examples named by task. See the [examples guide](examples/README.md) |
 
 `laya` is installed editable, so `import laya` from anywhere uses this checkout and picks up edits.
 
@@ -103,7 +103,7 @@ cd /Users/threaded/projects/Laya/laya      # repository root
 .venv/bin/python verify/checkpoints.py                           # weights vs recorded hashes
 .venv/bin/python verify/soak_check.py                            # drift, RSS, concurrency
 .venv/bin/python tests/test_local_e2e.py ./models                 # the repo's own e2e suite
-./examples/run_all.sh                                            # every example, one log per run
+./examples/run_all.sh                                            # all classic examples
 ```
 
 Results on this machine:

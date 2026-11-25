@@ -98,7 +98,7 @@ shows up as `gen_fixtures.py --check` drift instead of a silent re-record. `pred
 no revision; it would have to be re-recorded against the multilingual graph to gain one.
 
 Of the four workflows, only `invoice_processing`'s trained question schema is in this repository
-(`examples/32_typed_decisions_workflow.py`). The other three are known by their question-id
+(`examples/classic/typed_decision_workflow.py`). The other three are known by their question-id
 signatures alone, from `laya.router._TYPED_DECISION_WORKFLOWS`, so the golden carries those ids
 with instruction text written for the fixture. The ids are what the routing decision reads and the
 text is recorded verbatim, so both halves are real; the trained wording is not claimed.

@@ -490,7 +490,7 @@ import textwrap  # noqa: E402
 import laya.agent as laya_agent  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-EX35 = "examples/35_device_selection_and_latency.py"
+EX35 = "examples/classic/device_latency.py"
 DEVICES = ("cuda", "mps", "xpu", "cpu")
 BRANCH_TEST = re.compile(r"self\.device\.type == ['\"]([a-z]+)['\"]")
 

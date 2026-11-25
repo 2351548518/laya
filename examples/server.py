@@ -1085,7 +1085,7 @@ _PAGE_JS = r"""
 })();
 """
 
-# Laya's mark (assets/logo-mark-mono.svg): an open stroke that breaks into points and shrinks to one.
+# Inline version of assets/logo-mark.svg with animation delays for the demo.
 _MARK_DOTS = (
     (48.213, 42.609, 2.782, .929), (49.456, 33.958, 2.527, .894), (46.696, 26.535, 2.291, .852),
     (41.336, 21.918, 2.067, .803), (35.242, 20.694, 1.852, .749), (30.173, 22.422, 1.642, .691),

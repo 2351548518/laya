@@ -15,7 +15,6 @@ from laya.integrations.llamaindex import (
     LayaMultiSelector,
     LayaQueryRouter,
     LayaSingleSelector,
-    QueryBundle,
     ToolMetadata,
 )
 

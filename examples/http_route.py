@@ -9,9 +9,9 @@ TestClient exercises the real HTTP handler in process; it opens no listening soc
 import json
 import os
 
-from _common import Router
 from fastapi.testclient import TestClient
 
+from laya import Router
 from laya.serve import create_app
 
 

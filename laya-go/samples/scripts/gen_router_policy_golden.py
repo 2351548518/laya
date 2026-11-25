@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Record internal/gateway/testdata/policy.json: the tier policy and table row of
-examples/29_presets_model_router.py on synthetic answers, with the example's own formatting.
+examples/classic/model_routing_preset.py on synthetic answers, with the example's own formatting.
 
     python laya-go/samples/scripts/gen_router_policy_golden.py          # write
     python laya-go/samples/scripts/gen_router_policy_golden.py --check  # fail if the file differs
@@ -11,7 +11,7 @@ import json
 import pathlib
 import sys
 
-EXAMPLE = pathlib.Path(__file__).resolve().parents[3] / "examples" / "29_presets_model_router.py"
+EXAMPLE = pathlib.Path(__file__).resolve().parents[3] / "examples" / "classic" / "model_routing_preset.py"
 OUT = pathlib.Path(__file__).resolve().parents[1] / "internal" / "gateway" / "testdata" / "policy.json"
 
 

@@ -23,7 +23,7 @@ For TypeScript / Node.js / browser, see [`laya-ts/`](https://github.com/NandhaKi
 **Long documents.** `laya-multilingual` reads up to 8,192 tokens with `max_len=8192`. Measured accuracy and time by document length, reproducible with [`research/scripts/bench_long_context.py`](https://github.com/NandhaKishorM/laya/blob/main/research/scripts/bench_long_context.py):
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/NandhaKishorM/laya/main/assets/long_context_8192.png" alt="laya-multilingual with max_len=8192: 16 to 18 of 20 requests correct with up to about 4,000 tokens of text before them, more variable beyond" width="100%" />
+  <img src="https://raw.githubusercontent.com/2351548518/laya/main/assets/long_context_8192.png" alt="laya-multilingual with max_len=8192: 16 to 18 of 20 requests correct with up to about 4,000 tokens of text before them, more variable beyond" width="100%" />
 </p>
 
 ## Quickstart
@@ -114,7 +114,8 @@ state,team,urgency
 "A journalist from the Economic Times is asking for a comment on today's outage.",pr,2
 ```
 
-The whole loop, from import to the answer, is [`examples/42_fit_and_calibrate_vegaml.py`](https://github.com/NandhaKishorM/laya/blob/main/examples/42_fit_and_calibrate_vegaml.py). It holds out 4 rows per team (20), fits on the other 40, and measures the same 20 rows before and after. Condensed:
+The [Vega fitting example](https://github.com/2351548518/laya/blob/main/examples/fit_and_calibrate_vega.py)
+holds out 4 rows per team, fits on the other 40, and evaluates the same 20 rows before and after.
 
 ```python
 import csv, laya
@@ -227,31 +228,11 @@ The shipped checkpoints work zero-shot, but fine-tuning on decisions from your o
 
 **[Fine-tuning notebook](https://github.com/NandhaKishorM/laya/blob/main/notebooks/laya_finetune_typed_decisions_2xT4_kaggle.ipynb)** (Kaggle 2xT4) and **[Apple Silicon script](https://github.com/NandhaKishorM/laya/blob/main/notebooks/laya_finetune_typed_decisions_mps.py)** (MPS / CPU): run the whole loop (build dataset, train with RLCD, calibrate temperatures, evaluate, export). Details in [Fine-Tuning](#fine-tuning).
 
-## Documentation
+## Guides
 
-**[nandhakishorm.github.io/laya](https://nandhakishorm.github.io/laya/)**: guides for [prediction hooks](https://nandhakishorm.github.io/laya/hooks/), [schema-driven decisions](https://nandhakishorm.github.io/laya/structured/), [Docker](https://nandhakishorm.github.io/laya/docker/) and [LangChain and LangGraph](https://nandhakishorm.github.io/laya/langchain/), plus a full [API reference](https://nandhakishorm.github.io/laya/reference/).
-
-## What's new in 0.4.32
-
-* **Calibration fits about 2.4x faster.** Fitting temperatures, abstention thresholds and the
-  binning map over 100,000 records went from 6.4 s to 2.7 s, with byte-identical results (#1496).
-* **`LayaToolSelector` takes a per-bucket `min_confidence` map.** It used to crash comparing a
-  number with the map; it now gates each answer at its own bucket's threshold, as the core gate
-  does (#1494).
-* **`OptionStabilityHook` no longer counts the original question twice** when the option keys
-  are already `A`, `B`, ...; that doubled one rendering's weight and could turn a `VERIFY`
-  into an `ACCEPT` (#1498).
-
-## Where to go next
-
-| document | what is in it |
-|---|---|
-| Quickstart below | the shortest path to a working call |
-| [`examples/README.md`](https://github.com/NandhaKishorM/laya/blob/main/examples/README.md) | 41 runnable examples as an eight-stage learning path: first call → schema design → production service |
-| [`LOCAL_SETUP.md`](https://github.com/NandhaKishorM/laya/blob/main/LOCAL_SETUP.md) | running this checkout on macOS/Intel: pinned stack, checkpoint manifest, the two portability fixes, every verification run and its result |
-| [`BENCHMARKS.md`](https://github.com/NandhaKishorM/laya/blob/main/BENCHMARKS.md) | every benchmark run consolidated, all 51 languages, with the limits stated plainly |
-| [`research/README.md`](https://github.com/NandhaKishorM/laya/blob/main/research/README.md) | the harnesses that produce those numbers, and how to re-run them |
-
+Use the dedicated pages for the current interfaces. [Classic routing](routing.md) ·
+[Question types and confidence](questions-and-answers.md) · [Python API](reference/index.md) ·
+[Native multimodal decisions](multimodal.md) · [Benchmark methodology](benchmarks.md)
 
 ## Installation details
 
@@ -468,7 +449,7 @@ script itself is not Intel-specific. Commands are relative to the repository roo
 .venv/bin/python verify/checkpoints.py             # weights vs the recorded sha256 hashes
 .venv/bin/python verify/soak_check.py              # drift, RSS and concurrency over 200 calls
 .venv/bin/python tests/test_local_e2e.py ./models             # the repo's own e2e suite
-./examples/run_all.sh                              # all 41 examples, pass/fail
+./examples/run_all.sh                              # all classic examples
 ```
 
 Measured here, one `predict()` call answering 4 questions about a short email (median of 10,
@@ -856,79 +837,12 @@ The hint only decides *English or not*: a code whose primary subtag is `en`, `en
 
 ## Self-Hosting: HTTP Server (Jev-compatible)
 
-`laya.serve` exposes the `Router` over HTTP on the same `POST /v1/systemone`
-wire protocol as TypeSafe's hosted Jev API. Laya's answer payload is already
-schema-identical to what Jev returns (`choice`/`score`/`noul` answers and a
-`{input_tokens, output_tokens}` usage block), so an existing Jev client — e.g.
-the [`hs-jev`](https://github.com/getmissionctrl/hs-jev) Haskell client — just
-needs its `baseUrl` repointed; nothing else changes. A PHP client that targets
-`laya-serve` rather than Jev also exists: [`marcreichel/laya-php`](https://github.com/marcreichel/laya-php).
-
-```bash
-pip install "laya[serve]"          # adds fastapi + uvicorn + python-multipart
-LAYA_DEVICE=cuda LAYA_PRELOAD=1 laya-serve   # binds 0.0.0.0:8000, preloads all 3 checkpoints
-```
-
-```bash
-curl -s localhost:8000/v1/systemone -H 'content-type: application/json' -d '{
-  "state": {"body": "billed twice, refund please or we cancel"},
-  "questions": {"dept": {"type": "choice", "instructions": "which team?",
-                "criteria": {"billing": "refunds", "tech": "bugs"}}}
-}'
-```
-
-Questions in that request share the one `state`. Each is answered against the whole serialized state, so an instruction that names a record (`rows[i]`) still sees every record in it. One answer per record means one state per record, sent as `states` to `POST /v1/systemone/batch`. A state that does not fit the token room the questions leave is truncated before inference, and the server logs the dropped state tokens. The full response reports the same cut on `usage` (`truncated`, `state_tokens_dropped`, `truncated_questions`); `LAYA_JEV_STRICT=1` omits those fields, and the log line is the signal that remains.
-
-To evaluate multiple states in a single call, send a `states` array to `POST /v1/systemone/batch` (capped at 64 states; a batch larger than `LAYA_MAX_BATCH_TOKENS` is split across several forward passes rather than refused):
-
-```bash
-curl -s localhost:8000/v1/systemone/batch -H 'content-type: application/json' -d '{
-  "states": [
-    {"body": "billed twice, refund please"},
-    {"body": "cannot login, getting 500 error"}
-  ],
-  "questions": {"dept": {"type": "choice", "instructions": "which team?",
-                "criteria": {"billing": "refunds", "tech": "bugs"}}}
-}'
-```
-
-The endpoint shares forward passes via `Router.predict_batch` and returns an array of `results` in matching order along with aggregated `total_usage`. Each entry of `states` is its own context, which is the per-record call: a question on `/v1/systemone` sees the whole shared state, even when its text names `rows[i]`. When any result dropped state tokens, the server logs one warning for the batch — which results were cut, and how many tokens each lost — rather than one line per answer.
-
-
-Configuration is by environment variable: `LAYA_HOST`, `LAYA_PORT`,
-`LAYA_DEVICE`, `LAYA_PRELOAD`, `LAYA_MODELS` (comma list to preload),
-`LAYA_THREADS` (cap torch intra-op threads for CPU inference — keep at or below
-physical cores), `LAYA_AUTO_TASK`, `LAYA_DEFAULT_MODEL` (the checkpoint a state with no
-language evidence falls back to, `multilingual` by default; set it to `english` when most of
-your traffic is English), `LAYA_MAX_LOADED` (checkpoints resident at
-once, 2 by default; raise it to 3 when `LAYA_AUTO_TASK` makes a third one
-reachable on demand, or the server rebuilds one every time routing switches),
-`LAYA_IDLE_UNLOAD_SECONDS` (unload idle checkpoints; `0` disables it, `300` frees device memory
-after five minutes and makes the next request pay a cold load), `LAYA_EXTRA_MODELS` (a JSON object
-`{"my-checkpoint": "/path/to/it"}` registering extra checkpoints — Hub repo ids, local directories
-or `["repo", "subfolder"]` pairs — beside the bundled ones), and `LAYA_API_KEY` (when set, clients must
-send `Authorization: Bearer <key>`). A client's `model` field is honoured when it
-names a Laya checkpoint (`english`/`multilingual`/`typed-decisions`, a `LAYA_EXTRA_MODELS` name,
-or a published Hub id).
-`jev-1` and `convaiinnovations/laya` still mean the router auto-selects by script/language.
-A path or an unpublished Hub id (`/path/to/checkpoint`, `org/repo`) is a 422 on both
-`/v1/systemone` and `/v1/systemone/batch` instead of being answered by another checkpoint.
-The same body can also carry `task`,
-`lang`, `lang_guess`, `min_confidence`, `max_len` and `head_max_len` — the controls
-`Router.predict` takes that a JSON body can state — while the five hook arguments
-(`hooks`, `on_predict_start`, `on_predict_end`, `hooks_raise`, `hooks_timeout`) are refused
-with 422, because a hook is a callable that has to live where the server runs.
-
-When publishing the server under a reverse-proxy prefix such as `/laya`, set
-`LAYA_ROOT_PATH=/laya`. The proxy should strip that prefix before forwarding;
-the setting controls FastAPI-generated URLs and leaves the internal routes unchanged.
-
-Four things differ from Jev when you port a client:
-
-* **One shared context.** One `/v1/systemone` request is one state, and every question is decided on that whole state. Several records packed into it, with questions aimed at `rows[i]`, still share that context. Per-record answers are `states` on `/v1/systemone/batch`, one state per record. A state larger than the token room is truncated, and `laya-serve` logs the dropped tokens; under `LAYA_JEV_STRICT` that log is where the cut stays visible.
-* **Options per question.** A question's options share the checkpoint's option budget, `head_max_len` (192 tokens on `laya`, 256 on the other two), not Jev's cap of 255 options. In addition, the HTTP server (`laya.serve`) enforces an amplification guard of at most 100 choice options per question (`MAX_CHOICE_OPTIONS = 100`, rejected with 413 before inference). Once options overflow the token budget, around 20 options with a short description each, every option is trimmed to fit, so long or similar labels can reach the model reading the same ([Where Jev leads](#where-jev-leads)). Once they no longer fit the window at all, the library rejects the request with 422. For more candidates, narrow them first with `predict_shortlist` ([Honest limits](#honest-limits)).
-* **Score levels.** Every level needs a description. A `null` level is rejected with 422 rather than scored and echoed back in `legend`.
-* **`confidence`** on `choice` and `score` answers is 1 minus normalised entropy, a measure of how concentrated the distribution is, not Jev's `(n·p_max − 1)/(n − 1)`. A threshold carried over from Jev does not transfer. For one calibrated number on every question type, gate on `answer_confidence`, the probability of the reported answer. Both values shift with the number of options, so fit and validate any cutoff on held-out data at the option counts your workload uses ([#394](https://github.com/NandhaKishorM/laya/issues/394)).
+Run the local production server with the serve extra. For classic checkpoints,
+`/v1/systemone` accepts one state and `/v1/systemone/batch` accepts one state per record.
+With a native checkpoint configured, `/v1/multimodal` accepts one inline media file and
+optional context. The HTTP guide covers authentication, request budgets and the strict Jev
+response mode. [HTTP configuration and request examples](http-api.md) ·
+[Native clients and setup](multimodal-clients.md) · [Container setup](docker.md)
 
 ### Nix / NixOS
 
@@ -1317,50 +1231,10 @@ state/questions or `ctx.skip(...)` a cached answer; an end hook can rewrite the 
 
 ## Schema-driven decisions
 
-Describe the shape you want with a JSON schema or a pydantic model, and Laya answers it in one
-forward pass, with typed values and calibrated confidence.
-
-```python
-import laya
-
-schema = {
-    "type": "object",
-    "properties": {
-        "department": {"type": "string", "enum": ["billing", "support", "sales"],
-                       "description": "Which team should handle this?"},
-        "urgency": {"type": "integer", "minimum": 0, "maximum": 2},
-        "needs_human": {"type": "boolean"},
-    },
-}
-
-agent = laya.load("convaiinnovations/laya")
-agent.decide("I was charged twice, refund me.", schema=schema)
-# {"department": "billing", "urgency": 2, "needs_human": True}
-```
-
-`decide` also works on a `Router`, accepts a pydantic model (install `laya[structured]`), and can
-return per-field confidence with `return_details=True`. In an LCEL chain or LangGraph node the
-same call is `LayaDecision`. See [`docs/structured.md`](https://github.com/NandhaKishorM/laya/blob/main/docs/structured.md).
-
-For throughput, `decide_batch` answers a list of states against the *same* schema through
-`predict_batch` (see [Batch Mode](#batch-mode-score-many-states-in-one-forward-pass)), so the schema
-is planned once and the states share forward passes:
-
-```python
-values = agent.decide_batch(ticket_texts, schema=schema)   # values[i] matches ticket_texts[i]
-
-# On a Router the states may land on different checkpoints; keywords reach predict_batch:
-details = router.decide_batch(states, schema=schema, return_details=True, batch_size=64)
-```
-
-Measured on an Apple M-series (MPS), 8 English tickets through one checkpoint: 2624 ms one-by-one
-vs 723 ms batched (**3.6×**); 16 mixed English/German states through a `Router`: 2977 ms vs
-1903 ms (**1.6×**). On CPU the same workloads gave **1.6×** and **2.0×**. Projected values matched
-the one-by-one loop 8/8 and 16/16 on both devices, as expected wherever argmax is not at a
-threshold — verify against your own decision boundaries. `laya.decide_batch(runner, states, ...)`
-is the function form, and `ONNXAgent.decide_batch` runs the same thing on an ONNX export.
-
----
+Use `decide` for one state or `decide_batch` to apply one schema to several states. These
+helpers compile choice, ordinal and Boolean fields into typed questions. The tutorial
+covers the accepted JSON Schema and Pydantic fields, how results expose probabilities,
+and the function forms for Router and ONNX. [Schema-driven decisions](structured.md)
 
 ## Built-in Workflow Presets
 
@@ -1391,48 +1265,10 @@ email = agent.predict({"body": "Your account is locked, verify now"}, laya.email
 
 ## LangChain and LangGraph Integration
 
-Fast System 1 routing and guardrails directly inside LangGraph workflows and LCEL chains. Every node also takes core's per-call prediction hooks (`hooks`, `on_predict_start`, `on_predict_end`, `hooks_raise`, `hooks_timeout`) and the two routing hints that pick the checkpoint answering (`task`, `lang_guess`) — see [Which checkpoint answers](https://github.com/NandhaKishorM/laya/blob/main/docs/langchain.md#9-which-checkpoint-answers):
-
-```python
-from laya.integrations.langchain import LayaDecision, LayaGuardrail, LayaRouter
-
-# 1. Sub-35ms LangGraph conditional edge routing with confidence fallback
-router = LayaRouter(
-    criteria={"billing": "invoices, charges", "tech": "bugs, outages"},
-    confidence_threshold=0.80,
-    fallback="human_agent",
-)
-workflow.add_conditional_edges("triage", router)
-
-# 2. Inline prompt guardrails
-guard = LayaGuardrail(action="raise")  # raises LayaGuardrailError on jailbreak/injection
-
-# 3. Schema-driven decisions: a JSON schema in, schema-shaped values out
-decide = LayaDecision({
-    "type": "object",
-    "properties": {
-        "department": {"type": "string", "enum": ["billing", "technical", "other"]},
-        "needs_human": {"type": "boolean"},
-    },
-})
-decide.invoke("I was charged twice and the API still 500s for us.")
-# {'department': 'billing', 'needs_human': False}
-
-# 4. Score a backlog in one batched call, not one forward pass per input
-routes = router.batch(["refund my invoice", "the app crashes", "change my password"])
-```
-
-`batch()` and `abatch()` run the whole list through `predict_batch`, so `chain.batch(...)`,
-`RunnableParallel` and LangGraph map-reduce nodes get Laya's shared forward passes instead of
-LangChain's default one-call-per-input thread pool -- which races on MPS, where concurrent torch
-forwards abort the process. Measured on Apple M-series (medians of three): **2.2x** on a 16-ticket
-routing batch, **2.2x** across 24 mixed-language tickets through a `Router`, **1.8x** on the guard
-preset, with every route label and guardrail flag unchanged. On CPU the same workloads are
-2.2-2.4x over the one-by-one loop and 1.1-1.5x over the thread pool.
-
-See [**`docs/langchain.md`**](https://github.com/NandhaKishorM/laya/blob/main/docs/langchain.md) for the full guide, support ticket triage nodes, and remote HTTP server configuration.
-
----
+Use the integration extra for routing, triage, typed decisions and conditional edges
+within a LangChain or LangGraph workflow. The integration guide explains checkpoint
+selection, per-call hooks and how gate failures reach the caller.
+[LangChain and LangGraph usage](langchain.md)
 
 ## Decision Primitives
 
@@ -1552,84 +1388,9 @@ TileLang fast path and `compile=True` refuse such a checkpoint, and `backend="au
 
 ## MCP Server (Optional)
 
-Laya can be exposed as an [MCP](https://modelcontextprotocol.io) stdio server, so any MCP
-client (OpenClaw, Claude Desktop, Cursor, ...) can call typed decisions as tools
-(`laya_predict`, `laya_predict_batch`, `laya_predict_long`, `laya_route`, `laya_route_batch`, `laya_decide`, `laya_shortlist`, `laya_tournament`, `laya_preset`, `laya_status`) without writing glue code.
-This is an **optional extra**: the core package has no `mcp` dependency.
-
-```bash
-pip install "laya[mcp]"
-laya-mcp-server          # or: python -m laya.mcp.server
-```
-
-To share a `laya-serve` on your own hardware across editor sessions, set
-`LAYA_BASE_URL=http://127.0.0.1:8000` in each MCP client's environment. Its prediction tools use
-HTTP and import no torch; routing stays local. Set `LAYA_API_KEY` to the server's bearer key and
-`LAYA_REMOTE_TIMEOUT` to the allowed HTTP wait (300 seconds by default). `laya_shortlist` and
-`laya_tournament` are unavailable in this mode; use `laya_predict` with the HTTP server's
-`LAYA_TOURNAMENT_GROUP` enabled for shared-server tournament selection. See [shared-server MCP setup](https://github.com/NandhaKishorM/laya/blob/main/docs/cli-mcp.md#share-one-model-server-across-mcp-sessions).
-
-Example MCP client configuration (stdio transport):
-
-```json
-{
-  "mcpServers": {
-    "laya": {
-      "command": "laya-mcp-server",
-      "env": { "LAYA_DEVICE": "cpu" }
-    }
-  }
-}
-```
-
-The environment variables follow the contract documented at the top of
-[`laya/serve.py`](https://github.com/NandhaKishorM/laya/blob/main/laya/serve.py), so the same variable has one meaning across the
-package:
-
-| Variable | Default | Meaning |
-|---|---|---|
-| `LAYA_DEVICE` | (auto) | Same as `laya.serve`: the device type is lower-cased (`CUDA` → `cuda`, `CUDA:0` → `cuda:0`) and passed to torch, whose device parser is case-sensitive |
-| `LAYA_PRELOAD` | `1` | Same as `laya.serve`: build the checkpoints at startup, not lazily |
-| `LAYA_MODELS` | `english,multilingual` | Comma list to preload (serve contract). MCP difference: an empty value preloads `english,multilingual` so `typed-decisions` stays lazy; in `laya.serve` empty means every checkpoint |
-| `LAYA_THREADS` | (torch default) | Same as `laya.serve`: cap torch intra-op threads for CPU inference; keep it at or below the physical core count |
-| `LAYA_AUTO_TASK` | `0` | Same as `laya.serve`: `1` lets a request whose question ids match a typed-decisions workflow route to that checkpoint, which is then loaded on demand; it never joins the preload list |
-
-The tools return structured JSON (answers with probabilities, routing metadata, device,
-`latency_ms`). `laya_predict_batch` and `laya_route_batch` are the MCP form of
-[`Router.predict_batch` / `route_batch`](#batch-mode-score-many-states-in-one-forward-pass):
-one tool call takes an array of `{state, questions, model?, task?, lang?, lang_guess?, max_len?, head_max_len?}` requests, routes them
-first, groups them by checkpoint, and shares forward passes between requests with the same
-question schema, returning the answers in input order. `max_len` / `head_max_len` are per request
-there, exactly as `Router.predict_batch` reads them, so one wide question can raise its own budget
-without shrinking the rest of the batch to it. On 16 mixed-language tickets through
-the tool functions themselves, one batch call beat 16 `laya_predict` calls by **2.1-2.3x on
-MPS** (983-1082 ms -> 467-477 ms) and **~1.25x on CPU** (1861-2471 ms -> 1470-1911 ms), with
-**0/16 decision flips** (choice label, rounded score, noul sign) against the loop. Prefer it
-whenever a client has more than a few requests: each saved round trip is also an MCP
-request/response. `laya_decide` is the MCP form of [`laya.decide`](#schema-driven-decisions): it
-takes a JSON schema (enum choices, booleans, bounded integers) instead of hand-written
-questions and returns the decided `values` projected onto that schema -- enum member, integer
-level, boolean -- beside per-field `confidence` and `probabilities`, so a client that already
-knows the answer shape never parses an answer map by hand. `laya_shortlist` is the MCP form of [`predict_shortlist`](#honest-limits):
-it shortlists a many-option choice question to its `k` most likely labels by embedding
-similarity (mean-pooled from the answering checkpoint's own encoder, so no extra model is
-downloaded), answers in one forward pass, and returns per-question shortlist metadata
-(kept labels, cosine scores, `k`, option count, and whether the question passed through
-unshortlisted). `laya_tournament` is the in-process MCP form of [`predict_tournament`](#honest-limits):
-the decision model narrows large choices in balanced groups of `group_size=16` by default,
-then answers the complete request with the finalists. It returns `tournament` metadata per choice
-(`labels`, original count `n`, elimination `rounds`), finalist-only probabilities, and total latency.
-Small choices pass through with `rounds: 0`; narrowed questions report discarded `option_order`
-values under `option_order_dropped`. Routing uses the original request; language, budget and
-confidence controls reach every round. The guardrails shown on every decision
-tool point clients to `laya_shortlist` or `laya_tournament` for >20-option choices. As with the SDK, use it for structured
-decisions only; not for open Q&A or
-text generation. `laya_predict_long` is the MCP form of [`predict_long`](#long-documents-predict_long): it
-scans a state past the context window in overlapping windows and answers with per-answer
-window attribution plus the window count. Tests: `tests/test_mcp.py` (CI, no weights) and
-`tests/test_mcp_local_e2e.py` (local, real weights and a real stdio handshake).
-
----
+Install `.[mcp]` to run `laya-mcp-server` over stdio. A client can share a separate local
+`laya-serve` process by setting `LAYA_BASE_URL`. See the MCP guide for supported tools and
+the differences between local and shared-server mode. [MCP setup](cli-mcp.md)
 
 ## Evaluation harness
 
@@ -1658,7 +1419,7 @@ Community diagnostics: [Chinese workplace decisions (Feishu-style)](https://gith
 **Full report: [`BENCHMARKS.md`](https://github.com/NandhaKishorM/laya/blob/main/BENCHMARKS.md)** — every run consolidated, languages and themes, with per-language detail for all 51 languages.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/NandhaKishorM/laya/main/assets/laya_benchmark.png" alt="Per-language accuracy for both checkpoints across 51 languages" width="100%" />
+  <img src="https://raw.githubusercontent.com/2351548518/laya/main/assets/laya_benchmark.png" alt="Per-language accuracy for both checkpoints across 51 languages" width="100%" />
 </p>
 
 All Laya numbers below are measured. Every model answered byte-identical questions
@@ -1925,70 +1686,14 @@ Embedding the message alone gave the highest or tied-highest recall@20 for both 
 
 ## Fine-Tuning
 
-Fine-tune Laya on your own domain data. Two training options are provided:
+Use the classic fine-tuning guide for RLCD with the text encoder, temperature fitting,
+and the Kaggle and Apple silicon recipes. In a custom training loop,
+`model.head_checkpointing = True` recomputes decision-head activations during
+backpropagation. Enable encoder checkpointing separately.
+[Classic fine-tuning](finetune.md) · [Browser agent example](finetune_browser_agent.md)
 
-* **[`notebooks/laya_finetune_typed_decisions_2xT4_kaggle.ipynb`](https://github.com/NandhaKishorM/laya/blob/main/notebooks/laya_finetune_typed_decisions_2xT4_kaggle.ipynb)**: runs on Kaggle's free 2xT4 GPUs (DDP) and does the whole loop: build the dataset, train with RLCD (proper-scoring-rule rewards, GRPO-style policy gradient), fit calibration temperatures, evaluate, and push the result to the Hub.
-* **[`notebooks/laya_finetune_typed_decisions_mps.py`](https://github.com/NandhaKishorM/laya/blob/main/notebooks/laya_finetune_typed_decisions_mps.py)**: standalone training script for Apple Silicon MacBooks (PyTorch MPS with CPU fallback). Replaces DDP with single-process training and configurable micro-batches and gradient accumulation.
-
-For Apple Silicon (e.g. 16 GB MacBook), fine-tuning runs locally with unified memory:
-
-```bash
-python notebooks/laya_finetune_typed_decisions_mps.py \
-  --micro-batch 1 \
-  --grad-accum 32
-```
-
-The notebook and script enable gradient checkpointing on both the encoder and the decision head.
-For custom training loops, `model.head_checkpointing = True` enables activation
-checkpointing for the decision-head layers; enable the encoder's gradient checkpointing
-separately. During gradient-enabled training, this reduces stored intermediate activations
-by recomputing them during backward, trading extra computation for lower activation memory.
-The head flag defaults to `False` and is bypassed in evaluation and under `torch.no_grad()`.
-
-The notebook fits one `temperature` per type (`choice`, `score`, `noul`) and removes inherited
-`temperature_by_options` from the exported config. Otherwise those old bucket values take
-precedence at inference and silently mask the new fit. Existing checkpoints still honor
-intentional bucket-specific temperatures, falling back to the corresponding per-type value
-when a bucket is absent; the runtime's temperature clamp is unchanged.
-
-This fixes configuration persistence, not measured model accuracy or calibration quality.
-The notebook's calibration samples come from its training items; evaluate on separate held-out
-data before claiming an improvement. Already published checkpoints are not rewritten.
-Run the CPU-only regression checks with `python tests/test_calibration_persistence.py`
-(synthetic configs and tiny local fixtures; no pretrained downloads or training).
-
-Fine-tuning is where most of the value is. On the typed-decisions benchmark the base
-checkpoints score near chance zero-shot (0.36 and 0.35 against a 0.318 random baseline),
-while the fine-tuned checkpoint reaches **0.766** on the same 2,000 decisions -- above
-TypeSafe Jev's published 0.727 and above the 0.735 teacher self-agreement ceiling. Treat Laya
-as a fast base to specialise, not as a zero-shot decision engine.
-
-Runtime on 2xT4 is roughly 4-5 hours for 4 epochs over ~30k questions.
-
-### Worked example: a browser-agent decision head
-
-[`docs/finetune_browser_agent.md`](https://github.com/NandhaKishorM/laya/blob/main/docs/finetune_browser_agent.md) records a complete specialisation
-on a single 16 GB GPU with no paid API: Laya as the operation/target decider for
-[browser-use/jev-ultrafast](https://github.com/browser-use/jev-ultrafast) (same request format as
-TypeSafe Jev). Element top-1 among ~45 candidates goes from 0.10 zero-shot to 0.66, real-task
-success from 0 % to 62 % at 17-23 ms per step; weights, pipeline code and per-run results are on
-the Hub at [cklxx/laya-browser](https://huggingface.co/cklxx/laya-browser). The write-up covers the
-data recipe (reverse-generated goals, executed DONE states, Mind2Web, on-policy corrections), the
-input-format change that mattered most, and the things that did not work.
-
----
-
-## Support the Project
-
-If Laya helps your research or products, consider supporting independent research:
-
-<p align="left">
-  <a href="https://www.buymeacoffee.com/nandakishorm" target="_blank">
-    <img src="https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=&slug=nandakishorm&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" alt="Buy Me A Coffee" />
-  </a>
-</p>
-
----
+Use the joint trainer for supervised native decisions and single-box localization.
+[Native head warmup and LoRA](multimodal.md#head-warmup-and-lora-training)
 
 ## License
 
