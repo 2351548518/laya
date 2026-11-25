@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# Reproducible local setup for Laya on this machine (macOS on Intel x86_64).
+# Local setup for the classic Laya text checkpoints on macOS.
 #
-# Creates an isolated virtualenv, installs the only PyTorch release that still ships a
-# macOS Intel wheel, installs the newest transformers that runs on it, downloads the three
-# Laya checkpoints, and verifies the result with a real forward pass.
+# Creates an isolated virtualenv, uses the supported Intel stack on x86_64 or the current
+# package dependencies on Apple silicon, then downloads and verifies the text checkpoints.
 #
 # Usage:   ./setup_laya_macos.sh [--skip-models] [--skip-verify]   (or ./setup_laya.sh)
 # Idempotent: re-running only fixes what is missing.
@@ -35,7 +34,23 @@ say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 
 say "Host"
 uname -srm
-"$PYTHON_BIN" -c 'import platform,sys;print("python", sys.version.split()[0], platform.machine())'
+ENV_PYTHON="$PYTHON_BIN"
+if [ -x "$VENV/bin/python" ]; then
+  ENV_PYTHON="$VENV/bin/python"
+fi
+ARCH="$("$ENV_PYTHON" - <<'PY'
+import platform
+import sys
+
+arch = platform.machine()
+if sys.version_info < (3, 10):
+    sys.exit("Laya requires Python 3.10 or newer.")
+if arch == "x86_64" and sys.version_info >= (3, 13):
+    sys.exit("Use Python 3.10–3.12 for the Intel macOS PyTorch 2.2.2 wheel.")
+print(arch)
+PY
+)"
+"$ENV_PYTHON" -V
 
 if [ "$(uname -s)" != "Darwin" ]; then
   echo "warning: this script targets macOS; continuing anyway" >&2
@@ -48,21 +63,14 @@ fi
 "$VENV/bin/python" -m pip install --quiet --upgrade pip
 
 say "Dependencies"
-# torch: PyPI and download.pytorch.org both stopped publishing macOS x86_64 wheels after
-# 2.2.2, so this is the newest PyTorch this CPU can run from a wheel.
-# numpy: torch 2.2.2 was compiled against NumPy 1.x and fails to initialise under NumPy 2.
-# transformers: 4.57.x is the last 4.x line (5.x requires torch>=2.4, unavailable here) and
-# the oldest line that reads both the ModernBERT and mmBERT checkpoints.
-# huggingface_hub is capped <1.0 by transformers 4.x.
-"$VENV/bin/python" -m pip install \
-  "numpy<2" \
-  "torch==2.2.2" \
-  "transformers==4.57.6" \
-  "safetensors>=0.4.0" \
-  "huggingface_hub>=0.34.0,<1.0"
-
-say "Installing the laya package (editable)"
-"$VENV/bin/python" -m pip install --quiet -e "$ROOT"
+if [ "$ARCH" = "x86_64" ]; then
+  # The Intel wheel uses NumPy 1.x and Transformers 4.x. Resolve the pins together
+  # with the editable package so a later install cannot replace the supported stack.
+  "$VENV/bin/python" -m pip install -e "$ROOT" \
+    "numpy<2" "torch==2.2.2" "transformers==4.57.6" "huggingface_hub>=0.34.0,<1.0"
+else
+  "$VENV/bin/python" -m pip install -e "$ROOT"
+fi
 
 if [ "$SKIP_MODELS" -eq 0 ]; then
   say "Checkpoints -> $ROOT/models"

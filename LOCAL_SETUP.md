@@ -1,6 +1,10 @@
 # Laya on this machine — local setup
 
 For native multimodal setup on Linux or Apple silicon, run `./setup_laya.sh --multimodal`.
+On Windows, use `start.bat --multimodal` to serve a downloaded native checkpoint.
+On Intel macOS, the classic setup uses Python 3.10–3.12 and the pinned CPU/MPS stack.
+[Native service and SDKs](docs/multimodal-clients.md)
+
 The host measurements below describe the classic text checkpoints on an Intel Mac.
 [laya-multimodal installation](README.md#installation)
 

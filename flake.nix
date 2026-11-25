@@ -1,5 +1,5 @@
 {
-  description = "laya + laya-serve: a self-hosted, TypeSafe Jev-compatible System-1 decision server";
+  description = "Laya classic text runtime and local decision service for Nix";
 
   inputs = {
     # Pinned to the same rev missionctrl-infra uses, so hq's binary cache

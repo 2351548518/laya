@@ -1,3 +1,6 @@
+*.sh text eol=lf
+start.bat text eol=crlf
+
 # research/benchmarks/feishu_zh/SOURCE.json pins a sha256 of the raw bytes of the
 # frozen dataset and of every archived run, and audit.py verifies them with
 # read_bytes(). A checkout that rewrites the line endings (git's default

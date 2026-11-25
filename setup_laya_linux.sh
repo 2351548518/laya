@@ -61,9 +61,9 @@ say "PyTorch"
 # Installed before the project so the editable install reuses this build instead of pulling
 # its own. Without an NVIDIA driver, the CPU wheel avoids the much larger CUDA build.
 # An explicit TORCH_INDEX_URL always wins.
-if [ -z "${TORCH_INDEX_URL:-}" ] && ! command -v nvidia-smi >/dev/null 2>&1; then
+if [ -z "${TORCH_INDEX_URL:-}" ] && { [ "${LAYA_DEVICE:-}" = "cpu" ] || ! nvidia-smi -L >/dev/null 2>&1; }; then
   TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
-  echo "no NVIDIA driver found: using the CPU-only torch wheel"
+  echo "using the CPU-only torch wheel"
 fi
 TORCH_ARGS=()
 if [ -n "${TORCH_INDEX_URL:-}" ]; then

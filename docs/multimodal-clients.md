@@ -17,14 +17,16 @@ LAYA_HOST=127.0.0.1 LAYA_PRELOAD=0 \
 The first request loads the checkpoint when `LAYA_PRELOAD=0`. If you set `LAYA_API_KEY`,
 pass that bearer token to the SDK as `api_key` or `apiKey`. [Server settings](http-api.md)
 
-On Windows PowerShell, run the same service from the active Python environment:
+On Windows PowerShell, select your checkpoint and start the launcher.
 
 ```powershell
-$env:LAYA_HOST = "127.0.0.1"
-$env:LAYA_PRELOAD = "0"
 $env:LAYA_MULTIMODAL_MODEL = "$PWD\models\jev-multimodal-qwen3.5-4b"
-python -m laya.serve
+.\start.bat --multimodal
 ```
+
+The launcher uses `.venv-mm` and installs CPU PyTorch on first use. Set `TORCH_INDEX_URL` before
+creating the environment to choose a different PyTorch wheel index. Use
+`.\start.bat --multimodal 8080` for a different port.
 
 ## Python
 
@@ -81,3 +83,26 @@ its request and token budgets. [Single-box grounding](grounding.md)
 For pure text, use the SDK's `predict` or `predictBatch`/`predict_batch` on the text endpoints.
 For in-process text and media inference with the same native checkpoint, use
 `MultimodalAgent`. [Native Python usage](multimodal.md#local-prediction)
+
+## HTTP without an SDK
+
+Send a JSON object to `POST /v1/multimodal`. Encode the original file bytes with standard base64
+and put the string in the `base64` property of the corresponding media field. For example:
+
+```json
+{
+  "image": {"base64": "<base64 of scene.jpg>"},
+  "questions": {"target": {"type": "box", "instructions": "the red cup"}}
+}
+```
+
+Save the filled request as `request.json` and submit it with your HTTP client.
+
+```sh
+curl -fsS http://127.0.0.1:8000/v1/multimodal \
+  -H 'Content-Type: application/json' --data-binary @request.json
+```
+
+Send `Authorization: Bearer …` when server authentication is configured. For a text decision
+using the same checkpoint, send `state`, `questions` and `"model": "multimodal"` to
+`POST /v1/systemone`. [HTTP API](http-api.md)

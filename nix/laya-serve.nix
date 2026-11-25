@@ -136,7 +136,7 @@ in
       type = lib.types.listOf lib.types.str;
       default = [ "english" "multilingual" "typed-decisions" ];
       description = ''
-        Checkpoints to preload at startup. All three fit comfortably in a 24 GB
+        Checkpoints to preload at startup. The three default text models fit in a 24 GB
         card (~1.16B params total), so the default keeps every one hot and makes
         language routing free.
 
@@ -145,7 +145,7 @@ in
         `laya.router.normalise_name`, which accepts `english`, `multilingual` and
         `typed-decisions` plus the aliases `en`, `laya`, `default`, `multi`, `ml`,
         `laya-multilingual`, `typed`, `typed_decisions`, `laya-typed-decisions` and
-        `decisions`. An unknown name stops the service at startup with an error
+        `decisions`, and `multimodal` when multimodalModel is configured. An unknown name stops the service at startup with an error
         listing all of them. An `enum` here could only copy that list and fall
         behind it, refusing a spelling the server accepts.
       '';
@@ -321,7 +321,8 @@ in
       description = ''
         Native multimodal backbone or trained local checkpoint for `/v1/multimodal`
         (sets `LAYA_MULTIMODAL_MODEL`). The service package needs the multimodal
-        runtime dependencies. null leaves the native lane disabled.
+        runtime dependencies. Include "multimodal" in models to preload it.
+        null leaves the native lane disabled.
       '';
     };
 
@@ -388,6 +389,7 @@ in
       wantedBy = [ "multi-user.target" ];
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
+      path = lib.optional (cfg.multimodalModel != null) pkgs.ffmpeg;
 
       environment = {
         LAYA_HOST = cfg.host;

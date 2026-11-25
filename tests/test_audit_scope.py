@@ -106,14 +106,31 @@ check_true("pyproject/scope split covers every declared name",
            sorted(set(shipped) | set(advisory)) == expected and not set(shipped) & set(advisory),
            "shipped and advisory must partition the declared specs")
 
-# The blocking scope rests on one declaration-level fact: the image installs the [serve] extra
-# and no other (#694 review). If the Dockerfile ever reads `pip install ".[serve,onnx]"`, onnx
-# would ship in the image while sitting in the advisory bucket, and nothing would go red.
+# The default image installs [serve]. The native build explicitly opts into [multimodal],
+# whose dependencies are covered by the advisory audit.
 dockerfile = read("Dockerfile")
-image_extras = sorted({e.strip()
-                       for group in re.findall(r"pip install[^\n]*?\.\[([^\]]*)\]", dockerfile)
-                       for e in group.split(",") if e.strip()})
-check("Dockerfile/the image installs only the [serve] extra", image_extras, ["serve"])
+docker_commands = dockerfile.replace("\\\n", " ")
+install_blocks = re.finditer(
+    r'^RUN if \[ "\$LAYA_MULTIMODAL" = "1" \]; then\s+(.*?)\s+else\s+(.*?)\s+fi',
+    docker_commands, re.M)
+
+
+def installed_extras(instructions):
+    return sorted({extra.strip()
+                   for raw in re.findall(r"pip install[^\n]*?\.\[([^\]]*)\]", instructions)
+                   for extra in raw.split(",") if extra.strip()})
+
+
+project_installs = [block for block in install_blocks if installed_extras(block.group())]
+check("Dockerfile/one conditional project installation", len(project_installs), 1)
+if project_installs:
+    install = project_installs[0]
+    native_install, base_install = install.groups()
+    check("Dockerfile/default image extras", installed_extras(base_install), ["serve"])
+    check("Dockerfile/native image extras", installed_extras(native_install), ["multimodal", "serve"])
+    check("Dockerfile/no extra installs outside the opt-in block",
+          installed_extras(docker_commands[:install.start()] + docker_commands[install.end():]), [])
+check_true("Dockerfile/native image is opt-in", re.search(r"^ARG LAYA_MULTIMODAL=0$", dockerfile, re.M) is not None)
 
 # ---------------------------------------------------------------- the job's own extractors
 deps_job = "\n".join(section(read(os.path.join(".github", "workflows", "security.yml")),

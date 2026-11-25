@@ -1015,6 +1015,31 @@ def test_build_router_strips_the_device_before_torch_sees_it(monkeypatch):
     assert seen["device"] is None, repr(seen["device"])      # unset means auto
 
 
+def test_build_router_preloads_the_configured_native_checkpoint_by_default(monkeypatch):
+    import laya.router
+    import laya.serve
+
+    class RecordingRouter:
+        def __init__(self, **options):
+            self.options = options
+            self.preloaded = []
+
+        def preload(self, names=None):
+            self.preloaded.append(names)
+
+    monkeypatch.setattr(laya.router, "Router", RecordingRouter)
+    monkeypatch.setenv("LAYA_PRELOAD", "1")
+    monkeypatch.setenv("LAYA_MULTIMODAL_MODEL", " trained-checkpoint ")
+    monkeypatch.delenv("LAYA_MODELS", raising=False)
+    router = laya.serve.build_router()
+    assert router.options["multimodal"] == "trained-checkpoint"
+    assert router.preloaded == [["multimodal"]]
+    monkeypatch.setenv("LAYA_MODELS", "english, multimodal")
+    assert laya.serve.build_router().preloaded == [["english", "multimodal"]]
+    monkeypatch.setenv("LAYA_PRELOAD", "0")
+    assert laya.serve.build_router().preloaded == []
+
+
 def test_health_supports_router_without_loaded_revisions(monkeypatch):
     # FakeRouter deliberately has no loaded_revisions attribute. Injected test or
     # embedding routers predating revision reporting must remain health-compatible.

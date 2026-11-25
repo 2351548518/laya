@@ -2,7 +2,7 @@
 
 This guide covers the inherited Laya checkpoints, Vega integration, CLI, MCP and SDKs. The benchmark figures describe the models and protocols named in each section.
 
-Bare `laya.Agent()` and `laya.load()` default to Vega in Laya 0.5.3. Pass `vegaml=False` or
+Bare `laya.Agent()` and `laya.load()` default to Vega when `vegaml` is installed. Pass `vegaml=False` or
 name a classic checkpoint to select the text encoder. Use `MultimodalAgent` for a native
 Qwen3.5 or Gemma 4 decision checkpoint.
 
@@ -515,7 +515,8 @@ python examples/server.py               # http://127.0.0.1:8000
 
 On Windows, `start.bat` does the same from a clone: it creates `.venv` with whichever supported
 Python is installed, installs CPU torch and the `serve` extra on first run, then starts the server
-and opens the browser. `start.bat 8080` picks a different port.
+and opens the browser. `start.bat 8080` picks a different port. For the native HTTP service,
+use `start.bat --multimodal`. [Windows native setup](multimodal-clients.md#start-the-service)
 
 Open `http://127.0.0.1:8000` in a browser for the playground, or hit it directly:
 
@@ -959,10 +960,11 @@ The module runs a hardened `DynamicUser` systemd unit with CUDA device access,
 caches weights under `/var/lib/laya-serve`, and reads the bearer token (if any)
 via `LoadCredential` so it never enters the store.
 
-For native media on NixOS, set `services.laya-serve.multimodalModel` to a trained
-checkpoint path and supply `services.laya-serve.package` with the native runtime
-dependencies and FFmpeg on its PATH. The commands for the standard Python and
-container deployments are in the [media setup guide](multimodal-clients.md).
+The pinned Nix flake builds the classic runtime with Transformers 4.x. For native media on
+NixOS, supply `services.laya-serve.package` with the dependencies in `.[multimodal,serve]`
+and set `services.laya-serve.multimodalModel` to a readable trained checkpoint path.
+The module adds FFmpeg to the service PATH. Set `models = [ "multimodal" ];`
+to preload only the native model. [Python and container setup](multimodal-clients.md)
 
 ---
 

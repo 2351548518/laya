@@ -25,8 +25,8 @@ env var                    meaning                                        defaul
 ``LAYA_DEVICE``            torch device for every checkpoint              (auto)
 ``LAYA_MULTIMODAL_MODEL``  native multimodal model or trained directory   (off)
 ``LAYA_PRELOAD``           build the checkpoints at startup, not lazily   1
-``LAYA_MODELS``            comma list to preload (english,multilingual,   (all)
-                           typed-decisions); empty = every checkpoint
+``LAYA_MODELS``            comma list to preload                          (all classic,
+                                                                         or multimodal)
 ``LAYA_THREADS``           cap torch intra-op threads (CPU inference).    (torch
                            Keep <= physical cores; oversubscribing the     default)
                            logical/hyperthread count is a large regression.
@@ -1309,7 +1309,7 @@ def _apply_thread_limit():
 def build_router():
     """Build a Router from the environment, preloading unless told otherwise."""
     from .mcp.device import env_device
-    from .router import Router
+    from .router import MULTIMODAL_MODEL, Router
 
     _apply_thread_limit()
     # `env_device` rather than a raw read: it strips, the way `LAYA_MODELS` two lines
@@ -1322,6 +1322,8 @@ def build_router():
     multimodal_model = os.environ.get("LAYA_MULTIMODAL_MODEL", "").strip()
     if multimodal_model:
         options["multimodal"] = multimodal_model
+        if preload_names is None:
+            preload_names = [MULTIMODAL_MODEL]
     max_loaded = _resolve_max_loaded()
     if max_loaded is not None:
         options["max_loaded"] = max_loaded

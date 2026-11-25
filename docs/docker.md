@@ -18,31 +18,8 @@ before `up` on a host with the NVIDIA Container Toolkit. Set `LAYA_PRELOAD=1` to
 mounted checkpoint during startup. With lazy loading, `/health` checks whether the service is
 alive and the first request loads the model.
 
-Send an image to the native endpoint. Replace `scene.jpg` with a local image.
-
-```bash
-python - scene.jpg <<'PY'
-import base64
-import json
-import sys
-from pathlib import Path
-from urllib.request import Request, urlopen
-
-payload = {
-    "image": {"base64": base64.b64encode(Path(sys.argv[1]).read_bytes()).decode("ascii")},
-    "questions": {"target": {"type": "box", "instructions": "the red cup"}},
-}
-req = Request("http://127.0.0.1:8000/v1/multimodal", json.dumps(payload).encode(),
-              headers={"Content-Type": "application/json"})
-with urlopen(req) as response:
-    print(json.load(response)["answers"]["target"])
-PY
-```
-
-For audio or video, use the matching field and a checkpoint that supports that modality.
-For text decisions with the mounted checkpoint, send `"model": "multimodal"` to
-`POST /v1/systemone`.
-[Native input and HTTP contracts](multimodal.md#router-and-http) · [Released checkpoints](multimodal-release.md)
+Send a media request and read the typed decision or normalized box from the response.
+[HTTP and SDK examples](multimodal-clients.md) · [Released checkpoints](multimodal-release.md)
 
 ## Classic text checkpoints
 

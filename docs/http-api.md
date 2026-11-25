@@ -42,7 +42,7 @@ Everything is environment variables, so one image serves a laptop dev run and a 
 | `LAYA_DEVICE` | torch device for every checkpoint | auto |
 | `LAYA_MULTIMODAL_MODEL` | native multimodal backbone or trained local checkpoint for `/v1/multimodal` | off |
 | `LAYA_PRELOAD` | build the checkpoints at startup, not lazily | `1` |
-| `LAYA_MODELS` | comma list to preload (`english,multilingual,typed-decisions`); empty = all | all |
+| `LAYA_MODELS` | comma-separated checkpoint names to preload | `multimodal` if a native checkpoint is configured, otherwise all classic checkpoints |
 | `LAYA_THREADS` | cap torch intra-op threads on CPU; keep it <= physical cores -- oversubscribing logical cores is a large regression | torch default |
 | `LAYA_AUTO_TASK` | auto-route to the typed-decisions checkpoint | `0` |
 | `LAYA_IDLE_UNLOAD_SECONDS` | unload resident checkpoints after this many idle seconds; the next request loads its checkpoint again. Zero disables unloading | `0` |

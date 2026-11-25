@@ -13,8 +13,19 @@ let
     # pyproject.toml and laya.__version__) and fails CI when they diverge. Nothing
     # did, which is how this sat at 0.3.4 while the package reached 0.3.20.
     version = "0.5.3";
-    src = ../.;
+    src = lib.fileset.toSource {
+      root = ../.;
+      fileset = lib.fileset.unions [
+        (lib.fileset.fileFilter (file: file.hasExt "py") ../laya)
+        ../setup.py
+        ../pyproject.toml
+        ../README.md
+        ../LICENSE
+      ];
+    };
     format = "setuptools";
+    # The pinned package set builds the classic encoder. Vega falls back on import.
+    pythonRemoveDeps = [ "vegaml" ];
     propagatedBuildInputs = with python3Packages; [
       torch-bin # prebuilt CUDA wheel -- no source build
       transformers
@@ -22,10 +33,8 @@ let
       huggingface-hub
       numpy
       cryptography # verifies signed policies exported from Embedding Studio
-      # vegaml (a core dependency since 0.4.23) is not in nixpkgs. Everything but
-      # `laya.Agent(vegaml=True)` works without it, and that call names what to install.
     ];
-    # Every test loads a checkpoint from the Hub -> needs network + a GPU.
+    # Run the repository suites separately from this package build.
     doCheck = false;
     # serve.py defers its fastapi/uvicorn imports, so this stays honest without
     # dragging the web stack into the base library.

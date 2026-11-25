@@ -1,3 +1,5 @@
+# Classic text quickstart with a mounted request file. For native media use
+# compose.http.yaml and compose.multimodal.yaml with the laya-serve service.
 # Run from the repository root:
 # docker compose -f compose.yaml -f compose.example.yml run --build --rm laya
 # For NVIDIA, append -f compose.cuda.yaml before "run".

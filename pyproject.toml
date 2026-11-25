@@ -33,9 +33,8 @@ dependencies = [
     # vega's engine behind laya's surface, `laya.Agent(vegaml=True)` (laya/vega.py): conformal sets,
     # abstain and unbound flags, heads fitted on your labels, a refit calibration, 73k tokens of context,
     # images and speech, and continuous learning (`laya.Learner`, vegaml 0.17). A core dependency since
-    # 0.4.23 so a plain `pip install laya` carries it; the module itself is imported only when the argument
-    # is given or Learner is asked for, so `import laya` stays as light as before.
-    "vegaml>=0.18.0",
+    # 0.4.23. Intel macOS uses the classic encoder with PyTorch 2.2.2, below Vega's torch floor.
+    "vegaml>=0.18.0; platform_system != 'Darwin' or platform_machine != 'x86_64'",
     # Verifies the Ed25519 signature on policies exported from Embedding Studio (laya/policy.py).
     "cryptography>=41",
 ]
