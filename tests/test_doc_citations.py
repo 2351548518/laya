@@ -245,20 +245,15 @@ def landing_page() -> None:
     check_true("the landing-page check can see the guide pages", len(pages) >= 20,
                "only %d docs/*.md pages" % len(pages))
 
-    deferred = DEFERRAL.search(text)
-    check_true("the landing page still defers something to the README", deferred is not None,
-               "the `... is/are in the [README](...) for now.` sentence is gone, so this check "
-               "has nothing to hold -- delete it deliberately, not by accident")
-    if deferred is None:
-        return
-    topics = [t.strip() for t in re.split(r",| and ", deferred.group("topics")) if t.strip()]
-    check_true("the deferral lists the topics by name", len(topics) >= 1, topics)
-    for topic in topics:
-        slug = re.sub(r"\s+", "-", re.sub(r"^the\s+", "", topic.lower()).strip())
-        check_true("the README-only claim about %r has no page in this tree" % topic,
-                   slug not in pages,
-                   "docs/%s.md exists, so the front door has to link it instead of deferring it"
-                   % slug)
+    for deferred in DEFERRAL.finditer(text):
+        topics = [t.strip() for t in re.split(r",| and ", deferred.group("topics")) if t.strip()]
+        check_true("the deferral lists the topics by name", len(topics) >= 1, topics)
+        for topic in topics:
+            slug = re.sub(r"\s+", "-", re.sub(r"^the\s+", "", topic.lower()).strip())
+            check_true("the README-only claim about %r has no page in this tree" % topic,
+                       slug not in pages,
+                       "docs/%s.md exists, so the front door has to link it instead of deferring it"
+                       % slug)
 
     links = [l for l in re.findall(r"\]\(([^)#\s]+\.md)\)", text) if not l.startswith("http")]
     broken = [l for l in links
@@ -266,6 +261,8 @@ def landing_page() -> None:
     check_true("every guide the landing page links exists", not broken, broken)
     check_true("the landing-page link check has subjects", len(links) >= 10,
                "only %d relative links: %s" % (len(links), links))
+    guides = {"multimodal.md", "multimodal-clients.md", "grounding.md", "multimodal-release.md"}
+    check_true("the landing page links native guides", guides.issubset(links), sorted(guides.difference(links)))
 
 
 def main() -> int:

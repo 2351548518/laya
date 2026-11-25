@@ -1,8 +1,8 @@
 #!/usr/bin/env python
-"""Local smoke test for Laya: real weights, real forward passes, on this machine.
+"""Local smoke test for the three classic Laya text checkpoints.
 
-Exercises everything the README promises -- routing, the three checkpoints, all three
-decision primitives, the built-in presets -- and prints per-checkpoint latency.
+Exercises routing, three decision primitives and the built-in presets, and prints
+per-checkpoint latency. See verify/README.md for native multimodal checks.
 
     python verify/laya_smoke_test.py --models ./models [--device auto|cpu|mps] [--repeat 5]
 

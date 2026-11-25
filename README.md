@@ -76,6 +76,10 @@ Use `device="cpu"` for CPU inference. For Qwen video, use a state such as
 checkpoint also accepts `audio="clip.wav"` or a waveform and `sampling_rate`. The native guide
 covers input budgets, batch prediction, local routing and HTTP requests. [Native multimodal guide](https://github.com/2351548518/laya/blob/main/docs/multimodal.md)
 
+Use the [native Notebook](https://github.com/2351548518/laya/blob/main/notebooks/laya_native_multimodal.ipynb)
+to try text and media decisions and inspect the JSONL format. For a separate application process,
+the Python and TypeScript SDKs send media to your local server. [Native SDK examples](https://github.com/2351548518/laya/blob/main/docs/multimodal-clients.md)
+
 ## Train and evaluate
 
 The runtime feeds native media and question tokens into the backbone. A shared candidate scorer
@@ -120,9 +124,11 @@ patch, native export commands and evaluation scope. [Model releases and GGUF set
 | `laya/` | Inference, native media processing, JSONL loading, training and calibration |
 | `scripts/multimodal/` | Reusable training, evaluation, merge, conversion and quantization commands |
 | `configs/multimodal/` | Portable head warmup and LoRA recipes |
+| `sdk/python/`, `sdk/typescript/` | Local HTTP clients for text decisions, media decisions and single-box results |
+| `notebooks/`, `examples/` | Native multimodal walkthrough and classic checkpoint examples |
 | `docs/` and `tests/` | Usage, API contracts and regression checks |
 | `laya-cpp/`, `laya-rust/`, `laya-dotnet/`, `laya-go/`, `laya-java/`, `laya-ts/` | Classic Laya text runtimes and instructions for calling the local multimodal services |
-| `benchmarks/` | Reproduction instructions and reference benchmark artifacts |
+| `benchmarks/`, `research/`, `verify/` | Evaluation recipes, published result records and local runtime checks |
 | `Dockerfile`, `compose.*` and `setup_laya.sh` | Local installation and service deployment |
 
 Keep downloaded weights in `models/`, local datasets in `multimodal-data/`, and checkpoints
@@ -143,7 +149,9 @@ See the [contribution guide](https://github.com/2351548518/laya/blob/main/CONTRI
 ## Credits and license
 
 laya-multimodal extends the Laya project by Convai Innovations. The upstream project documents
-the original text decision models, SDKs and Vega integration.
+the original text decision models, SDKs and Vega integration. This fork follows upstream Laya
+0.5.3: bare `laya.Agent()` and `laya.load()` use Vega. Use `vegaml=False` to select the classic
+encoder and `laya.MultimodalAgent(...)` to load a native decision checkpoint.
 [Laya text routing and integrations](https://github.com/2351548518/laya/blob/main/docs/laya-guide.md) · [Upstream Laya](https://github.com/NandhaKishorM/laya)
 
 The source is licensed under [Apache 2.0](https://github.com/2351548518/laya/blob/main/LICENSE). The base models and datasets retain their

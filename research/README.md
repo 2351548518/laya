@@ -1,7 +1,8 @@
 # Research
 
-Benchmark harnesses and raw results for the Laya checkpoints. This branch is the evidence behind
-the numbers quoted in the main README — nothing here is imported by the `laya` package.
+Benchmark harnesses and recorded results for the inherited Laya checkpoints.
+[Classic benchmark summary](../BENCHMARKS.md) ·
+[Native Qwen3.5 decision and grounding results](../docs/multimodal-release.md)
 
 ## Evaluation
 

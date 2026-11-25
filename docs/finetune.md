@@ -1,5 +1,9 @@
 # Fine-tuning Laya on your own decisions
 
+This page and its Kaggle notebook describe RLCD for the classic text encoder. The native
+multimodal recipes use supervised decision and single-box targets, head warmup and LoRA.
+[Native training guide](multimodal.md#head-warmup-and-lora-training)
+
 On the typed-decisions benchmark the base checkpoints score near chance zero-shot — 0.36 and
 0.35 against a 0.318 random baseline — while the fine-tuned checkpoint reaches **0.766** on the
 same 2,000 decisions, above TypeSafe Jev's published 0.727 and above the 0.735 teacher

@@ -17,6 +17,8 @@ Install the source checkout, download the released checkpoint and run the first 
 | To | Read |
 |---|---|
 | run or train native text, image, audio and video decisions | [Native multimodal decisions](multimodal.md) |
+| try native prediction and inspect example training records | [Native multimodal Notebook](https://github.com/2351548518/laya/blob/main/notebooks/laya_native_multimodal.ipynb) |
+| send media to your local server from Python or TypeScript | [Native media SDKs](multimodal-clients.md) |
 | locate one object in an image | [Single-box grounding](grounding.md) |
 | download the released model or deploy a quantized variant locally | [Models and GGUF deployment](multimodal-release.md) |
 | get typed values back from a JSON schema or a pydantic model | [Schema-driven decisions](structured.md) |

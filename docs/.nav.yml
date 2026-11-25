@@ -4,6 +4,7 @@ nav:
   - index.md
   - Guides:
       - multimodal.md
+      - multimodal-clients.md
       - grounding.md
       - multimodal-release.md
       - laya-guide.md

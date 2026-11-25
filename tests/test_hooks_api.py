@@ -19,6 +19,7 @@ import json
 import os
 import re
 import sys
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -94,9 +95,17 @@ for label, fn in (("Agent.__init__", Agent.__init__), ("load", load)):
 check_param("Router.__init__", Router.__init__, "default", "multilingual")
 check_param("Router.__init__", Router.__init__, "multimodal", None)
 check_param("load", load, "multimodal", None)
+check_param("load", load, "model_id_or_path", None)
 check_true("MultimodalAgent is a public lazy export", "MultimodalAgent" in laya.__all__)
 from laya.multimodal import MultimodalAgent  # noqa: E402
-from laya.multimodal import MULTIMODAL_MODELS  # noqa: E402
+from laya.multimodal import DEFAULT_MULTIMODAL_MODEL, MULTIMODAL_MODELS  # noqa: E402
+with patch("laya.multimodal.MultimodalAgent") as load_native:
+    check("load(multimodal=True) bypasses the Vega default", load(multimodal=True), load_native.return_value)
+    check("native default source", load_native.call_args.args, (DEFAULT_MULTIMODAL_MODEL,))
+    with patch("laya.agent.os.path.isfile", return_value=True) as is_file:
+        check("load detects a local native checkpoint", load("my-checkpoint"), load_native.return_value)
+        check("native config probe", is_file.call_args.args, (os.path.join("my-checkpoint", "multimodal_config.json"),))
+    check("saved native source", load_native.call_args.args, ("my-checkpoint",))
 check("Qwen3.5 4B alias", MULTIMODAL_MODELS["qwen3.5-4b"], "Qwen/Qwen3.5-4B")
 check("Qwen3.5 9B alias", MULTIMODAL_MODELS["qwen3.5-9b"], "Qwen/Qwen3.5-9B")
 from laya.multimodal_train import MultimodalTrainConfig, finetune_multimodal  # noqa: E402

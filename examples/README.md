@@ -1,5 +1,10 @@
 # Laya examples — a learning path
 
+For text, image, video and audio with a native decision checkpoint, start with the
+[multimodal Notebook](../notebooks/laya_native_multimodal.ipynb). For media requests to a separate
+local process, see [Python and TypeScript SDK examples](../docs/multimodal-clients.md). The
+learning path below uses the classic checkpoints and Vega.
+
 41 runnable scripts arranged as eight stages. Each stage assumes the one before it and adds one
 idea, so you can stop wherever you already have what you need. Every script runs against the real
 checkpoints and prints real output — nothing here is a mock, and the numbers you see come from the
@@ -29,7 +34,7 @@ python examples/01_first_call_minimal.py         # any Python with torch + trans
 ---
 
 `data/routing_labels.csv` is a 60-row labelled set (five teams, three urgency levels) for
-`laya.Agent(vegaml=True).fit(...)`; the main README's quickstart uses it.
+`laya.Agent(vegaml=True).fit(...)`. [Vega walkthrough](../docs/laya-guide.md)
 
 ---
 

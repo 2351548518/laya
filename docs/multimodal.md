@@ -5,7 +5,8 @@ It uses the backbone's image, audio and video processing, a shared candidate sco
 optional compact single-box readout. Every question uses one backbone forward pass.
 
 The published Qwen3.5-4B checkpoint is available as merged safetensors and typed-decision GGUF.
-[Models and GGUF deployment](multimodal-release.md)
+[Models and GGUF deployment](multimodal-release.md) ·
+[Native multimodal Notebook](https://github.com/2351548518/laya/blob/main/notebooks/laya_native_multimodal.ipynb)
 
 Install the optional runtime and training dependencies:
 
@@ -85,8 +86,8 @@ checkpoint, and start `laya-serve`. `POST /v1/multimodal` accepts `state`, `ques
 one of `image`, `audio` or `video`, and optional `max_len` and `min_confidence` controls. Encode
 file bytes as `{"base64": "..."}` in the selected media field. Remote callers cannot provide
 server file paths. Existing authentication, request size limits and admission controls apply.
-Video audio follows the configured backbone's capabilities. See the [HTTP API](http-api.md)
-for server settings and the existing text endpoints.
+Video audio follows the configured backbone's capabilities. [HTTP API](http-api.md) ·
+[Python and TypeScript media examples](multimodal-clients.md)
 
 ## Local JSONL data loading
 

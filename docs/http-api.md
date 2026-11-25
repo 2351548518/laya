@@ -2,9 +2,9 @@
 
 Native media decisions are available at `POST /v1/multimodal` when the server is configured with
 `LAYA_MULTIMODAL_MODEL` (a backbone name or trained local checkpoint). This route accepts inline
-base64 file bytes and shares the server's authentication and bounded request handling. See the
-[multimodal guide](multimodal.md#router-and-http) for its separate media contract. The existing
-`/v1/systemone` endpoints retain their text contract.
+base64 file bytes and shares the server's authentication and bounded request handling. The
+`/v1/systemone` endpoints retain their text contract. [Media request schema](multimodal.md#router-and-http) ·
+[Python and TypeScript SDKs](multimodal-clients.md)
 
 `laya-serve` exposes Laya over the TypeSafe Jev `/v1/systemone` wire protocol. A client written
 against Jev -- `hs-jev`, `typesafe-sdk`, or your own -- can point its base URL at this server and
@@ -12,9 +12,9 @@ keep working: Laya's `predict()` output is already schema-compatible, and the se
 HTTP surface: single and batch inference, a routing snapshot, a health probe, an optional bearer
 check and request limits.
 
-The [Python HTTP client](https://github.com/NandhaKishorM/laya/blob/main/sdk/python/README.md)
-provides synchronous `predict` and `health` calls with no runtime dependencies. Install it
-from `sdk/python` in the application environment to keep the inference stack on the server.
+The Python HTTP client provides synchronous single, batch and media predictions plus health
+checks. Install it from `sdk/python` in the application environment to keep the inference stack
+on the server. [Python SDK](https://github.com/2351548518/laya/tree/main/sdk/python)
 
 A client that targets `laya-serve` rather than the Jev API exists for PHP:
 [`marcreichel/laya-php`](https://github.com/marcreichel/laya-php) is a Composer SDK (PHP 8.4+)

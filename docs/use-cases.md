@@ -408,7 +408,7 @@ Before rolling out any of the above patterns to production, verify:
    appropriately (`torch.set_num_threads`).
 2. **Confidence thresholding:** Set `min_confidence` (e.g. `0.80–0.90`) on mission-critical gates so
    the system safely falls back when queries are ambiguous.
-3. **Multilingual routing:** Use `Router()` instead of a static `Agent()` when user traffic includes
-   mixed or non-English inputs.
+3. **Multilingual routing:** Use `Router()` to select among classic encoders for mixed or
+   non-English inputs.
 4. **Staged rollout:** Follow the [Staged Adoption Guide](staged-adoption.md) to shadow production traffic
    before making decisions authoritative.

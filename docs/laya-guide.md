@@ -2,6 +2,10 @@
 
 This guide covers the inherited Laya checkpoints, Vega integration, CLI, MCP and SDKs. The benchmark figures describe the models and protocols named in each section.
 
+Bare `laya.Agent()` and `laya.load()` default to Vega in Laya 0.5.3. Pass `vegaml=False` or
+name a classic checkpoint to select the text encoder. Use `MultimodalAgent` for a native
+Qwen3.5 or Gemma 4 decision checkpoint.
+
 [Native multimodal decisions](multimodal.md) · [Model deployment](multimodal-release.md)
 
 ## Installation
@@ -41,7 +45,7 @@ agent = laya.Agent(vegaml=True)   # the 0.8B universal reader (nandakishorm/vega
 #   laya.Agent(vegaml="nandakishorm/vega-U")               # any Hub repo id holding a vega-U checkpoint
 #   laya.Agent(vegaml="./my-reader/")                      # a local dir from VegaAgent.attach(...), your own LLM ported in
 #   laya.Agent(vegaml=True, backbone="Qwen/Qwen3.5-0.8B")  # name the reader weights explicitly, e.g. a mirror
-# Without the argument, laya's own encoders, also by Hub name:
+# Name a classic Laya encoder explicitly:
 #   laya.Agent("convaiinnovations/laya")                   # English, 33 ms on a T4
 #   laya.Agent("convaiinnovations/laya-multilingual")      # 100+ languages, up to 8,192 tokens with max_len=8192
 #   laya.Agent("convaiinnovations/laya-typed-decisions")   # fine-tuned for the typed-decisions workflows
@@ -75,7 +79,7 @@ The output keeps laya's shape (`choice`, `score`, `noul`, `probabilities`, `answ
 ```python
 from laya.vega import Router
 
-router = Router(fast=laya.Agent(), vega=agent)
+router = Router(fast=laya.Agent(vegaml=False), vega=agent)
 out = router.predict(state, questions)
 print(out["routing"])            # {"model": "fast", "reason": "short English text, no fitted head: the fast encoder is enough"}
 out = router.predict("मुझसे मार्च में दो बार शुल्क लिया गया, कृपया डुप्लिकेट राशि वापस करें।", questions)
@@ -955,6 +959,11 @@ The module runs a hardened `DynamicUser` systemd unit with CUDA device access,
 caches weights under `/var/lib/laya-serve`, and reads the bearer token (if any)
 via `LoadCredential` so it never enters the store.
 
+For native media on NixOS, set `services.laya-serve.multimodalModel` to a trained
+checkpoint path and supply `services.laya-serve.package` with the native runtime
+dependencies and FFmpeg on its PATH. The commands for the standard Python and
+container deployments are in the [media setup guide](multimodal-clients.md).
+
 ---
 
 ## Single-Model Mode (Direct SDK)
@@ -1185,7 +1194,7 @@ agent.predict(audio=wav, questions=questions, sampling_rate=16000)   # transcrib
 agent.predict(video="call.mp4", questions=questions)                  # speech if any, else frames
 
 from laya.vega import Router
-router = Router(fast=laya.Agent(), vega=agent)   # laya for short English text, vega otherwise
+router = Router(fast=laya.Agent(vegaml=False), vega=agent)   # laya for short English text, vega otherwise
 router.predict(state, questions)["routing"]     # {"model": "fast" | "vega", "reason": ...}
 ```
 

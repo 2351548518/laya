@@ -1,5 +1,6 @@
 @echo off
-rem Start the Laya web UI + API on http://localhost:8000
+rem Start the classic text UI and API on http://localhost:8000
+rem Native multimodal service setup: docs\multimodal-clients.md
 rem Usage: start.bat [port]      (default port 8000, same as examples/server.py)
 setlocal enabledelayedexpansion
 cd /d "%~dp0"

@@ -6,7 +6,8 @@ TypeScript inference for Laya (`Agent.predict`, `Router`, `lang`, `email`, `pres
 
 The local `Agent` reads classic Laya text checkpoints. To ask the native Qwen or Gemma model
 about a file, start the local multimodal server and use the corresponding media field.
-[Server setup](https://github.com/2351548518/laya/blob/main/docs/docker.md#serve-a-native-multimodal-checkpoint)
+[Server setup](https://github.com/2351548518/laya/blob/main/docs/multimodal-clients.md) ·
+[Typed laya-client example](https://github.com/2351548518/laya/blob/main/docs/multimodal-clients.md#typescript)
 
 ```ts
 import { readFile } from "node:fs/promises";

@@ -19,7 +19,7 @@
     agent.predict(video=clip, questions=questions) # the sound track if it carries speech, frames if not
     agent.predict_long(very_long_state, questions)   # 73k tokens, no windowing
     agent.save_calibration("fit/")               # heads and calibration, reloadable
-    laya.vega.Router(fast=laya.Agent(), ...)     # model switching: laya for short English text,
+    laya.vega.Router(fast=laya.Agent(vegaml=False), ...)  # model switching: laya for short English text,
                                                   # vega for everything else
 
 **What the argument buys.** laya's own checkpoints are ModernBERT encoders: fast, small, text
@@ -1181,8 +1181,8 @@ def _pad_for_calibration(result: Mapping, cal) -> Dict:
 class Router:
     """Model switching: laya's fast encoder where it is enough, vega where it is not.
 
-        router = from laya.vega import Router
-        Router(fast=laya.Agent(), vega=laya.Agent(vegaml=True))
+        from laya.vega import Router
+        router = Router(fast=laya.Agent(vegaml=False), vega=laya.Agent(vegaml=True))
         router.predict(state, questions)            # -> picks, and says which under "routing"
 
     The rule, in order: an ``image``, ``audio`` or ``video`` goes to vega (the encoder has no eyes or
