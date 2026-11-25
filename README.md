@@ -1,5 +1,7 @@
 # laya-multimodal
 
+<img src="https://raw.githubusercontent.com/2351548518/laya/main/assets/laya-multimodal-banner.webp" alt="Text, image, video and audio inputs converge into a local decision" width="100%">
+
 A local System 1 decision engine for text, images, video and audio. Each question runs one backbone
 forward pass and returns a typed answer with zero generated answer tokens. Use it for routing,
 action selection, yes/no checks, ordinal ratings and single-object localization.
@@ -31,6 +33,12 @@ python -m pip install -e '.[multimodal]'
 
 The Python package is imported as `laya`. The HTTP server is available with
 `python -m pip install -e '.[multimodal,serve]'`.
+
+On Linux and Apple silicon, `./setup_laya.sh --multimodal` prepares `.venv-mm` and downloads
+the merged Qwen checkpoint shown below. Pass `--skip-models` to use an existing checkpoint.
+
+For a container, mount the local checkpoint and enable the native media dependencies with
+`compose.multimodal.yaml`. [Docker setup](https://github.com/2351548518/laya/blob/main/docs/docker.md#serve-a-native-multimodal-checkpoint)
 
 ## Quickstart
 
@@ -113,6 +121,9 @@ patch, native export commands and evaluation scope. [Model releases and GGUF set
 | `scripts/multimodal/` | Reusable training, evaluation, merge, conversion and quantization commands |
 | `configs/multimodal/` | Portable head warmup and LoRA recipes |
 | `docs/` and `tests/` | Usage, API contracts and regression checks |
+| `laya-cpp/`, `laya-rust/`, `laya-dotnet/`, `laya-go/`, `laya-java/`, `laya-ts/` | Classic Laya text runtimes and instructions for calling the local multimodal services |
+| `benchmarks/` | Reproduction instructions and reference benchmark artifacts |
+| `Dockerfile`, `compose.*` and `setup_laya.sh` | Local installation and service deployment |
 
 Keep downloaded weights in `models/`, local datasets in `multimodal-data/`, and checkpoints
 and reports in `multimodal-runs/`. Use `_local/` for data collection and preparation,
