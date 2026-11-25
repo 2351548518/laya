@@ -221,17 +221,20 @@ def filter_split_overlaps(splits):
     return dropped
 
 
+def _decision_target(row, qid, question):
+    """Read the target in canonical option order, preferring soft labels when supplied."""
+    if "gold" in row:
+        return target_from_gold(question, row["gold"][qid])
+    return target_from_expected(question, row["expected"][qid])
+
+
 def _items(agent, rows):
     items = []
     for row in rows:
         for qid, qdef in row["questions"].items():
             agent._check_question(qid, qdef)
             q = agent._to_internal(qdef)
-            if "gold" in row:
-                target = target_from_gold(q, row["gold"][qid])
-            else:
-                target = target_from_expected(q, row["expected"][qid])
-            items.append((row, qid, qdef, target))
+            items.append((row, qid, qdef, _decision_target(row, qid, q)))
     return items
 
 

@@ -19,9 +19,10 @@ from .evals import file_fingerprint
 from .grounding import box_iou, crowd_overlap, grounding_loss, validate_boxes
 from .multimodal import MultimodalAgent, _active_head, _is_adapter_model
 from .multimodal_distributed import distributed_context
-from .multimodal_train import MultimodalTrainConfig, configure_training, collate_multimodal_inputs, _train_mode
+from .multimodal_train import (
+    MultimodalTrainConfig, configure_training, collate_multimodal_inputs, _train_mode, _decision_target,
+)
 from .multimodal_objectives import learning_rate_factor, optimizer_groups
-from .train import target_from_gold, target_from_expected
 
 
 @dataclass
@@ -171,29 +172,34 @@ def decision_retained(current, baseline, margin):
 
 
 def checkpoint_score(metrics, selection_metric="joint"):
-    """Keep decision adaptation selection separate from geometric adaptation selection."""
-    geometric=[]
-    if metrics.get('single_n',1):geometric.append(metrics['acc_iou50'])
-    if metrics.get('set_n',1):geometric.append(metrics['set_f1_50'])
-    geometry=sum(geometric)/len(geometric) if geometric else 0.
-    decisions=metrics.get('decisions')
-    if selection_metric=='decision_macro':
-        if not decisions or not decisions['by_modality']:
-            raise ValueError('decision_macro selection requires decision development data')
-        return sum(v['accuracy'] for v in decisions['by_modality'].values())/len(decisions['by_modality'])
-    if selection_metric!='joint':raise ValueError('unknown checkpoint selection metric')
-    if decisions:
-        macro=sum(v['accuracy'] for v in decisions['by_modality'].values())/len(decisions['by_modality'])
-        return (geometry+macro)/2
-    return geometry
+    """Score the available geometric tasks and optionally blend in macro decision accuracy."""
+    geometric = []
+    if metrics.get('single_n', 1):
+        geometric.append(metrics['acc_iou50'])
+    if metrics.get('set_n', 1):
+        geometric.append(metrics['set_f1_50'])
+    geometry = sum(geometric) / len(geometric) if geometric else 0.
+
+    decisions = metrics.get('decisions')
+    if selection_metric == 'decision_macro' and (not decisions or not decisions['by_modality']):
+        raise ValueError('decision_macro selection requires decision development data')
+    if selection_metric not in ('joint', 'decision_macro'):
+        raise ValueError('unknown checkpoint selection metric')
+    if not decisions:
+        return geometry
+    modalities = decisions['by_modality']
+    macro_accuracy = sum(values['accuracy'] for values in modalities.values()) / len(modalities)
+    return macro_accuracy if selection_metric == 'decision_macro' else (geometry + macro_accuracy) / 2
 
 
-def grounding_retained(current,baseline,margin):
+def grounding_retained(current, baseline, margin):
     """Check retention on the geometric tasks actually present in development data."""
-    keys=[]
-    if baseline.get('single_n',1):keys.append('acc_iou50')
-    if baseline.get('set_n',1):keys.append('set_f1_50')
-    return all(current[key]>=baseline[key]-margin for key in keys)
+    keys = []
+    if baseline.get('single_n', 1):
+        keys.append('acc_iou50')
+    if baseline.get('set_n', 1):
+        keys.append('set_f1_50')
+    return all(current[key] >= baseline[key] - margin for key in keys)
 
 
 def _decision_development(agent,rows,tagged_only=False):
@@ -238,27 +244,34 @@ def _geometry_microbatches(agent, rows, config):
             yield pack(task, items)
 
 
-def _decision_microbatches(agent,rows,config):
+def _decision_microbatches(agent, rows, config):
     """Pack native decision inputs by media fields and the actual padded token budget."""
-    buckets={}
+    buckets = {}
+
     def pack(items):
-        inputs=items[0][1] if len(items)==1 else collate_multimodal_inputs(
-            [item[1] for item in items],getattr(agent.tok,'pad_token_id',0) or 0)
-        return [item[0] for item in items],inputs
-    if getattr(config,'length_bucketing',False):
-        rows=sorted(rows,key=lambda row:row.get('training_admission',{}).get('tokens',0))
+        inputs = items[0][1] if len(items) == 1 else collate_multimodal_inputs(
+            [item[1] for item in items], getattr(agent.tok, 'pad_token_id', 0) or 0)
+        return [item[0] for item in items], inputs
+
+    if getattr(config, 'length_bucketing', False):
+        rows = sorted(rows, key=lambda row: row.get('training_admission', {}).get('tokens', 0))
     for row in rows:
-        if 'grounding' in row:continue
-        qid,qdef=next(iter(row['questions'].items()))
-        inputs,q,_=agent._prepare(agent._input(row['state']),qdef)
-        values=target_from_gold(q,row['gold'][qid]) if 'gold' in row else target_from_expected(q,row['expected'][qid])
-        key=tuple(sorted(inputs));items=buckets.setdefault(key,[]);length=inputs['input_ids'].shape[-1]
-        longest=max([length]+[item[1]['input_ids'].shape[-1] for item in items])
-        if items and (len(items)>=config.micro_batch or longest*(len(items)+1)>config.max_micro_tokens):
-            buckets[key]=[];yield pack(items)
-        buckets[key].append(((row,qid,qdef,q,values),inputs))
+        if 'grounding' in row:
+            continue
+        qid, qdef = next(iter(row['questions'].items()))
+        inputs, q, _ = agent._prepare(agent._input(row['state']), qdef)
+        target = _decision_target(row, qid, q)
+        input_fields = tuple(sorted(inputs))
+        items = buckets.setdefault(input_fields, [])
+        lengths = [inputs['input_ids'].shape[-1]] + [item[1]['input_ids'].shape[-1] for item in items]
+        padded_tokens = max(lengths) * (len(items) + 1)
+        if items and (len(items) >= config.micro_batch or padded_tokens > config.max_micro_tokens):
+            buckets[input_fields] = []
+            yield pack(items)
+        buckets[input_fields].append(((row, qid, qdef, q, target), inputs))
     for items in buckets.values():
-        if items:yield pack(items)
+        if items:
+            yield pack(items)
 
 
 def _activation_context(inputs, config):
@@ -317,12 +330,13 @@ def grounding_metrics(agent, rows, limit=256, threshold=.25):
         qid, qdef = next(iter(row["questions"].items()))
         inputs, q, _ = agent._prepare(agent._input(row["state"]), qdef)
         if "grounding" not in row:
-            y = target_from_gold(q, row["gold"][qid]) if "gold" in row else target_from_expected(q, row["expected"][qid])
-            probabilities = agent._logits(inputs, len(y))[0].softmax(-1)
+            target = _decision_target(row, qid, q)
+            probabilities = agent._logits(inputs, len(target))[0].softmax(-1)
             if q.get('option_order') is not None:
                 probabilities = probabilities[torch.argsort(torch.as_tensor(q['option_order'],device=agent.device))]
             stats["presence_n"] += 1
-            stats["presence_correct"] += int(int(probabilities.argmax()) == max(range(len(y)), key=lambda i: y[i]))
+            expected_index = max(range(len(target)), key=lambda i: target[i])
+            stats["presence_correct"] += int(int(probabilities.argmax()) == expected_index)
             continue
         spec = row["grounding"]; multiple = spec["task"] == "multiple"
         out = agent._grounding_outputs(inputs, multiple=multiple)
@@ -357,11 +371,20 @@ def grounding_metrics(agent, rows, limit=256, threshold=.25):
             "presence_accuracy": stats["presence_correct"] / max(1, stats["presence_n"]), "evaluated": len(chosen)}
 
 
+def _evaluate_development(agent, geometry_rows, decision_rows, config):
+    result = grounding_metrics(agent, geometry_rows, config.eval_limit)
+    if decision_rows:
+        result.update(_decision_development(agent, decision_rows, config.retention_tagged_only))
+    return result
+
+
 def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2B-it", replay_data=None,
                        decision_dev_data=None, config=None, device=None, agent=None):
-    """Train the attached heads/backbone; benchmarks are evaluated by a separate command."""
-    cfg = config or GroundingTrainConfig(); cfg.validate(); ctx = distributed_context()
-    if cfg.selection_metric=='decision_macro' and not decision_dev_data:
+    """Train the attached heads and select checkpoints on development data."""
+    cfg = config or GroundingTrainConfig()
+    cfg.validate()
+    ctx = distributed_context()
+    if cfg.selection_metric == 'decision_macro' and not decision_dev_data:
         raise ValueError('decision_macro selection requires decision_dev_data')
     torch.manual_seed(cfg.seed)
     # Keep million-row corpora off the Python heap on each independent GPU rank.
@@ -416,26 +439,37 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
         replay = [r for r in replay if r.get("group") not in dev_groups]
         if agent.model_type not in {"gemma4", "qwen2_5_omni", "qwen2_5_omni_thinker", "gemma3n"}:
             replay = [r for r in replay if not (isinstance(r["state"], dict) and r["state"].get("audio") is not None)]
-    rng = random.Random(cfg.seed); order = list(range(len(rows))); output = Path(output); output.mkdir(parents=True, exist_ok=True)
+    rng = random.Random(cfg.seed)
+    order = list(range(len(rows)))
+    output = Path(output)
+    output.mkdir(parents=True, exist_ok=True)
     total = min(cfg.max_steps or 10**12, math.ceil(len(rows) / cfg.global_batch_size) * cfg.epochs)
     steps, best, history = 0, -1., []
-    forward_counts = {'geometry': 0, 'decisions': 0}; execution = {}
+    forward_counts = {'geometry': 0, 'decisions': 0}
+    execution = {}
+    train_decisions = cfg.mode != 'head' or cfg.train_readout_in_warmup
     if ctx.main:
-        before = grounding_metrics(agent, dev, cfg.eval_limit)
-        if decision_dev:before.update(_decision_development(agent,decision_dev,cfg.retention_tagged_only))
+        before = _evaluate_development(agent, dev, decision_dev, cfg)
         (output / "before.json").write_text(json.dumps(before, indent=2) + "\n")
         agent.save(output / 'initial')
         if cfg.include_initial_selection:
-            best=checkpoint_score(before,cfg.selection_metric);agent.save(output/'best')
-    ctx.barrier(); start = time.perf_counter()
+            best = checkpoint_score(before, cfg.selection_metric)
+            agent.save(output / 'best')
+    ctx.barrier()
+    start = time.perf_counter()
     for epoch in range(cfg.epochs):
         rng.shuffle(order)
         for offset in range(0, len(order), cfg.global_batch_size):
             window = [rows[i] for i in order[offset:offset + cfg.global_batch_size]]
+            window_size = len(window)
             if replay:
-                count = int(len(window) * cfg.replay_fraction)
-                if count:window[-count:] = rng.choices(replay, k=count)
-            optimizer.zero_grad(set_to_none=True); loss_sum = 0.; flags = [0, 0]; calls = [0, 0]
+                replay_count = int(window_size * cfg.replay_fraction)
+                if replay_count:
+                    window[-replay_count:] = rng.choices(replay, k=replay_count)
+            optimizer.zero_grad(set_to_none=True)
+            loss_sum = 0.
+            positive_targets = [0, 0]  # Single-box and set targets, in that order.
+            geometry_forwards, decision_forwards = 0, 0
             _grounding_train_mode(agent, cfg)
             if not execution:
                 execution = {'training_mode_during_updates': agent.model.training,
@@ -443,25 +477,28 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
                         or getattr(module, 'activation_checkpointing', False)) and module.training
                         for module in agent.model.modules())}
             local_rows = window[ctx.rank::ctx.world_size]
+            # Each rank scales by the same optimizer window before gradients are summed.
             for chunk, inputs, multiple in _geometry_microbatches(agent, local_rows, cfg):
                 with _activation_context(inputs, cfg):
-                    result = agent._grounding_outputs(inputs, multiple=multiple); calls[0] += 1
+                    result = agent._grounding_outputs(inputs, multiple=multiple)
+                    geometry_forwards += 1
                     loss, _ = grounding_loss(result, [row['grounding']['boxes'] for row in chunk], multiple=multiple,
-                        ignored=[row['grounding'].get('ignored', []) for row in chunk],quality_matched_only=cfg.quality_matched_only)
-                if not torch.isfinite(loss):raise RuntimeError("nonfinite grounding loss")
-                (loss * len(chunk) / len(window)).backward();loss_sum += float(loss.detach()) * len(chunk)
-                flags[int(multiple)] += sum(bool(row['grounding']['boxes']) for row in chunk)
+                        ignored=[row['grounding'].get('ignored', []) for row in chunk],
+                        quality_matched_only=cfg.quality_matched_only)
+                if not torch.isfinite(loss):
+                    raise RuntimeError("nonfinite grounding loss")
+                (loss * len(chunk) / window_size).backward()
+                loss_sum += float(loss.detach()) * len(chunk)
+                positive_targets[int(multiple)] += sum(bool(row['grounding']['boxes']) for row in chunk)
             for row in local_rows:
-                if 'grounding' in row:
-                    continue
-                if cfg.batch_decisions:continue
-                if cfg.mode == 'head' and not cfg.train_readout_in_warmup and 'grounding' not in row:
+                if cfg.batch_decisions or not train_decisions or 'grounding' in row:
                     continue
                 qid, qdef = next(iter(row["questions"].items()))
                 inputs, q, _ = agent._prepare(agent._input(row["state"]), qdef)
-                values = target_from_gold(q, row["gold"][qid]) if "gold" in row else target_from_expected(q, row["expected"][qid])
+                values = _decision_target(row, qid, q)
                 with _activation_context(inputs, cfg):
-                    logits = agent._logits(inputs, len(values)); calls[1] += 1
+                    logits = agent._logits(inputs, len(values))
+                    decision_forwards += 1
                 if q.get('option_order') is not None:
                     option_order = torch.as_tensor(q['option_order'], device=agent.device)
                     logits = logits[:, torch.argsort(option_order)]
@@ -481,55 +518,70 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
                     if reference.shape != target.shape:raise ValueError('replay reference option order/size mismatch')
                     if int(reference.argmax()) == int(target.argmax()) and float(reference.max()) >= .5:
                         loss = loss + cfg.replay_kl_weight * F.kl_div(F.log_softmax(logits[0].float(), -1), reference, reduction='sum')
-                if not torch.isfinite(loss):raise RuntimeError("nonfinite grounding loss")
-                (loss / len(window)).backward(); loss_sum += float(loss.detach())
-            if cfg.batch_decisions and (cfg.mode!='head' or cfg.train_readout_in_warmup):
-                for chunk,inputs in _decision_microbatches(agent,local_rows,cfg):
+                if not torch.isfinite(loss):
+                    raise RuntimeError("nonfinite grounding loss")
+                (loss / window_size).backward()
+                loss_sum += float(loss.detach())
+            if cfg.batch_decisions and train_decisions:
+                for chunk, inputs in _decision_microbatches(agent, local_rows, cfg):
                     with _activation_context(inputs, cfg):
-                        loss=_decision_batch_loss(agent,chunk,inputs,cfg);calls[1]+=1
-                    if not torch.isfinite(loss):raise RuntimeError('nonfinite decision micro-batch loss')
-                    (loss*len(chunk)/len(window)).backward();loss_sum+=float(loss.detach())*len(chunk)
-            ctx.sum_gradients(params); torch.nn.utils.clip_grad_norm_(params, 1., error_if_nonfinite=True)
+                        loss = _decision_batch_loss(agent, chunk, inputs, cfg)
+                        decision_forwards += 1
+                    if not torch.isfinite(loss):
+                        raise RuntimeError('nonfinite decision micro-batch loss')
+                    (loss * len(chunk) / window_size).backward()
+                    loss_sum += float(loss.detach()) * len(chunk)
+            ctx.sum_gradients(params)
+            torch.nn.utils.clip_grad_norm_(params, 1., error_if_nonfinite=True)
             factor = learning_rate_factor(steps + 1, total, cfg.warmup_ratio, cfg.min_lr_ratio)
             for group in optimizer.param_groups:
                 group['lr'] = group['base_lr'] * factor
-            optimizer.step(); steps += 1
-            reduced = ctx.sum_values([loss_sum, *flags, *calls], agent.device)
-            forward_counts['geometry'] += int(reduced[3]); forward_counts['decisions'] += int(reduced[4])
-            agent.grounding_trained |= bool(reduced[1]); agent.detection_trained |= bool(reduced[2])
+            optimizer.step()
+            steps += 1
+            reduced = ctx.sum_values([loss_sum, *positive_targets, geometry_forwards, decision_forwards], agent.device)
+            total_loss, single_targets, set_targets, geometry_calls, decision_calls = reduced
+            forward_counts['geometry'] += int(geometry_calls)
+            forward_counts['decisions'] += int(decision_calls)
+            agent.grounding_trained |= bool(single_targets)
+            agent.detection_trained |= bool(set_targets)
             agent.calibrated = False; agent.modality_calibration = {}; agent.temperature = [1.] * 3; agent.temperature_by_options = {}
             agent.ordinal_calibration = {}
             if ctx.main and (steps == 1 or steps % 10 == 0):
-                print('grounding step=%d loss=%.5f elapsed=%.1fs ranks=%d' % (steps, reduced[0] / len(window), time.perf_counter()-start, ctx.world_size), flush=True)
+                print('grounding step=%d loss=%.5f elapsed=%.1fs ranks=%d' %
+                      (steps, total_loss / window_size, time.perf_counter() - start, ctx.world_size), flush=True)
             if cfg.eval_every and steps % cfg.eval_every == 0:
                 if ctx.main:
-                    metrics = grounding_metrics(agent, dev, cfg.eval_limit)
-                    if decision_dev:
-                        metrics.update(_decision_development(agent,decision_dev,cfg.retention_tagged_only))
-                    history.append(dict(step=steps, **metrics)); score = checkpoint_score(metrics,cfg.selection_metric)
+                    metrics = _evaluate_development(agent, dev, decision_dev, cfg)
+                    record = dict(step=steps, **metrics)
+                    history.append(record)
+                    score = checkpoint_score(metrics, cfg.selection_metric)
                     decision_ok = True
                     if decision_dev:
-                        decision_ok = _development_retained(metrics,before,cfg.max_decision_regression)
-                        history[-1]['decision_retention_passed'] = decision_ok
-                    geometry_ok = cfg.max_grounding_regression is None or grounding_retained(metrics,before,cfg.max_grounding_regression)
-                    history[-1]['grounding_retention_passed']=geometry_ok
-                    retained=decision_ok and geometry_ok
-                    print('GROUNDING DEV', json.dumps(history[-1]), flush=True)
-                    if retained and score > best:best = score; agent.save(output / 'best')
+                        decision_ok = _development_retained(metrics, before, cfg.max_decision_regression)
+                        record['decision_retention_passed'] = decision_ok
+                    geometry_ok = cfg.max_grounding_regression is None or grounding_retained(
+                        metrics, before, cfg.max_grounding_regression)
+                    record['grounding_retention_passed'] = geometry_ok
+                    print('GROUNDING DEV', json.dumps(record), flush=True)
+                    if decision_ok and geometry_ok and score > best:
+                        best = score
+                        agent.save(output / 'best')
                 ctx.barrier()
-            if steps >= total:break
-        if steps >= total:break
+            if steps >= total:
+                break
+        if steps >= total:
+            break
     if ctx.main:
-        after = grounding_metrics(agent, dev, cfg.eval_limit)
-        if decision_dev:
-            after.update(_decision_development(agent,decision_dev,cfg.retention_tagged_only))
+        after = _evaluate_development(agent, dev, decision_dev, cfg)
         agent.save(output / 'last')
-        decision_ok = not decision_dev or _development_retained(after,before,cfg.max_decision_regression)
-        geometry_ok = cfg.max_grounding_regression is None or grounding_retained(after,before,cfg.max_grounding_regression)
-        accepted=decision_ok and geometry_ok
-        final_score = checkpoint_score(after,cfg.selection_metric)
+        decision_ok = not decision_dev or _development_retained(after, before, cfg.max_decision_regression)
+        geometry_ok = cfg.max_grounding_regression is None or grounding_retained(
+            after, before, cfg.max_grounding_regression)
+        accepted = decision_ok and geometry_ok
+        final_score = checkpoint_score(after, cfg.selection_metric)
         if accepted and final_score > best:
-            best = final_score;agent.save(output / 'best')
+            best = final_score
+            agent.save(output / 'best')
         train_sha256 = file_fingerprint(str(train_data))
         report = {'status': 'complete', 'steps': steps, 'config': asdict(cfg), 'train_records': len(rows),
             'dev_records': len(dev), 'before': before, 'after': after, 'selection_history': history,
