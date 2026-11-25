@@ -27,12 +27,15 @@ def _media_path(value, directory, verify):
     return str(path)
 
 
-def _file_part(asset, media_files, directory, verify):
-    if not isinstance(asset, dict) or not isinstance(asset.get("part"), str):
+def _file_part(asset, media_files, used_parts, directory, verify):
+    if not isinstance(asset, dict) or not isinstance(asset.get("part"), str) or not asset["part"].strip():
         raise ValueError("local asset needs a named file part")
     name = asset["part"]
     if name not in media_files:
         raise ValueError("file part has no media_files entry: " + name)
+    if name in used_parts:
+        raise ValueError("each asset needs a distinct file part: " + name)
+    used_parts.add(name)
     return _media_path(media_files[name], directory, verify)
 
 
@@ -70,22 +73,29 @@ def normalize_record(row, directory, *, verify_media=True):
         media_files = row.pop("media_files", {})
         if not isinstance(media_files, dict):
             raise ValueError("media_files must be an object of local paths")
+        used_parts = set()
         assets = request.get("assets", {})
         if not isinstance(assets, dict):
             raise ValueError("assets must be an object")
         if assets:
             if any(not ref.strip() for ref in assets):
                 raise ValueError("image references must be nonempty")
-            row["_image_assets"] = {ref: _file_part(asset, media_files, directory, verify_media)
+            if any(not isinstance(asset, dict) or asset.get("type") != "image" for asset in assets.values()):
+                raise ValueError("System One dataset assets must declare type image")
+            row["_image_assets"] = {ref: _file_part(asset, media_files, used_parts, directory, verify_media)
                                     for ref, asset in assets.items()}
         native_media = {}
         for kind in MEDIA_FIELDS:
             value = request.get(kind)
             if value is None:
                 continue
+            if isinstance(value, list) and (not value or kind == "video"):
+                raise ValueError("each request needs one video part or nonempty image/audio parts")
             parts = value if isinstance(value, list) else [value]
-            paths = [_file_part(part, media_files, directory, verify_media) for part in parts]
+            paths = [_file_part(part, media_files, used_parts, directory, verify_media) for part in parts]
             native_media[kind] = paths if isinstance(value, list) else paths[0]
+        if used_parts != media_files.keys():
+            raise ValueError("each media_files entry needs a matching asset or media part")
         if native_media:
             if assets:
                 raise ValueError("combine media through the native extension or through image assets")

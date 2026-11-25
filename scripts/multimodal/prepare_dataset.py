@@ -166,8 +166,8 @@ def build_split(source, target, destination, model, check_training=False):
                 if isinstance(row, dict) and "_meta" in row:
                     row = normalize_record(row, source.parent, verify_media=False)
                 record, modality = export_record(row, source.parent, destination, model)
+                normalized = normalize_record(record, destination, verify_media=False)
                 if check_training:
-                    normalized = normalize_record(record, destination, verify_media=False)
                     _validate_grounding_row(normalized)
                 request = record["request"]
                 if modality in ("video", "audio"):

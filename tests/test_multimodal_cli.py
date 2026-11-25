@@ -256,3 +256,20 @@ def test_request_shaped_dataset_preserves_media_labels_and_option_order(tmp_path
     assert not can_shuffle_choice(choice)
     assert not can_shuffle_choice({key: value for key, value in choice.items() if key != "option_order"})
     assert can_shuffle_choice({"type": "choice", "instructions": "Pick a response", "criteria": ["accept", "reject"]})
+
+
+@pytest.mark.parametrize(("assets", "files", "error"), [
+    ({"scene": {"type": "audio", "part": "file"}}, {"file": "scene.jpg"}, "declare type image"),
+    ({"scene": {"type": "image", "part": "file"}, "view": {"type": "image", "part": "file"}},
+     {"file": "scene.jpg"}, "distinct file part"),
+    ({"scene": {"type": "image", "part": "file"}}, {"file": "scene.jpg", "orphan": "other.jpg"},
+     "matching asset"),
+])
+def test_request_shaped_dataset_checks_file_parts(tmp_path, assets, files, error):
+    from laya.multimodal_data import normalize_record
+
+    row = {"request": {"state": "scene", "assets": assets,
+                       "questions": {"x": {"type": "noul", "instructions": "Is the scene clear?"}}},
+           "media_files": files, "expected": {"x": True}}
+    with pytest.raises(ValueError, match=error):
+        normalize_record(row, tmp_path, verify_media=False)
