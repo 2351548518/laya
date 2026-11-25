@@ -180,6 +180,32 @@ def test_video_preserves_order_and_audio_together(tmp_path, monkeypatch):
         agent.predict(video=path, questions={"x": Q["category"]})
 
 
+def test_native_video_bytes_are_decoded_once_for_each_state(monkeypatch):
+    pytest.importorskip("transformers.video_utils")
+    from PIL import Image
+
+    agent = tiny_agent()
+    agent.model_type = "qwen3_5"
+    agent.use_audio_in_video = False
+    decoded = []
+
+    def read_clip(path, **kwargs):
+        data = Path(path).read_bytes()
+        decoded.append((path, data))
+        frames = [Image.new("RGB", (4, 4), (data[0], 0, 0)) for _ in range(3)]
+        return {"duration_s": 3, "has_audio": False}, frames, [0.5, 1.5, 2.5], None
+
+    monkeypatch.setattr(agent, "_read_video", read_clip)
+    states = [{"video": video, "video_encoding": "native"} for video in (b"a", b"z")]
+    results = agent.predict_batch(states, Q)
+    assert [data for _, data in decoded] == [b"a", b"z"]
+    assert all(not Path(path).exists() for path, _ in decoded)
+    assert all(result["usage"]["forward_passes"] == len(Q) for result in results)
+    assert all(list(result["media"]) == ["video"] for result in results)
+    assert [int(call["videos"][0][0, 0, 0, 0]) for call in agent.processor.calls] == [97] * len(Q) + [122] * len(Q)
+    assert [part["type"] for part in agent.processor.messages[0]["content"]] == ["video", "text"]
+
+
 def test_hooks_skip_and_error_lifecycle():
     agent, events = tiny_agent(), []
     def start(ctx):

@@ -9,6 +9,7 @@ from __future__ import annotations
 import inspect
 from collections import OrderedDict
 import errno
+from functools import cache, partial
 import hashlib
 import io
 import json
@@ -463,7 +464,7 @@ class MultimodalAgent(Agent):
             return
         Agent._check_question(qid, qdef)
 
-    def _prepare(self, request, qdef, *, max_len=None):
+    def _prepare(self, request, qdef, *, max_len=None, load_media=None):
         q = self._to_internal(qdef)
         is_box = q["t"] == "box"
         options = [] if is_box else render_options(q)
@@ -475,7 +476,7 @@ class MultimodalAgent(Agent):
         if len(options) > capacity:
             raise ValueError("multimodal questions support at most %d options; shortlist or split the question" % capacity)
         order = q.get("option_order", list(range(len(options))))
-        content, images, audios, metadata = self._media(request)
+        content, images, audios, metadata = self._media(request) if load_media is None else load_media()
         spans = []
         if is_box:
             if len(images) != 1 or request.get("video") is not None:
@@ -500,11 +501,12 @@ class MultimodalAgent(Agent):
             prompt = "%s question: %s\n" % (q["t"], q["ins"])
             prompt += "\n".join("%s: %s" % (self.symbols[slot], options[index]) for slot, index in enumerate(order))
             prompt += "\nState: %s\nSelect exactly one option. Answer with its letter or digit only." % request.get("text", "")
-        content.append({"type": "text", "text": prompt})
+        content = [*content, {"type": "text", "text": prompt}]
         messages = [{"role": "user", "content": content}]
         text = self.processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True,
                                                    enable_thinking=False)
         kwargs = {"text": text, "return_tensors": "pt", "padding": False}
+        metadata = metadata.copy()
         native_frames = metadata.pop("_native_video_frames", None)
         if native_frames is not None:
             from transformers.video_utils import VideoMetadata
@@ -573,11 +575,13 @@ class MultimodalAgent(Agent):
         if isinstance(threshold, bool) or not math.isfinite(threshold) or not 0 <= threshold <= 1:
             raise ValueError("threshold must be finite and in [0,1]")
         request = self._input(state, image=image)
+        load_media = cache(partial(self._media, request))
         objects, tokens = [], 0
         with self._lock:
             self.model.eval()
             for label in labels:
-                inputs, _, _ = self._prepare(request, {"type": "box", "instructions": "all instances of " + label}, max_len=max_len)
+                inputs, _, _ = self._prepare(request, {"type": "box", "instructions": "all instances of " + label},
+                                              max_len=max_len, load_media=load_media)
                 out = self._grounding_outputs(inputs, multiple=True)
                 scores = out["object_logits"][0].sigmoid() * out["quality_logits"][0].sigmoid()
                 for box, score in zip(out["boxes"][0], scores):
@@ -711,8 +715,10 @@ class MultimodalAgent(Agent):
                         modality = next((k for k in ("video", "audio", "image") if request.get(k) is not None), "text")
                         answers, tokens, metadata = {}, 0, {}
                         vision_cache = {}
+                        load_media = cache(partial(self._media, request))
                         for qid, qdef in ctx.questions.items():
-                            inputs, q, metadata = self._prepare(request, qdef, max_len=ctx.max_len)
+                            inputs, q, metadata = self._prepare(request, qdef, max_len=ctx.max_len,
+                                                               load_media=load_media)
                             if q["t"] == "box" and not getattr(self, "grounding_trained", False):
                                 raise ValueError("grounding head has not been trained")
                             if len(ctx.questions) > 1:
