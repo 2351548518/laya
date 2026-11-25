@@ -1,12 +1,13 @@
 # laya-cpp
 
-A C++17 port of [laya](../README.md), following the same plan as [laya-go](../laya-go/README.md):
-the Python package is the reference and the port is checked against goldens the reference records.
+A C++17 port of the classic Laya text engine. The Python implementation is the reference for
+tokenization, language detection, sequence construction and decision decoding. The C++ tests check these
+results against recorded Python outputs. [Laya text routing and integrations](../docs/laya-guide.md)
 
-**Status: skeleton only.** There is no library code yet beyond `laya::version()`. This directory
-holds the build, the presets, the CI lane and the test-count checker, so the toolchain can be
-reviewed before anything is ported. ONNX Runtime support (`-DLAYA_ONNX=ON`) is not implemented
-and is refused at configure time.
+The `laya` library accepts classic text questions. `LAYA_ONNX=ON` adds `laya_onnx` to run
+exported Laya ONNX checkpoints. A C++ application that needs native Gemma or Qwen media decisions
+can send media to the local Python HTTP service or the matching GGUF server.
+[Native HTTP API](../docs/multimodal.md#router-and-http) · [GGUF runtime](../docs/multimodal-release.md)
 
 ## Build and test
 
@@ -20,6 +21,9 @@ cmake --preset debug && cmake --build --preset debug && ctest --preset debug
 ```
 
 Options: `LAYA_BUILD_TESTS` (default ON), `LAYA_ONNX` (default OFF).
+
+For an ONNX build, configure with `-DLAYA_ONNX=ON`. CMake downloads the pinned ONNX Runtime
+archive or uses the local release selected by `-DLAYA_ONNXRUNTIME_ROOT=/path/to/onnxruntime`.
 
 Floating point is compiled with `-ffp-contract=off -fno-fast-math` (`/fp:precise` on MSVC) and
 warnings are errors. The `compile_flags` test fails if either flag is missing from a laya-cpp

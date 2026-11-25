@@ -8,6 +8,9 @@ Inference runs in your self-hosted `laya-serve` process. JavaScript clients do
 not need Python, PyTorch, or model weights installed; the server does. This
 package does not run models directly in a browser or Node.js.
 
+For native image, audio and video requests, use the server's `/v1/multimodal` endpoint
+with `fetch`. [TypeScript media example](https://github.com/2351548518/laya/blob/main/laya-ts/README.md#native-media-over-http)
+
 ## Run from this repository
 
 In a terminal at the repository root, start the server:

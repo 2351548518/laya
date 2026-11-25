@@ -3,6 +3,11 @@
 JVM inference for Laya: `Agent.predict` / `Agent.predictBatch` over the BPE tokenizer, the sequence
 builder, ONNX Runtime and typed answers. JDK 17+. One dependency — `com.microsoft.onnxruntime`.
 
+The JVM runtime loads exported classic text checkpoints. For native media, Java applications can
+use `java.net.http.HttpClient` to send the inline JSON request to a local Python decision server.
+Compact Qwen GGUF files use the matching local llama.cpp-jev server.
+[Native HTTP request shape](../docs/docker.md#serve-a-native-multimodal-checkpoint) · [GGUF runtime](../docs/multimodal-release.md)
+
 Laya is a non-autoregressive "System 1" decision model: a bidirectional encoder plus a typed head
 that answers `choice` / `score` / `noul` questions about a state in **one forward pass**, with
 calibrated confidences. Every question about the same state becomes one row of a single batch, so
