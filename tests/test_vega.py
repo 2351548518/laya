@@ -797,7 +797,10 @@ def test_video_helpers_on_synthetic_clips(tmp_path):
     assert not v.has_speech(loud, "thank you")
     assert v.has_speech(loud, "refund the duplicate today")
     frames, times = v.sample_frames(tone, 4)
-    assert len(frames) == 4 and [round(t, 2) for t in times] == [0.38, 1.12, 1.88, 2.62]
+    # FFmpeg releases can write slightly different durations for the AAC track.
+    duration = v.probe(tone)["duration_s"]
+    assert len(frames) == 4
+    assert times == pytest.approx([duration * centre for centre in (.125, .375, .625, .875)])
     assert frames[0].size == (160, 120)
     sheet = v.contact_sheet(frames, cell=128)
     assert sheet.size == (256, 256), "four frames tile 2x2"
