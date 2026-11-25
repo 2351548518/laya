@@ -83,10 +83,11 @@ def main():
                 cwd=root, env=env)
         print("PASS sdist rebuild and installed-package regression", flush=True)
         if args.server_python:
-            command(python, "-I", tests / "integration.py", "--server-python", args.server_python.resolve(),
+            server_python = args.server_python.absolute()
+            command(python, "-I", tests / "integration.py", "--server-python", server_python,
                     cwd=root, env=env)
             if args.legacy_server_fixture:
-                command(python, "-I", tests / "integration.py", "--server-python", args.server_python.resolve(),
+                command(python, "-I", tests / "integration.py", "--server-python", server_python,
                         "--server-fixture", args.legacy_server_fixture.resolve(), "--legacy-fixture",
                         cwd=root, env=env)
         elif args.legacy_server_fixture:

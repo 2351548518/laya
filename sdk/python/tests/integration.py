@@ -203,6 +203,8 @@ if __name__ == "__main__":
                         default=Path(__file__).resolve().parents[3] / "tests" / "sdk_server_fixture.py")
     parser.add_argument("--legacy-fixture", action="store_true")
     args = parser.parse_args()
-    run(args.server_python.resolve(), args.server_fixture.resolve(), legacy=args.legacy_fixture)
+    # A virtualenv's interpreter may be a symlink to the base Python executable.
+    server_python, fixture_path = args.server_python.absolute(), args.server_fixture.resolve()
+    run(server_python, fixture_path, legacy=args.legacy_fixture)
     if not args.legacy_fixture:
-        run(args.server_python.resolve(), args.server_fixture.resolve(), strict=True)
+        run(server_python, fixture_path, strict=True)
