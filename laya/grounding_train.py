@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from array import array
+import hashlib
 import json
 import math
 import os
@@ -13,6 +14,7 @@ import random
 import time
 
 import torch
+from torch import distributed as dist
 from torch.nn import functional as F
 
 from .evals import file_fingerprint
@@ -69,6 +71,8 @@ class GroundingTrainConfig:
     shuffle_options: bool = False
     balance_ranks: bool = False
     prefetch_video: bool = False
+    distributed_decision_eval: bool = False
+    fused_adamw: bool = False
 
     def validate(self):
         if self.mode not in {"head", "lora", "full"}:
@@ -114,6 +118,10 @@ class GroundingTrainConfig:
             raise ValueError('balance_ranks must be boolean')
         if not isinstance(self.prefetch_video, bool):
             raise ValueError('prefetch_video must be boolean')
+        if not isinstance(self.distributed_decision_eval, bool):
+            raise ValueError('distributed_decision_eval must be boolean')
+        if not isinstance(self.fused_adamw, bool):
+            raise ValueError('fused_adamw must be boolean')
         if self.selection_metric not in {'joint', 'decision_macro', 'harmonic'} or not isinstance(self.include_initial_selection,bool) or not isinstance(self.quality_matched_only,bool):
             raise ValueError('invalid checkpoint selection configuration')
         if not isinstance(self.retention_tagged_only,bool):raise ValueError('retention_tagged_only must be boolean')
@@ -157,12 +165,32 @@ def load_grounding_rows(path):
 
 
 class _IndexedGroundingRows:
-    def __init__(self, path, validate_split):
+    def __init__(self, path, validate_split, *, index=None):
         self.path = Path(path).resolve()
         self.offsets = array('Q')
+        if index is None:
+            version, self.sha256 = self._build_index(validate_split)
+        else:
+            version, self.sha256, offsets = index
+            self.offsets.frombytes(offsets)
+        self.stream = self.path.open('rb')
+        self.version = version
+        if self._version(self.stream) != self.version:
+            self.stream.close()
+            raise ValueError("training file changed while building or sharing its index: " + str(self.path))
+
+    @staticmethod
+    def _version(stream):
+        stat = os.fstat(stream.fileno())
+        return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns
+
+    def _build_index(self, validate_split):
         offset = 0
+        digest = hashlib.sha256()
         with self.path.open('rb') as stream:
+            version = self._version(stream)
             for line_number, line in enumerate(stream, 1):
+                digest.update(line)
                 if line.strip() and not line.lstrip().startswith(b"#"):
                     try:
                         row = normalize_record(json.loads(line), self.path.parent, verify_media=False)
@@ -172,10 +200,19 @@ class _IndexedGroundingRows:
                         raise ValueError("%s:%d: %s" % (self.path, line_number, error)) from error
                     self.offsets.append(offset)
                 offset += len(line)
+            if self._version(stream) != version:
+                raise ValueError("training file changed during validation: " + str(self.path))
         self.offsets.append(offset)
         if len(self.offsets) == 1:
-            raise ValueError('empty grounding dataset: ' + str(path))
-        self.stream = self.path.open('rb')
+            raise ValueError('empty grounding dataset: ' + str(self.path))
+        return version, digest.hexdigest()
+
+    def share_index(self):
+        return self.version, self.sha256, self.offsets.tobytes()
+
+    def check_unchanged(self):
+        if self._version(self.stream) != self.version:
+            raise ValueError("indexed training file changed during training: " + str(self.path))
 
     def __len__(self):
         return len(self.offsets) - 1
@@ -190,6 +227,23 @@ class _IndexedGroundingRows:
 
     def __iter__(self):
         yield from read_records(self.path, verify_media=False)
+
+
+def _shared_indexed_rows(path, validate_split, ctx):
+    if ctx.world_size == 1:
+        return _IndexedGroundingRows(path, validate_split)
+    payload = rows = None
+    if ctx.main:
+        try:
+            rows = _IndexedGroundingRows(path, validate_split)
+        except (OSError, ValueError) as exc:
+            payload = str(exc), None
+        else:
+            payload = None, rows.share_index()
+    error, index = ctx.broadcast(payload)
+    if error is not None:
+        raise ValueError(error)
+    return rows if ctx.main else _IndexedGroundingRows(path, validate_split, index=index)
 
 
 def decision_retained(current, baseline, margin):
@@ -233,9 +287,8 @@ def grounding_retained(current, baseline, margin):
     return all(current[key] >= baseline[key] - margin for key in keys)
 
 
-def _decision_development(agent,rows,tagged_only=False,*,micro_batch=4,max_micro_tokens=None):
-    from .multimodal_train import collect_records,example_hash,metrics
-    records=collect_records(agent,rows,micro_batch,max_micro_tokens=max_micro_tokens)
+def _decision_development_metrics(rows, records, tagged_only):
+    from .multimodal_train import example_hash, metrics
     result={'decisions':metrics(records)}
     if tagged_only:
         keys={example_hash(row,qid,qdef) for row in rows if row.get('retention_reference')
@@ -244,6 +297,47 @@ def _decision_development(agent,rows,tagged_only=False,*,micro_batch=4,max_micro
         if not selected:raise ValueError('tagged retention requested without reference development decisions')
         result['retention_decisions']=metrics(selected)
     return result
+
+
+def _decision_eval_shard(agent, rows, rank, world_size):
+    """Keep requests for a shared clip together and balance the decoding work."""
+    from .multimodal_train import _evaluation_video_key
+    groups = {}
+    for index, row in enumerate(rows):
+        key = _evaluation_video_key(agent, row)
+        groups.setdefault(index if key is None else key, []).append((index, row))
+
+    def work(group):
+        return sum(len(row["questions"]) * (3 if record_modality(row) == "video" else 1)
+                   for _, row in group)
+
+    shards = [[] for _ in range(world_size)]
+    totals = [0] * world_size
+    for group in sorted(groups.values(), key=work, reverse=True):
+        worker = min(range(world_size), key=totals.__getitem__)
+        shards[worker].extend(group)
+        totals[worker] += work(group)
+    return sorted(shards[rank])
+
+
+def _decision_development_records(agent, rows, config, ctx, sharded):
+    from .multimodal_train import collect_records
+    if not sharded:
+        return collect_records(agent, rows, config.decision_eval_micro_batch, max_micro_tokens=config.max_micro_tokens)
+    shard = _decision_eval_shard(agent, rows, ctx.rank, ctx.world_size)
+    records = collect_records(agent, [row for _, row in shard], 1, max_micro_tokens=config.max_micro_tokens)
+    cursor = 0
+    local = []
+    for index, row in shard:
+        next_cursor = cursor + len(row["questions"])
+        local.append((index, records[cursor:next_cursor]))
+        cursor = next_cursor
+    gathered = [None] * ctx.world_size if ctx.main else None
+    dist.gather_object(local, gathered, dst=0)
+    if ctx.main:
+        ordered = sorted(item for shard_records in gathered for item in shard_records)
+        return [record for _, group in ordered for record in group]
+    return None
 
 
 def _development_retained(current,baseline,margin):
@@ -477,17 +571,23 @@ def grounding_metrics(agent, rows, limit=256, threshold=.25, *, micro_batch=1, m
             "presence_accuracy": stats["presence_correct"] / max(1, stats["presence_n"]), "evaluated": len(chosen)}
 
 
-def _evaluate_development(agent, geometry_rows, decision_rows, config):
-    result = grounding_metrics(agent, geometry_rows, config.eval_limit,
-                               micro_batch=config.grounding_eval_micro_batch, max_micro_tokens=config.max_micro_tokens)
+def _evaluate_development(agent, geometry_rows, decision_rows, config, ctx):
+    sharded = (config.distributed_decision_eval and bool(decision_rows)
+               and ctx.world_size > 1 and config.decision_eval_micro_batch == 1)
+    if not ctx.main and not sharded:
+        return None
+    result = (grounding_metrics(agent, geometry_rows, config.eval_limit,
+                               micro_batch=config.grounding_eval_micro_batch,
+                               max_micro_tokens=config.max_micro_tokens) if ctx.main else None)
     if decision_rows:
-        result.update(_decision_development(agent, decision_rows, config.retention_tagged_only,
-            micro_batch=config.decision_eval_micro_batch, max_micro_tokens=config.max_micro_tokens))
+        records = _decision_development_records(agent, decision_rows, config, ctx, sharded)
+        if ctx.main:
+            result.update(_decision_development_metrics(decision_rows, records, config.retention_tagged_only))
     return result
 
 
 def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2B-it", replay_data=None,
-                       decision_dev_data=None, config=None, device=None, agent=None):
+                       decision_dev_data=None, config=None, device=None, agent=None, row_validator=None):
     """Train the attached heads and select checkpoints on development data."""
     cfg = config or GroundingTrainConfig()
     cfg.validate()
@@ -501,6 +601,8 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
     dev_groups = {row["group"] for row in dev if row.get("group") is not None}
     decision_groups = set()
     for row in decision_dev:
+        if row_validator is not None:
+            row_validator("decision_dev", row)
         group = row.get("group")
         if group is not None:
             source = None if str(group).startswith(("toolace:", "coco:")) else row.get("source", row.get("dataset"))
@@ -512,6 +614,8 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
 
     def validate_split(row):
         check_single_box(row)
+        if row_validator is not None:
+            row_validator("train", row)
         group = row.get("group")
         if group in dev_groups:
             raise ValueError("grounding train/dev image groups overlap")
@@ -521,9 +625,12 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
 
     for row in dev:
         check_single_box(row)
-    # Validate the split while indexing, with eight bytes per row on each GPU rank.
-    if Path(train_data).stat().st_size >= 128 * 1024**2:
-        rows = _IndexedGroundingRows(train_data, validate_split)
+        if row_validator is not None:
+            row_validator("dev", row)
+    # Share the validated index instead of parsing every JSONL record on every rank.
+    indexed = ctx.broadcast(Path(train_data).stat().st_size >= 128 * 1024**2 if ctx.main else None)
+    if indexed:
+        rows = _shared_indexed_rows(train_data, validate_split, ctx)
     else:
         rows = load_grounding_rows(train_data)
         for row in rows:
@@ -557,7 +664,7 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
     base.grounding_head.float().requires_grad_(True)
     params = [p for p in agent.model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(optimizer_groups(agent.model, cfg.learning_rate,
-        cfg.head_learning_rate, cfg.projector_learning_rate))
+        cfg.head_learning_rate, cfg.projector_learning_rate), fused=True if cfg.fused_adamw else None)
     optimizer_summary = [{key: value for key, value in group.items() if key != 'params'} |
         {'parameters': sum(parameter.numel() for parameter in group['params'])} for group in optimizer.param_groups]
     ctx.synchronize_parameters(params)
@@ -577,8 +684,8 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
     forward_counts = {'geometry': 0, 'decisions': 0}
     execution = {}
     train_decisions = cfg.mode != 'head' or cfg.train_readout_in_warmup
+    before = _evaluate_development(agent, dev, decision_dev, cfg, ctx)
     if ctx.main:
-        before = _evaluate_development(agent, dev, decision_dev, cfg)
         (output / "before.json").write_text(json.dumps(before, indent=2) + "\n")
         agent.save(output / 'initial')
         if cfg.include_initial_selection:
@@ -587,6 +694,8 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
     ctx.barrier()
     start = time.perf_counter()
     for epoch in range(cfg.epochs):
+        if indexed:
+            rows.check_unchanged()
         rng.shuffle(order)
         for offset in range(0, len(order), cfg.global_batch_size):
             window = [rows[i] for i in order[offset:offset + cfg.global_batch_size]]
@@ -680,8 +789,8 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
                 print('grounding step=%d loss=%.5f elapsed=%.1fs ranks=%d' %
                       (steps, total_loss / window_size, time.perf_counter() - start, ctx.world_size), flush=True)
             if cfg.eval_every and steps % cfg.eval_every == 0:
+                metrics = _evaluate_development(agent, dev, decision_dev, cfg, ctx)
                 if ctx.main:
-                    metrics = _evaluate_development(agent, dev, decision_dev, cfg)
                     record = dict(step=steps, **metrics)
                     history.append(record)
                     score = checkpoint_score(metrics, cfg.selection_metric)
@@ -701,8 +810,8 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
                 break
         if steps >= total:
             break
+    after = _evaluate_development(agent, dev, decision_dev, cfg, ctx)
     if ctx.main:
-        after = _evaluate_development(agent, dev, decision_dev, cfg)
         agent.save(output / 'last')
         decision_ok = not decision_dev or _development_retained(after, before, cfg.max_decision_regression)
         geometry_ok = cfg.max_grounding_regression is None or grounding_retained(
@@ -712,7 +821,9 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
         if accepted and final_score > best:
             best = final_score
             agent.save(output / 'best')
-        train_sha256 = file_fingerprint(str(train_data))
+        if indexed:
+            rows.check_unchanged()
+        train_sha256 = rows.sha256 if indexed else file_fingerprint(str(train_data))
         report = {'status': 'complete', 'steps': steps, 'config': asdict(cfg), 'train_records': len(rows),
             'dev_records': len(dev), 'before': before, 'after': after, 'selection_history': history,
             'world_size': ctx.world_size, 'train_sha256': train_sha256,

@@ -16,25 +16,35 @@ from laya.multimodal_distributed import distributed_context
 from laya._qwen_training import qwen_training_delta
 
 
-def validate_visual_training(root, model, max_len=None, require_admission=True, *, train_split='train'):
+def _visual_row_validator(model, max_len, require_admission):
     # Never silently drop the audio part of a trajectory to make a VLM fit.
     expected_processor=Path(model).resolve();verified_processors=set()
+
+    def validate(split, row):
+        state=row['state']
+        if isinstance(state,dict) and (state.get('audio') is not None or
+                (state.get('video') is not None and state.get('video_audio') is not False)):
+            raise ValueError('Qwen3.5 requires an admitted visual-only view; audio cannot be discarded: '+str(row.get('id')))
+        admission=row.get('training_admission',{})
+        if not isinstance(admission,dict):
+            raise ValueError('training_admission must be an object')
+        admitted=admission.get('processor')
+        if split == 'train' and not admitted and require_admission:
+            raise ValueError('Qwen3.5 training requires native processor admission for every training row')
+        if admitted and admitted not in verified_processors:
+            if Path(admitted).resolve()!=expected_processor:
+                raise ValueError('Training view was admitted using a different backbone processor: '+str(admitted))
+            verified_processors.add(admitted)
+        if max_len is not None and admitted and admission.get('max_len')!=max_len:
+            raise ValueError('Native admission and training context budgets must match')
+    return validate
+
+
+def validate_visual_training(root, model, max_len=None, require_admission=True, *, train_split='train'):
+    validate = _visual_row_validator(model, max_len, require_admission)
     for split in (train_split, 'dev', 'decision_dev'):
-        name = split + '.jsonl'
-        for row in read_records(root/name, verify_media=False):
-            state=row['state']
-            if isinstance(state,dict) and (state.get('audio') is not None or
-                    (state.get('video') is not None and state.get('video_audio') is not False)):
-                raise ValueError('Qwen3.5 requires an admitted visual-only view; audio cannot be discarded: '+str(row.get('id')))
-            admitted=row.get('training_admission',{}).get('processor')
-            if split == train_split and not admitted and require_admission:
-                raise ValueError('Qwen3.5 training requires native processor admission for every training row')
-            if admitted and admitted not in verified_processors:
-                if Path(admitted).resolve()!=expected_processor:
-                    raise ValueError('Training view was admitted using a different backbone processor: '+str(admitted))
-                verified_processors.add(admitted)
-            if max_len is not None and admitted and row['training_admission'].get('max_len')!=max_len:
-                raise ValueError('Native admission and training context budgets must match')
+        for row in read_records(root/(split+'.jsonl'), verify_media=False):
+            validate('train' if split == train_split else split, row)
 
 
 def main():
@@ -62,9 +72,8 @@ def main():
     if args.qwen_training_delta and model_type!='qwen3_5':
         raise ValueError('--qwen-training-delta requires Qwen3.5')
     root=Path(args.data)
-    if args.visual_only:
-        validate_visual_training(root, source, config.max_len, not args.allow_unadmitted,
-                                 train_split=args.train_split)
+    row_validator = (_visual_row_validator(source, config.max_len, not args.allow_unadmitted)
+                     if args.visual_only else None)
     if args.require_original_base:
         if (Path(args.model)/'multimodal_config.json').exists() or (Path(args.model)/'adapter_config.json').exists():
             raise ValueError('fresh-base training must not load a decision checkpoint or adapter')
@@ -88,7 +97,7 @@ def main():
             'qwen_training_delta':args.qwen_training_delta},indent=2)+'\n')
     with qwen_training_delta() if args.qwen_training_delta else nullcontext():
         finetune_grounding(root/(args.train_split+'.jsonl'),root/'dev.jsonl',args.out,model=args.model,
-            decision_dev_data=root/'decision_dev.jsonl',config=config,agent=agent)
+            decision_dev_data=root/'decision_dev.jsonl',config=config,agent=agent,row_validator=row_validator)
 
 
 if __name__=='__main__':main()

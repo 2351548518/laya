@@ -14,6 +14,10 @@ pytest.importorskip("scipy")
 pytestmark = pytest.mark.skipif(not dist.is_available() or not dist.is_gloo_available(), reason="needs PyTorch Gloo")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from laya.multimodal_distributed import _atomic_torch_save, distributed_context  # noqa: E402
+from laya.multimodal_distributed import DistributedContext  # noqa: E402
+from laya.grounding_train import (  # noqa: E402
+    GroundingTrainConfig, _evaluate_development, _shared_indexed_rows,
+)
 from laya.multimodal_train import MultimodalTrainConfig, finetune_multimodal, load_rows  # noqa: E402
 from test_multimodal import Q, tiny_agent  # noqa: E402
 
@@ -84,6 +88,44 @@ def test_two_process_training_matches_single_process_with_uneven_tail(tmp_path):
     for rank in range(2):
         actual = torch.load(tmp_path / ("rank%d.pt" % rank), weights_only=True)
         torch.testing.assert_close(actual, expected, atol=3e-7, rtol=3e-6)
+
+
+def _joint_development_worker(rank, world, directory):
+    torch.set_num_threads(1)
+    path = Path(directory)
+    dist.init_process_group("gloo", init_method=(path / "joint-rendezvous").as_uri(), rank=rank, world_size=world)
+    try:
+        ctx = distributed_context()
+        validated = []
+        rows = _shared_indexed_rows(path / "train.jsonl", lambda row: validated.append(row["id"]), ctx)
+        expected = load_rows(path / "train.jsonl")
+        assert list(rows) == expected and rows[-1] == expected[-1]
+        assert validated == ([row["id"] for row in expected] if ctx.main else [])
+
+        agent = tiny_agent()
+        agent._video_cache_size = 2
+        def prepare(request, question):
+            value = int(request["text"][-1])
+            inputs = {"input_ids": torch.tensor([[1, value + 2]])}
+            return inputs, agent._to_internal(question), {}
+        agent._prepare = prepare
+        decision_rows = [{**row, "state": {"text": row["state"], "video": "clip.mp4"}}
+                         if i < 2 else row for i, row in enumerate(expected)]
+        cfg = GroundingTrainConfig(distributed_decision_eval=True, retention_tagged_only=True)
+        decision_rows[-1]["retention_reference"] = True
+        actual = _evaluate_development(agent, [], decision_rows, cfg, ctx)
+        if ctx.main:
+            original = _evaluate_development(agent, [], decision_rows, cfg, DistributedContext())
+            assert actual == original and actual["decisions"]["overall"]["n"] == len(decision_rows)
+        else:
+            assert actual is None
+    finally:
+        dist.destroy_process_group()
+
+
+def test_joint_development_and_startup_share_work_without_changing_results(tmp_path):
+    _dataset(tmp_path / "train.jsonl")
+    mp.spawn(_joint_development_worker, args=(2, str(tmp_path)), nprocs=2, join=True)
 
 
 def test_resume_restores_adam_state_and_replays_the_data_cursor(tmp_path):

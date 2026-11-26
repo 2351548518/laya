@@ -230,19 +230,23 @@ def _calibration_group(row):
     return str(row.get("dataset", "custom")) + ":" + str(row.get("group", row.get("id")))
 
 
+def _evaluation_video_key(agent, row):
+    state = row["state"]
+    video = state.get("video") if isinstance(state, dict) else None
+    if isinstance(video, (str, os.PathLike)) and not os.fspath(video).endswith(".frames.json"):
+        return (os.path.realpath(video), state.get("video_frames", agent.frames),
+                state.get("video_audio", agent.use_audio_in_video), tuple(state.get("video_bounds") or ()))
+    return None
+
+
 def _serial_evaluation_order(agent, items):
     """Place requests sharing a decoded clip together when an in-memory cache is active."""
     if not getattr(agent, "_video_cache_size", 0):
         return enumerate(items)
     groups = {}
     for index, item in enumerate(items):
-        state = item[0]["state"]
-        video = state.get("video") if isinstance(state, dict) else None
-        key = index
-        if isinstance(video, (str, os.PathLike)) and not os.fspath(video).endswith(".frames.json"):
-            key = (os.path.realpath(video), state.get("video_frames", agent.frames),
-                   state.get("video_audio", agent.use_audio_in_video), tuple(state.get("video_bounds") or ()))
-        groups.setdefault(key, []).append((index, item))
+        key = _evaluation_video_key(agent, item[0])
+        groups.setdefault(index if key is None else key, []).append((index, item))
     return chain.from_iterable(groups.values())
 
 

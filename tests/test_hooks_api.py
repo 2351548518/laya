@@ -168,12 +168,15 @@ check_param("GroundingTrainConfig", GroundingTrainConfig, "length_bucketing", Fa
 check_param("GroundingTrainConfig", GroundingTrainConfig, "activation_offload_min_tokens", None)
 check_param("GroundingTrainConfig", GroundingTrainConfig, "balance_ranks", False)
 check_param("GroundingTrainConfig", GroundingTrainConfig, "prefetch_video", False)
+check_param("GroundingTrainConfig", GroundingTrainConfig, "distributed_decision_eval", False)
+check_param("GroundingTrainConfig", GroundingTrainConfig, "fused_adamw", False)
 check_true("grounding batching preserves existing positional learning_rate", list(inspect.signature(GroundingTrainConfig).parameters)[4] == "learning_rate")
 check_param("GroundingTrainConfig", GroundingTrainConfig, "lora_targets", "attention")
 check_param("GroundingTrainConfig", GroundingTrainConfig, "replay_fraction", .2)
 check_param("GroundingTrainConfig", GroundingTrainConfig, "train_readout_in_warmup", False)
 check_param("GroundingTrainConfig", GroundingTrainConfig, "max_decision_regression", .05)
 check_param("finetune_grounding", finetune_grounding, "decision_dev_data", None)
+check_param("finetune_grounding", finetune_grounding, "row_validator", None)
 from laya.multimodal_train import load_rows as load_multimodal_rows  # noqa: E402
 check_param("multimodal data loader", load_multimodal_rows, "path", inspect.Parameter.empty)
 for _media in ("image", "audio", "video", "sampling_rate"):

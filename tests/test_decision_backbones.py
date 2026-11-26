@@ -168,6 +168,12 @@ def test_indexed_training_preserves_unicode_labels_random_access_and_validation(
     assert [indexed[index] for index in [3, 0, -1, 2]] == [rows[index] for index in [3, 0, -1, 2]]
     assert len(indexed.offsets) * indexed.offsets.itemsize == 48
     with pytest.raises(IndexError): indexed[5]
+    shared = indexed.share_index()
+    assert _IndexedGroundingRows(path, None, index=shared)[-1] == rows[-1]
+    with path.open('a') as stream:
+        stream.write('\n')
+    with pytest.raises(ValueError, match='training file changed'):
+        _IndexedGroundingRows(path, None, index=shared)
     path2 = tmp_path / 'invalid.jsonl'
     path2.write_text(json.dumps({**rows[0], 'questions': {'q': rows[0]['questions']['q'], 'extra': rows[0]['questions']['q']}}))
     with pytest.raises(ValueError, match='exactly one'): _IndexedGroundingRows(path2, lambda row: None)

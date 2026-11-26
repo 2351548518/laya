@@ -196,6 +196,7 @@ per-module learning rates, and cosine decay after warmup. Set `activation_offloa
 to offload saved activations to CPU for long inputs. Set `balance_ranks` to group compatible
 admitted lengths and distribute their work across GPUs within each optimizer window.
 Set `prefetch_video` to overlap video decoding on the CPU with decision updates.
+Set `fused_adamw` to use PyTorch's fused AdamW optimizer and reduce optimizer-step temporary storage.
 For Qwen3.5, `--qwen-training-delta` reduces the temporary gradients in the PyTorch
 chunk scan during training. The LoRA recipe selects by the harmonic
 mean of the single-box IoU≥0.5 accuracy and decision accuracy averaged across modalities.
@@ -206,6 +207,11 @@ Set `shuffle_options` in the joint configuration to permute Choice options witho
 order or references to option positions. The loss aligns logits to the original labels and replay
 distributions. Development inference uses one request per decision forward pass by default.
 The recipes allow four compatible image requests per grounding evaluation forward pass.
+Set `distributed_decision_eval` for single-request decision evaluation on all training ranks.
+Each rank keeps requests for the same video clip together, and the primary rank restores the original
+record order before computing metrics.
+For large JSONL splits, the primary rank validates the records and shares the offset index
+with the other ranks.
 
 Use `laya-mm-train --help` for the decision-only trainer's JSONL, checkpoint selection,
 calibration and resume options.
