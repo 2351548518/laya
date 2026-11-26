@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from array import array
 import json
@@ -17,7 +18,7 @@ from torch.nn import functional as F
 from .evals import file_fingerprint
 from .grounding import box_iou, crowd_overlap, grounding_loss, validate_boxes
 from .multimodal import MultimodalAgent, _active_head, _is_adapter_model
-from .multimodal_data import can_shuffle_choice, normalize_record, read_records, record_input
+from .multimodal_data import can_shuffle_choice, normalize_record, read_records, record_input, record_modality
 from .multimodal_distributed import distributed_context
 from .multimodal_train import (
     MultimodalTrainConfig, configure_training, collate_multimodal_inputs, _train_mode, _decision_target,
@@ -66,6 +67,8 @@ class GroundingTrainConfig:
     activation_offload_min_tokens: int | None = None
     video_cache_size: int = 0
     shuffle_options: bool = False
+    balance_ranks: bool = False
+    prefetch_video: bool = False
 
     def validate(self):
         if self.mode not in {"head", "lora", "full"}:
@@ -107,6 +110,10 @@ class GroundingTrainConfig:
             raise ValueError('video_cache_size must be a nonnegative integer')
         if not isinstance(self.shuffle_options, bool):
             raise ValueError('shuffle_options must be boolean')
+        if not isinstance(self.balance_ranks, bool):
+            raise ValueError('balance_ranks must be boolean')
+        if not isinstance(self.prefetch_video, bool):
+            raise ValueError('prefetch_video must be boolean')
         if self.selection_metric not in {'joint', 'decision_macro', 'harmonic'} or not isinstance(self.include_initial_selection,bool) or not isinstance(self.quality_matched_only,bool):
             raise ValueError('invalid checkpoint selection configuration')
         if not isinstance(self.retention_tagged_only,bool):raise ValueError('retention_tagged_only must be boolean')
@@ -244,6 +251,47 @@ def _development_retained(current,baseline,margin):
         baseline.get('retention_decisions',baseline['decisions']),margin)
 
 
+def _rank_window(window, rank, world_size, config):
+    """Group compatible lengths and distribute estimated work within one optimizer window."""
+    if not config.balance_ranks or world_size == 1:
+        return window[rank::world_size]
+    buckets = {}
+    for index, row in enumerate(window):
+        admission = row.get("training_admission")
+        length = admission.get("tokens") if isinstance(admission, dict) else None
+        if type(length) is not int or length < 1:
+            return window[rank::world_size]
+        modality = record_modality(row)
+        task = row.get("grounding", {}).get("task")
+        buckets.setdefault((modality, task), []).append((length, index))
+
+    groups = []
+    for (modality, task), candidates in buckets.items():
+        limit = config.micro_batch if task is not None or config.batch_decisions else 1
+        batch = []
+        for length, index in sorted(candidates):
+            if batch and (len(batch) >= limit or length * (len(batch) + 1) > config.max_micro_tokens):
+                groups.append((modality, batch))
+                batch = []
+            batch.append((length, index))
+        groups.append((modality, batch))
+
+    def estimated_work(group):
+        modality, batch = group
+        length = batch[-1][0]
+        # Estimate per-record preparation and sequence compute. The true
+        # token limit is checked again after native processing on each rank.
+        return len(batch) * (256 + (512 if modality == "video" else 0) + length + length**2 / 8192)
+
+    assigned = [[] for _ in range(world_size)]
+    load = [0.] * world_size
+    for group in sorted(groups, key=estimated_work, reverse=True):
+        worker = min(range(world_size), key=load.__getitem__)
+        assigned[worker].extend(window[index] for _, index in group[1])
+        load[worker] += estimated_work(group)
+    return assigned[rank]
+
+
 def _geometry_microbatches(agent, rows, config):
     """Batch same-head image requests while preserving every original target and its weight."""
     buckets = {}
@@ -291,24 +339,34 @@ def _decision_microbatches(agent, rows, config, *, option_rng=None):
 
     if getattr(config, 'length_bucketing', False):
         rows = sorted(rows, key=lambda row: row.get('training_admission', {}).get('tokens', 0))
-    for row in rows:
-        if 'grounding' in row:
-            continue
-        qid, qdef = next(iter(row['questions'].items()))
-        request, question = record_input(agent, row, qid, _training_question(qdef, option_rng))
-        inputs, q, _ = agent._prepare(request, question)
-        target = _decision_target(row, qid, q)
-        input_fields = tuple(sorted(inputs))
-        items = buckets.setdefault(input_fields, [])
-        lengths = [inputs['input_ids'].shape[-1]] + [item[1]['input_ids'].shape[-1] for item in items]
-        padded_tokens = max(lengths) * (len(items) + 1)
-        if items and (len(items) >= config.micro_batch or padded_tokens > config.max_micro_tokens):
-            buckets[input_fields] = []
-            yield pack(items)
-        buckets[input_fields].append(((row, qid, qdef, q, target), inputs))
-    for items in buckets.values():
-        if items:
-            yield pack(items)
+    with ThreadPoolExecutor(max_workers=1) if config.prefetch_video else nullcontext() as loader:
+        videos = {}
+        if loader is not None:
+            for row in rows:
+                state = row["state"]
+                if (id(row) not in videos and 'grounding' not in row and not row.get('_image_assets')
+                        and isinstance(state, dict) and state.get('video') is not None):
+                    videos[id(row)] = loader.submit(agent._media, agent._input(state))
+        for row in rows:
+            if 'grounding' in row:
+                continue
+            qid, qdef = next(iter(row['questions'].items()))
+            request, question = record_input(agent, row, qid, _training_question(qdef, option_rng))
+            future = videos.get(id(row))
+            inputs, q, _ = (agent._prepare(request, question, load_media=future.result) if future is not None
+                            else agent._prepare(request, question))
+            target = _decision_target(row, qid, q)
+            input_fields = tuple(sorted(inputs))
+            items = buckets.setdefault(input_fields, [])
+            lengths = [inputs['input_ids'].shape[-1]] + [item[1]['input_ids'].shape[-1] for item in items]
+            padded_tokens = max(lengths) * (len(items) + 1)
+            if items and (len(items) >= config.micro_batch or padded_tokens > config.max_micro_tokens):
+                buckets[input_fields] = []
+                yield pack(items)
+            buckets[input_fields].append(((row, qid, qdef, q, target), inputs))
+        for items in buckets.values():
+            if items:
+                yield pack(items)
 
 
 def _activation_context(inputs, config):
@@ -547,7 +605,7 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
                     'checkpointed_training_modules': sum(bool(getattr(module, 'gradient_checkpointing', False)
                         or getattr(module, 'activation_checkpointing', False)) and module.training
                         for module in agent.model.modules())}
-            local_rows = window[ctx.rank::ctx.world_size]
+            local_rows = _rank_window(window, ctx.rank, ctx.world_size, cfg)
             # Each rank scales by the same optimizer window before gradients are summed.
             for chunk, inputs, multiple in _geometry_microbatches(agent, local_rows, cfg):
                 with _activation_context(inputs, cfg):

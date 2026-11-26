@@ -193,7 +193,11 @@ The starter recipes use supervised losses in `laya/grounding_train.py`.
 
 Candidate readouts project only the selected hidden states in FP32. The LoRA recipe uses gradient checkpointing, length bucketing,
 per-module learning rates, and cosine decay after warmup. Set `activation_offload_min_tokens`
-to offload saved activations to CPU for long inputs. The LoRA recipe selects by the harmonic
+to offload saved activations to CPU for long inputs. Set `balance_ranks` to group compatible
+admitted lengths and distribute their work across GPUs within each optimizer window.
+Set `prefetch_video` to overlap video decoding on the CPU with decision updates.
+For Qwen3.5, `--qwen-training-delta` reduces the temporary gradients in the PyTorch
+chunk scan during training. The LoRA recipe selects by the harmonic
 mean of the single-box IoU≥0.5 accuracy and decision accuracy averaged across modalities.
 Retention checks can reject a checkpoint that exceeds its allowed development-set regression.
 Set `video_cache_dir` to `null` to disable disk caching and use `video_cache_size` to cap the

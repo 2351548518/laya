@@ -1,13 +1,16 @@
 """Production parity and isolation for ordinal calibration and vision reuse."""
 import copy
 import math
+import threading
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 import torch
 
-from laya.grounding_train import GroundingTrainConfig, _activation_context
+from laya.grounding_train import GroundingTrainConfig, _activation_context, _decision_microbatches, _rank_window
+from laya._qwen_training import qwen_training_delta
+from laya.multimodal import MultimodalAgent
 from laya.multimodal_calibration import (fit_ordinal_calibration, ordinal_probabilities,
                                         validate_ordinal_calibration)
 from laya.multimodal_train import metrics
@@ -105,6 +108,80 @@ def test_activation_offload_preserves_cpu_forward_and_gradients(threshold):
 @pytest.mark.parametrize("threshold", [True, 0, -1, 1.5])
 def test_activation_offload_validates_threshold(threshold):
     with pytest.raises(ValueError, match="activation_offload"): GroundingTrainConfig(activation_offload_min_tokens=threshold).validate()
+
+
+def test_rank_balancing_keeps_optimizer_windows_and_handles_missing_admission():
+    lengths = [16384 if index % 4 == 0 else 512 + index for index in range(32)]
+    rows = [{"id": index, "state": "text", "training_admission": {"tokens": length}}
+            for index, length in enumerate(lengths)]
+    config = GroundingTrainConfig(balance_ranks=True, batch_decisions=True, max_micro_tokens=16384)
+    config.validate()
+    ranks = [_rank_window(rows, rank, 4, config) for rank in range(4)]
+    assert sorted(row["id"] for assigned in ranks for row in assigned) == list(range(len(rows)))
+    assert all(sum(row["training_admission"]["tokens"] == 16384 for row in assigned) == 2 for assigned in ranks)
+    assert _rank_window(rows, 0, 1, config) == rows
+    rows[-1].pop("training_admission")
+    assert [_rank_window(rows, rank, 4, config) for rank in range(4)] == [rows[rank::4] for rank in range(4)]
+
+
+def test_video_prefetch_reuses_the_same_media_and_preserves_targets():
+    seen = []
+    owner = threading.get_ident()
+
+    def decode(request):
+        seen.append((request["video"], threading.get_ident()))
+        return [1, 2, 3]
+
+    def prepare(request, question, *, load_media=None):
+        pixels = decode(request) if load_media is None else load_media()
+        return {"input_ids": torch.tensor([pixels])}, MultimodalAgent._to_internal(question), {}
+
+    agent = SimpleNamespace(_input=dict, _media=decode, _prepare=prepare)
+    record = {"state": {"text": "A clip", "video": "clip.mp4"},
+              "questions": {"q": {"type": "noul", "instructions": "Does it move?"}},
+              "expected": {"q": True}}
+    output = []
+    for prefetch in (False, True):
+        config = GroundingTrainConfig(prefetch_video=prefetch, micro_batch=1)
+        output.append(list(_decision_microbatches(agent, [record, record], config)))
+    assert seen[:2] == [("clip.mp4", owner)] * 2
+    assert len(seen) == 3 and seen[2][0] == "clip.mp4" and seen[2][1] != owner
+    for (serial, left), (parallel, right) in zip(*output, strict=True):
+        assert serial == parallel
+        torch.testing.assert_close(left["input_ids"], right["input_ids"], rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
+def test_qwen_training_scan_matches_native_forward_and_gradients(dtype):
+    native = pytest.importorskip("transformers.models.qwen3_5.modeling_qwen3_5")
+    original = native.torch_chunk_gated_delta_rule
+    reference = getattr(original, "__wrapped__", original)
+    torch.manual_seed(105)
+    query = torch.randn(2, 137, 2, 16, dtype=dtype) * .1
+    values = [query, torch.randn_like(query) * .1, torch.randn(2, 137, 4, 16, dtype=dtype) * .1,
+              -torch.rand(2, 137, 4), torch.rand(2, 137, 4, dtype=dtype),
+              torch.randn(2, 4, 16, 16) * .01]
+
+    def result(operator):
+        inputs = [value.clone().requires_grad_() for value in values]
+        with torch.autocast("cpu", dtype=torch.bfloat16, enabled=dtype == torch.bfloat16):
+            output, state = operator(*inputs[:5], initial_state=inputs[5], output_final_state=True,
+                                     use_qk_l2norm_in_kernel=True)
+            loss = output.float().square().mean() + state.float().square().mean()
+        return output.detach(), state.detach(), torch.autograd.grad(loss, inputs)
+
+    expected_output, expected_state, expected_grads = result(reference)
+    with qwen_training_delta():
+        output, state, grads = result(native.torch_chunk_gated_delta_rule)
+        with torch.no_grad():
+            fallback, _ = native.torch_chunk_gated_delta_rule(*values[:5])
+            expected_fallback, _ = reference(*values[:5])
+        torch.testing.assert_close(fallback, expected_fallback, rtol=0, atol=0)
+    assert native.torch_chunk_gated_delta_rule is original
+    torch.testing.assert_close(output, expected_output, rtol=0, atol=0)
+    torch.testing.assert_close(state, expected_state, rtol=0, atol=0)
+    for gradient, expected in zip(grads, expected_grads):
+        torch.testing.assert_close(gradient, expected, rtol=.01, atol=1e-7)
 
 
 class Vision(torch.nn.Module):
