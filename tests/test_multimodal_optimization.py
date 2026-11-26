@@ -105,6 +105,17 @@ def test_activation_offload_preserves_cpu_forward_and_gradients(threshold):
         torch.testing.assert_close(observed, wanted, atol=0, rtol=0)
 
 
+def test_activation_offload_counts_all_padded_tokens(monkeypatch):
+    offload = object()
+    monkeypatch.setattr(torch.autograd.graph, "save_on_cpu", lambda *, pin_memory: offload)
+    config = GroundingTrainConfig(activation_offload_min_tokens=4096)
+    inputs = {"input_ids": torch.zeros(4, 4064, dtype=torch.long)}
+    assert _activation_context(inputs, config) is offload
+    assert _activation_context({"input_ids": inputs["input_ids"][:1]}, config) is not offload
+    with torch.no_grad():
+        assert _activation_context(inputs, config) is not offload
+
+
 @pytest.mark.parametrize("threshold", [True, 0, -1, 1.5])
 def test_activation_offload_validates_threshold(threshold):
     with pytest.raises(ValueError, match="activation_offload"): GroundingTrainConfig(activation_offload_min_tokens=threshold).validate()

@@ -469,7 +469,7 @@ def _decision_microbatches(agent, rows, config, *, option_rng=None):
 
 def _activation_context(inputs, config):
     threshold = config.activation_offload_min_tokens
-    if threshold is None or not torch.is_grad_enabled() or inputs['input_ids'].shape[-1] < threshold:
+    if threshold is None or not torch.is_grad_enabled() or inputs['input_ids'].numel() < threshold:
         return nullcontext()
     return torch.autograd.graph.save_on_cpu(pin_memory=inputs['input_ids'].device.type == 'cuda')
 
