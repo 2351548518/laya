@@ -17,6 +17,7 @@ import torch
 from torch import distributed as dist
 from torch.nn import functional as F
 
+from ._grounding_checkpoint import load_checkpoint, save_checkpoint
 from .evals import file_fingerprint
 from .grounding import box_iou, crowd_overlap, grounding_loss, validate_boxes
 from .multimodal import MultimodalAgent, _active_head, _is_adapter_model
@@ -72,6 +73,7 @@ class GroundingTrainConfig:
     balance_ranks: bool = False
     prefetch_video: bool = False
     distributed_decision_eval: bool = False
+    checkpoint_every: int = 0
     fused_adamw: bool = False
 
     def validate(self):
@@ -93,6 +95,8 @@ class GroundingTrainConfig:
             raise ValueError("replay_fraction must lie in [0,1)")
         if isinstance(self.eval_every, bool) or not isinstance(self.eval_every, int) or self.eval_every < 0:
             raise ValueError("eval_every must be a nonnegative integer")
+        if type(self.checkpoint_every) is not int or self.checkpoint_every < 0:
+            raise ValueError("checkpoint_every must be a nonnegative integer")
         if any(isinstance(v, bool) or not math.isfinite(v) or v <= 0 for v in [self.learning_rate, self.head_learning_rate]):
             raise ValueError("learning rates must be finite and positive")
         if self.projector_learning_rate is not None and (isinstance(self.projector_learning_rate, bool)
@@ -586,8 +590,31 @@ def _evaluate_development(agent, geometry_rows, decision_rows, config, ctx):
     return result
 
 
+def _checkpoint_identity(agent, model, cfg, ctx, total, train_records, train_digest, dev, decisions, replay):
+    origin = Path(model)
+    backbone = Path(getattr(agent, "model_id", model))
+    files = []
+    if backbone.is_dir():
+        for path in sorted(backbone.glob("*.safetensors")):
+            stat = path.stat()
+            files.append([path.name, stat.st_size, stat.st_mtime_ns])
+    config = asdict(cfg)
+    config.pop("checkpoint_every")
+    return {"format": 1, "config": config, "world_size": ctx.world_size, "schedule_steps": total,
+            "train_records": train_records,
+            "origin": str(origin.resolve()) if origin.is_dir() else str(origin),
+            "backbone": str(backbone), "backbone_files": files,
+            "revision": getattr(agent, "revision", None), "dtype": str(agent.dtype),
+            "readout": getattr(agent, "readout", "letter"), "prompt_version": getattr(agent, "prompt_version", "v1"),
+            "execution": getattr(agent, "_training_variant", {}),
+            "data": {"train": train_digest, "dev": file_fingerprint(str(dev)),
+                     "decision_dev": file_fingerprint(str(decisions)) if decisions else None,
+                     "replay": file_fingerprint(str(replay)) if replay else None}}
+
+
 def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2B-it", replay_data=None,
-                       decision_dev_data=None, config=None, device=None, agent=None, row_validator=None):
+                       decision_dev_data=None, config=None, device=None, agent=None, row_validator=None,
+                       resume_from=None):
     """Train the attached heads and select checkpoints on development data."""
     cfg = config or GroundingTrainConfig()
     cfg.validate()
@@ -681,23 +708,43 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
     output.mkdir(parents=True, exist_ok=True)
     total = min(cfg.max_steps or 10**12, math.ceil(len(rows) / cfg.global_batch_size) * cfg.epochs)
     steps, best, history = 0, -1., []
+    first_epoch, first_offset = 0, 0
     forward_counts = {'geometry': 0, 'decisions': 0}
     execution = {}
     train_decisions = cfg.mode != 'head' or cfg.train_readout_in_warmup
-    before = _evaluate_development(agent, dev, decision_dev, cfg, ctx)
+    identity = None
+    if cfg.checkpoint_every or resume_from is not None:
+        train_digest = rows.sha256 if indexed else file_fingerprint(str(train_data))
+        identity = _checkpoint_identity(agent, model, cfg, ctx, total, len(rows), train_digest,
+                                        dev_data, decision_dev_data, replay_data)
+    if resume_from is None:
+        before = _evaluate_development(agent, dev, decision_dev, cfg, ctx)
+        if ctx.main:
+            agent.save(output / 'initial')
+            if cfg.include_initial_selection:
+                best = checkpoint_score(before, cfg.selection_metric)
+                agent.save(output / 'best')
+    else:
+        progress, order = load_checkpoint(resume_from, output, agent, ctx, optimizer, identity, rng, option_rng)
+        steps, first_epoch, first_offset = progress["steps"], progress["epoch"], progress["next_offset"]
+        best, history, before = progress["best"], progress["history"], progress["before"]
+        forward_counts, execution = progress["forward_counts"], progress["execution"]
+        if ctx.main:
+            print("Resumed joint training at optimizer step %d" % steps, flush=True)
+    starting_step = steps
     if ctx.main:
         (output / "before.json").write_text(json.dumps(before, indent=2) + "\n")
-        agent.save(output / 'initial')
-        if cfg.include_initial_selection:
-            best = checkpoint_score(before, cfg.selection_metric)
-            agent.save(output / 'best')
     ctx.barrier()
     start = time.perf_counter()
-    for epoch in range(cfg.epochs):
+    for epoch in range(first_epoch, cfg.epochs):
+        if steps >= total:
+            break
         if indexed:
             rows.check_unchanged()
-        rng.shuffle(order)
-        for offset in range(0, len(order), cfg.global_batch_size):
+        if resume_from is None or epoch != first_epoch:
+            rng.shuffle(order)
+        offset_start = first_offset if epoch == first_epoch else 0
+        for offset in range(offset_start, len(order), cfg.global_batch_size):
             window = [rows[i] for i in order[offset:offset + cfg.global_batch_size]]
             window_size = len(window)
             if replay:
@@ -785,10 +832,11 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
             agent.detection_trained |= bool(set_targets)
             agent.calibrated = False; agent.modality_calibration = {}; agent.temperature = [1.] * 3; agent.temperature_by_options = {}
             agent.ordinal_calibration = {}
-            if ctx.main and (steps == 1 or steps % 10 == 0):
+            if ctx.main and (steps == starting_step + 1 or steps % 10 == 0):
                 print('grounding step=%d loss=%.5f elapsed=%.1fs ranks=%d' %
                       (steps, total_loss / window_size, time.perf_counter() - start, ctx.world_size), flush=True)
-            if cfg.eval_every and steps % cfg.eval_every == 0:
+            evaluated = cfg.eval_every and steps % cfg.eval_every == 0
+            if evaluated:
                 metrics = _evaluate_development(agent, dev, decision_dev, cfg, ctx)
                 if ctx.main:
                     record = dict(step=steps, **metrics)
@@ -806,6 +854,14 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
                         best = score
                         agent.save(output / 'best')
                 ctx.barrier()
+            if cfg.checkpoint_every and (steps % cfg.checkpoint_every == 0 or steps == total or evaluated):
+                if indexed:
+                    rows.check_unchanged()
+                progress = {"identity": identity, "steps": steps, "epoch": epoch, "next_offset": offset + window_size,
+                            "best": best, "history": history, "before": before, "forward_counts": forward_counts,
+                            "execution": execution, "grounding_trained": agent.grounding_trained,
+                            "detection_trained": agent.detection_trained}
+                save_checkpoint(output, agent, ctx, optimizer, progress, order, rng, option_rng)
             if steps >= total:
                 break
         if steps >= total:
@@ -823,7 +879,8 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
             agent.save(output / 'best')
         if indexed:
             rows.check_unchanged()
-        train_sha256 = rows.sha256 if indexed else file_fingerprint(str(train_data))
+        train_sha256 = identity["data"]["train"] if identity is not None else (
+            rows.sha256 if indexed else file_fingerprint(str(train_data)))
         report = {'status': 'complete', 'steps': steps, 'config': asdict(cfg), 'train_records': len(rows),
             'dev_records': len(dev), 'before': before, 'after': after, 'selection_history': history,
             'world_size': ctx.world_size, 'train_sha256': train_sha256,
@@ -832,6 +889,9 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
             'checkpoint': str(output / ('best' if best >= 0 or accepted else 'initial')),
             'final_decision_retention_passed': decision_ok,'final_grounding_retention_passed':geometry_ok,
             'note': 'Development selection only; native benchmark results are separate. Failed decision or geometric retention falls back to the unchanged initial checkpoint.'}
+        if cfg.checkpoint_every or resume_from is not None:
+            report["resume"] = {"starting_step": starting_step,
+                                "latest": str(output / "checkpoint_latest.json") if cfg.checkpoint_every else None}
         (output / 'training_report.json').write_text(json.dumps(report, indent=2) + '\n')
     ctx.barrier()
     return agent

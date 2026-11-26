@@ -3,6 +3,7 @@ import argparse
 from contextlib import nullcontext
 from dataclasses import fields
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -58,7 +59,12 @@ def main():
         help='Allow local JSONL without stored processor receipts; native media and context checks still apply')
     parser.add_argument('--qwen-training-delta', action='store_true',
         help='Use the local PyTorch chunk scan for Qwen3.5 gradient computation')
+    parser.add_argument('--resume', help='Run directory or optimizer snapshot to resume with the original model and data')
+    parser.add_argument('--deterministic', action='store_true', help='Use deterministic PyTorch training operations')
     parser.add_argument('--text-attention',choices=['sdpa','flex_attention'],default='sdpa');args=parser.parse_args()
+    if args.deterministic:
+        os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+        torch.use_deterministic_algorithms(True)
     values=json.loads(Path(args.config).read_text())
     if set(values)-{field.name for field in fields(GroundingTrainConfig)}:raise ValueError('unknown training fields')
     config=GroundingTrainConfig(**values);config.validate();ctx=distributed_context()
@@ -81,6 +87,8 @@ def main():
     torch.manual_seed(config.seed)
     agent=MultimodalAgent(args.model,device=ctx.device,max_len=config.max_len,frames=4,
         max_audio_seconds=30.,use_audio_in_video=not args.visual_only,readout='candidate',prompt_version='v2',grounding_slots=1)
+    agent._training_variant = {"text_attention": args.text_attention, "qwen_training_delta": args.qwen_training_delta,
+                               "deterministic": torch.are_deterministic_algorithms_enabled()}
     if args.text_attention!='sdpa':
         if model_type!='gemma4':raise ValueError('Experimental text attention currently validated for Gemma only')
         agent.model.set_attn_implementation({'':'sdpa','text_config':args.text_attention,'vision_config':'sdpa','audio_config':'eager'})
@@ -93,11 +101,13 @@ def main():
             'seed_before_head_construction':config.seed,'original_base':args.require_original_base,
             'readout':agent.readout,'prompt_version':agent.prompt_version,'grounding_architecture':'single-v1',
             'inherited_adapters':hasattr(agent.model,'peft_config'),
-            'fresh_optimizer':True,'world_size':ctx.world_size,'text_attention':args.text_attention,
-            'qwen_training_delta':args.qwen_training_delta},indent=2)+'\n')
+            'fresh_optimizer':args.resume is None,'world_size':ctx.world_size,'text_attention':args.text_attention,
+            'qwen_training_delta':args.qwen_training_delta,'deterministic':agent._training_variant["deterministic"]},
+            indent=2)+'\n')
     with qwen_training_delta() if args.qwen_training_delta else nullcontext():
         finetune_grounding(root/(args.train_split+'.jsonl'),root/'dev.jsonl',args.out,model=args.model,
-            decision_dev_data=root/'decision_dev.jsonl',config=config,agent=agent,row_validator=row_validator)
+            decision_dev_data=root/'decision_dev.jsonl',config=config,agent=agent,row_validator=row_validator,
+            resume_from=args.resume)
 
 
 if __name__=='__main__':main()

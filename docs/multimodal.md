@@ -213,6 +213,14 @@ record order before computing metrics.
 For large JSONL splits, the primary rank validates the records and shares the offset index
 with the other ranks.
 
+For recoverable joint training, set `checkpoint_every` to a positive number of optimizer steps.
+The trainer publishes a local optimizer snapshot at that interval, at development evaluation
+points and at the final optimizer step. It keeps the latest two complete snapshots. Resume with
+`--resume RUN_DIRECTORY` and the original model, dataset, optimizer configuration and rank count.
+The snapshot restores AdamW, the current epoch order, the per-rank random states, and the
+best checkpoint selected at that step. Use the same `--deterministic` setting for the original
+training and its continuation when comparing exact updates. Deterministic kernels can cost throughput.
+
 Use `laya-mm-train --help` for the decision-only trainer's JSONL, checkpoint selection,
 calibration and resume options.
 

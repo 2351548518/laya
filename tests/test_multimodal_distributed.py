@@ -16,8 +16,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from laya.multimodal_distributed import _atomic_torch_save, distributed_context  # noqa: E402
 from laya.multimodal_distributed import DistributedContext  # noqa: E402
 from laya.grounding_train import (  # noqa: E402
-    GroundingTrainConfig, _evaluate_development, _shared_indexed_rows,
+    GroundingTrainConfig, _evaluate_development, _shared_indexed_rows, finetune_grounding,
 )
+from laya.grounding import GroundingHead  # noqa: E402
 from laya.multimodal_train import MultimodalTrainConfig, finetune_multimodal, load_rows  # noqa: E402
 from test_multimodal import Q, tiny_agent  # noqa: E402
 
@@ -126,6 +127,58 @@ def _joint_development_worker(rank, world, directory):
 def test_joint_development_and_startup_share_work_without_changing_results(tmp_path):
     _dataset(tmp_path / "train.jsonl")
     mp.spawn(_joint_development_worker, args=(2, str(tmp_path)), nprocs=2, join=True)
+
+
+def _joint_restart_worker(rank, world, directory):
+    from laya._grounding_checkpoint import resolve_checkpoint, save_checkpoint
+
+    torch.set_num_threads(1)
+    path = Path(directory)
+    dist.init_process_group("gloo", init_method=(path / "restart-rendezvous").as_uri(), rank=rank, world_size=world)
+    ctx = distributed_context()
+
+    def train(output, resume_from=None):
+        agent = tiny_agent()
+        agent.model.grounding_head = GroundingHead(8, 16, 1, "single-v1")
+        agent.grounding_trained = agent.detection_trained = False
+        agent.save = lambda destination: _save_head(agent, destination)
+        cfg = GroundingTrainConfig(epochs=2, global_batch_size=2, micro_batch=1, eval_every=2,
+            learning_rate=.01, head_learning_rate=.01, train_readout_in_warmup=True,
+            batch_decisions=True, shuffle_options=True, checkpoint_every=1, replay_fraction=.5)
+        finetune_grounding(path / "train.jsonl", path / "dev.jsonl", output, agent=agent, config=cfg,
+                           replay_data=path / "replay.jsonl", resume_from=resume_from)
+        return agent.model.lm_head.weight.detach().clone()
+
+    def interrupted(*args):
+        save_checkpoint(*args)
+        if args[4]["steps"] == 2:
+            raise RuntimeError("simulated interruption after publishing the checkpoint")
+
+    try:
+        expected = train(path / "full")
+        with patch("laya.grounding_train.save_checkpoint", side_effect=interrupted):
+            with pytest.raises(RuntimeError, match="simulated interruption"):
+                train(path / "interrupted")
+        saved = resolve_checkpoint(path / "interrupted")
+        assert json.loads((saved / "progress.json").read_text())["steps"] == 2
+        assert (saved / ("option_rng_rank%d.pt" % rank)).is_file()
+        actual = train(path / "continued", resume_from=path / "interrupted")
+        torch.testing.assert_close(actual, expected, atol=0, rtol=0)
+        if ctx.main:
+            reference = json.loads((path / "full/training_report.json").read_text())
+            resumed = json.loads((path / "continued/training_report.json").read_text())
+            assert resumed["steps"] == reference["steps"] == 6
+            assert resumed["resume"]["starting_step"] == 2
+            assert resumed["selection_history"] == reference["selection_history"]
+            assert len(list((path / "continued/optimizer-checkpoints").glob("step-*"))) == 2
+    finally:
+        dist.destroy_process_group()
+
+
+def test_joint_training_restores_optimizer_and_order_across_ranks(tmp_path):
+    for name in ("train", "dev", "replay"):
+        _dataset(tmp_path / (name + ".jsonl"))
+    mp.spawn(_joint_restart_worker, args=(2, str(tmp_path)), nprocs=2, join=True)
 
 
 def test_resume_restores_adam_state_and_replays_the_data_cursor(tmp_path):
