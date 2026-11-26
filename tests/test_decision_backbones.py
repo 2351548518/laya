@@ -93,7 +93,7 @@ def test_merged_qwen_keeps_decision_and_box_inference_with_stale_peft_metadata()
         for name, value in boxes.items():
             torch.testing.assert_close(agent._grounding_outputs(inputs)[name], value, rtol=0, atol=0)
     trainable = configure_training(agent, MultimodalTrainConfig(mode="head"))
-    expected = list(agent.model.get_output_embeddings().parameters()) + list(agent.model.decision_scorer.parameters())
+    expected = list(agent.model.decision_scorer.parameters())
     assert {id(p) for p in trainable} == {id(p) for p in expected}
 
 
@@ -161,13 +161,16 @@ def test_indexed_training_preserves_unicode_labels_random_access_and_validation(
         'questions': {'q': {'type': 'noul', 'instructions': '可以继续吗？'}}, 'expected': {'q': i % 2}}
         for i in range(5)]
     path.write_text('\n'.join(json.dumps(row, ensure_ascii=False) for row in rows))
-    indexed = _IndexedGroundingRows(path)
+    groups = []
+    indexed = _IndexedGroundingRows(path, lambda row: groups.append(row['group']))
     assert len(indexed) == 5 and list(indexed) == load_grounding_rows(path) == rows
+    assert groups == [row['group'] for row in rows]
     assert [indexed[index] for index in [3, 0, -1, 2]] == [rows[index] for index in [3, 0, -1, 2]]
     assert len(indexed.offsets) * indexed.offsets.itemsize == 48
     with pytest.raises(IndexError): indexed[5]
-    path2 = tmp_path / 'invalid.jsonl'; path2.write_text(json.dumps({'questions': {}}) + '\n')
-    with pytest.raises(ValueError, match='exactly one'): _IndexedGroundingRows(path2)
+    path2 = tmp_path / 'invalid.jsonl'
+    path2.write_text(json.dumps({**rows[0], 'questions': {'q': rows[0]['questions']['q'], 'extra': rows[0]['questions']['q']}}))
+    with pytest.raises(ValueError, match='exactly one'): _IndexedGroundingRows(path2, lambda row: None)
 
 
 @pytest.mark.parametrize('values', [{'projector_learning_rate': 0}, {'projector_learning_rate': True},
@@ -180,20 +183,21 @@ def test_joint_schedule_rejects_invalid_parameters(values):
 
 def test_visual_only_training_rejects_lost_audio_and_wrong_native_processor(tmp_path):
     from scripts.multimodal.train import validate_visual_training
+    questions = {'q': {'type': 'noul', 'instructions': 'Continue?'}}
     for name in ('train', 'dev', 'decision_dev'):
-        (tmp_path / (name + '.jsonl')).write_text(json.dumps({'id': name, 'state': 'text',
+        (tmp_path / (name + '.jsonl')).write_text(json.dumps({'id': name, 'state': 'text', 'questions': questions,
             'training_admission': {'processor': 'models/Qwen3.5-4B', 'max_len': 16384}}) + '\n')
     validate_visual_training(tmp_path, 'models/Qwen3.5-4B')
     with pytest.raises(ValueError, match='context budgets'):
         validate_visual_training(tmp_path, 'models/Qwen3.5-4B', 8192)
     for state in ({'audio': 'clip.wav'}, {'video': 'clip.mp4'}, {'video': 'clip.mp4', 'video_audio': True}):
-        (tmp_path / 'train.jsonl').write_text(json.dumps({'id': 'unsafe', 'state': state}) + '\n')
+        (tmp_path / 'train.jsonl').write_text(json.dumps({'id': 'unsafe', 'state': state, 'questions': questions}) + '\n')
         with pytest.raises(ValueError, match='audio cannot be discarded'):
             validate_visual_training(tmp_path, 'models/Qwen3.5-4B')
-    (tmp_path / 'train.jsonl').write_text(json.dumps({'id': 'wrong', 'state': 'text',
+    (tmp_path / 'train.jsonl').write_text(json.dumps({'id': 'wrong', 'state': 'text', 'questions': questions,
         'training_admission': {'processor': 'models/gemma-4-E2B-it'}}) + '\n')
     with pytest.raises(ValueError, match='different backbone processor'):
         validate_visual_training(tmp_path, 'models/Qwen3.5-4B')
-    (tmp_path / 'train.jsonl').write_text(json.dumps({'id': 'unadmitted', 'state': 'text'}) + '\n')
+    (tmp_path / 'train.jsonl').write_text(json.dumps({'id': 'unadmitted', 'state': 'text', 'questions': questions}) + '\n')
     with pytest.raises(ValueError, match='every training row'):
         validate_visual_training(tmp_path, 'models/Qwen3.5-4B')
