@@ -256,6 +256,32 @@ def test_hooks_skip_and_error_lifecycle():
     assert events[-2:] == ["error", "failed_end"]
 
 
+def test_frame_decode_keeps_seek_precision_and_missing_frame_policy(tmp_path, monkeypatch):
+    import io
+    from PIL import Image
+    import laya.video as video
+
+    image = io.BytesIO()
+    Image.new("RGB", (2, 2), (11, 39, 201)).save(image, format="PNG")
+    captured = []
+
+    def read_frame(args, _description):
+        captured.append(args[args.index("-ss") + 1])
+        return image.getvalue() if len(captured) == 1 else b""
+
+    monkeypatch.setattr(video, "_need_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr(video, "_run", read_frame)
+    frames, times = video.sample_frames("clip.mp4", 2, 4.)
+    assert captured == ["1.000", "3.000"] and times == [1.]
+    assert frames[0].getpixel((0, 0)) == (11, 39, 201)
+    path = tmp_path / "clip.mp4"
+    path.touch()
+    monkeypatch.setattr(video, "probe", lambda _path: {"duration_s": 4., "has_audio": False})
+    with pytest.raises(ValueError, match="bounded video frame"):
+        tiny_agent()._read_video(path, use_audio=False, frames=2, bounds=(.1, 2.1234))
+    assert captured[-1] == str(.1 + (2.1234 - .1) * .5 / 2)
+
+
 def test_video_overrides_and_persistent_cache_preserve_native_evidence(tmp_path, monkeypatch):
     import laya.video as video
     from PIL import Image

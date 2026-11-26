@@ -143,6 +143,22 @@ def has_speech(wave: Optional[np.ndarray], transcript: Optional[str] = None) -> 
     return len(re.findall(r"[^\W_]+", transcript)) >= MIN_WORDS
 
 
+def _decode_frame(exe, path, seek, what):
+    try:
+        from PIL import Image
+    except ImportError as error:
+        raise ImportError("video frames need Pillow: pip install pillow") from error
+    # A subprocess handles one frame. Limit its thread pools and skip
+    # compressing the lossless PNG that Pillow immediately reads from the pipe.
+    png = _run([exe, "-v", "error", "-threads", "2", "-filter_threads", "1", *seek, "-i", path,
+                "-frames:v", "1", "-threads", "1", "-compression_level", "0",
+                "-f", "image2pipe", "-vcodec", "png", "-"], what)
+    if not png:
+        return None
+    with Image.open(io.BytesIO(png)) as image:
+        return image.convert("RGB")
+
+
 def sample_frames(path: str, n: int = 4, duration_s: Optional[float] = None) -> Tuple[List, List[float]]:
     """``n`` frames at evenly spaced times, as PIL RGB images, with the times they came from.
 
@@ -152,10 +168,6 @@ def sample_frames(path: str, n: int = 4, duration_s: Optional[float] = None) -> 
     frames actually came from.
     """
     exe = _need_ffmpeg()
-    try:
-        from PIL import Image
-    except ImportError as e:
-        raise ImportError("video frames need Pillow: pip install pillow") from e
     if duration_s is None:
         duration_s = probe(path)["duration_s"]
     n = max(1, int(n))
@@ -167,12 +179,10 @@ def sample_frames(path: str, n: int = 4, duration_s: Optional[float] = None) -> 
     for t in times:
         # Raw streams may be unable to seek even to zero. Decode their first frame directly.
         seek = ["-ss", "%.3f" % t] if t > 0 else []
-        png = _run([exe, "-v", "error", *seek, "-i", path, "-frames:v", "1",
-                    "-f", "image2pipe", "-vcodec", "png", "-"], "read a frame at %.1fs" % t)
-        if not png:
+        frame = _decode_frame(exe, path, seek, "read a frame at %.1fs" % t)
+        if frame is None:
             continue
-        with Image.open(io.BytesIO(png)) as im:
-            frames.append(im.convert("RGB"))
+        frames.append(frame)
         got.append(t)
     if not frames:
         raise RuntimeError("no frame could be read from %r" % path)

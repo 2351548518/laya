@@ -408,21 +408,18 @@ class MultimodalAgent(Agent):
         if bounds is None:
             images, times = sample_frames(path, frames, info["duration_s"])
         else:
-            import io
-            from PIL import Image
-            from .video import _need_ffmpeg, _run
+            from .video import _decode_frame, _need_ffmpeg
             start, end = max(0., float(bounds[0])), min(info["duration_s"], float(bounds[1]))
             if not start < end:
                 raise ValueError("video_bounds have no overlap with the video")
             times = [start + (end - start) * (i + .5) / frames for i in range(frames)]
             images = []
+            ffmpeg = _need_ffmpeg()
             for timestamp in times:
-                png = _run([_need_ffmpeg(), "-v", "error", "-ss", str(timestamp), "-i", path,
-                            "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"], "sample a bounded clip")
-                if not png:
+                frame = _decode_frame(ffmpeg, path, ["-ss", str(timestamp)], "sample a bounded clip")
+                if frame is None:
                     raise ValueError("bounded video frame could not be decoded")
-                with Image.open(io.BytesIO(png)) as image:
-                    images.append(image.convert("RGB"))
+                images.append(frame)
         wave = extract_audio(path) if use_audio and info["has_audio"] else None
         value = info, images, times, wave
         if cached_path is not None and images:
