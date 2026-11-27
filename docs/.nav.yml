@@ -4,6 +4,7 @@ nav:
   - index.md
   - Guides:
       - multimodal.md
+      - project-readme
       - multimodal-clients.md
       - grounding.md
       - multimodal-release.md

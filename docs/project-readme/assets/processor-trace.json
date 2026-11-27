@@ -1,0 +1,678 @@
+{
+  "train_sha256": "2d37aa072b74802bedc091ac858e3b9a9200c4782e18fd89832ccc9e285df7d0",
+  "scope": "CPU Qwen v6 native processor only",
+  "records": [
+    {
+      "id": "tasksource:toxic-chat-toxicchat0124-toxicity-259fcfe274:train:4210",
+      "modality": "text",
+      "type": "choice",
+      "source": "tasksource:toxic-chat/toxicchat0124/toxicity",
+      "line_number": 1425303,
+      "input_ids_shape": [
+        1,
+        60
+      ],
+      "_candidate_positions": [
+        [
+          31,
+          38
+        ]
+      ]
+    },
+    {
+      "id": "tasksource:glue-sst2-a91549683f:train:15149",
+      "modality": "text",
+      "type": "choice",
+      "source": "tasksource:glue/sst2",
+      "line_number": 1384423,
+      "input_ids_shape": [
+        1,
+        57
+      ],
+      "_candidate_positions": [
+        [
+          28,
+          35
+        ]
+      ]
+    },
+    {
+      "id": "tasksource:financial-phrasebank-sentences-allagree-fb77247656:train:511",
+      "modality": "text",
+      "type": "choice",
+      "source": "tasksource:financial_phrasebank/sentences_allagree",
+      "line_number": 1383678,
+      "input_ids_shape": [
+        1,
+        63
+      ],
+      "_candidate_positions": [
+        [
+          27,
+          34,
+          41
+        ]
+      ]
+    },
+    {
+      "id": "tasksource:go-emotions-simplified-c563c5a238:train:9616:noul-label-verification",
+      "modality": "text",
+      "type": "noul",
+      "source": "tasksource:go_emotions/simplified",
+      "line_number": 1387589,
+      "input_ids_shape": [
+        1,
+        78
+      ],
+      "_candidate_positions": [
+        [
+          43,
+          56
+        ]
+      ]
+    },
+    {
+      "id": "tasksource:clinc-oos-plus-1b9b3d1a5a:train:15203:noul-label-verification",
+      "modality": "text",
+      "type": "noul",
+      "source": "tasksource:clinc_oos/plus",
+      "line_number": 1379513,
+      "input_ids_shape": [
+        1,
+        78
+      ],
+      "_candidate_positions": [
+        [
+          43,
+          56
+        ]
+      ]
+    },
+    {
+      "id": "tasksource:dynahate-224d6896b5:train:1664:noul-label-verification",
+      "modality": "text",
+      "type": "noul",
+      "source": "tasksource:dynahate",
+      "line_number": 1382218,
+      "input_ids_shape": [
+        1,
+        78
+      ],
+      "_candidate_positions": [
+        [
+          43,
+          56
+        ]
+      ]
+    },
+    {
+      "id": "tasksource:multilingual-AfriSenti-twitter-sentiment-twi-32a4496e5c:train:1486",
+      "modality": "text",
+      "type": "score",
+      "source": "tasksource:multilingual/AfriSenti-twitter-sentiment/twi",
+      "line_number": 554444,
+      "input_ids_shape": [
+        1,
+        87
+      ],
+      "_candidate_positions": [
+        [
+          43,
+          54,
+          65
+        ]
+      ]
+    },
+    {
+      "id": "tasksource:multilingual-tweet-sentiment-multilingual-31edbb5b11:train:8470",
+      "modality": "text",
+      "type": "score",
+      "source": "tasksource:multilingual/tweet_sentiment_multilingual",
+      "line_number": 1396432,
+      "input_ids_shape": [
+        1,
+        77
+      ],
+      "_candidate_positions": [
+        [
+          33,
+          44,
+          55
+        ]
+      ]
+    },
+    {
+      "id": "tasksource:multilingual-AfriSenti-twitter-sentiment-ary-4c2d98e466:train:5541",
+      "modality": "text",
+      "type": "score",
+      "source": "tasksource:multilingual/AfriSenti-twitter-sentiment/ary",
+      "line_number": 1444840,
+      "input_ids_shape": [
+        1,
+        81
+      ],
+      "_candidate_positions": [
+        [
+          37,
+          48,
+          59
+        ]
+      ]
+    },
+    {
+      "id": "nayana:zh:document_10026_page_41:4",
+      "modality": "image",
+      "type": "choice",
+      "source": "Cognitive-Lab/NayanaOCR_Corpus_2025:extractive-mcq",
+      "line_number": 1032798,
+      "input_ids_shape": [
+        1,
+        8325
+      ],
+      "image_grid_thw": [
+        [
+          1,
+          206,
+          160
+        ]
+      ],
+      "_candidate_positions": [
+        [
+          8271,
+          8281,
+          8293,
+          8303
+        ]
+      ]
+    },
+    {
+      "id": "aokvqa-native:hjMqaofRj93ndSRibZqeZq",
+      "modality": "image",
+      "type": "choice",
+      "source": "HuggingFaceM4/A-OKVQA:native-mc",
+      "line_number": 355446,
+      "input_ids_shape": [
+        1,
+        350
+      ],
+      "image_grid_thw": [
+        [
+          1,
+          28,
+          40
+        ]
+      ],
+      "_candidate_positions": [
+        [
+          307,
+          314,
+          321,
+          328
+        ]
+      ]
+    },
+    {
+      "id": "scienceqa-native:a0eaea2b9af55e19bd8bfb41cdf29ad2a30f63d6ce6b4e414f473bab78120eca",
+      "modality": "image",
+      "type": "choice",
+      "source": "derek-thomas/ScienceQA:native-image",
+      "line_number": 1349262,
+      "input_ids_shape": [
+        1,
+        149
+      ],
+      "image_grid_thw": [
+        [
+          1,
+          14,
+          22
+        ]
+      ],
+      "_candidate_positions": [
+        [
+          111,
+          119,
+          127
+        ]
+      ]
+    },
+    {
+      "id": "vqa2-unanimous:525101015",
+      "modality": "image",
+      "type": "noul",
+      "source": "lmms-lab-encoder/VQAv2:unanimous-native-binary",
+      "line_number": 1321141,
+      "input_ids_shape": [
+        1,
+        369
+      ],
+      "image_grid_thw": [
+        [
+          1,
+          40,
+          30
+        ]
+      ],
+      "_candidate_positions": [
+        [
+          334,
+          347
+        ]
+      ]
+    },
+    {
+      "id": "vqa2-train:384740002",
+      "modality": "image",
+      "type": "noul",
+      "source": "VQA-v2:official-train-consensus",
+      "line_number": 1245713,
+      "input_ids_shape": [
+        1,
+        368
+      ],
+      "image_grid_thw": [
+        [
+          1,
+          30,
+          40
+        ]
+      ],
+      "_candidate_positions": [
+        [
+          333,
+          346
+        ]
+      ]
+    },
+    {
+      "id": "doclaynet:79f6a44c875a6992f27f85cb65b6cdc48c45a8ccc5c67c4bd3521a4bdf685ad8:presence:table",
+      "modality": "image",
+      "type": "noul",
+      "source": "docling-project/DocLayNet-v1.1",
+      "line_number": 1203886,
+      "input_ids_shape": [
+        1,
+        1095
+      ],
+      "image_grid_thw": [
+        [
+          1,
+          64,
+          64
+        ]
+      ],
+      "_candidate_positions": [
+        [
+          1060,
+          1073
+        ]
+      ]
+    },
+    {
+      "id": "koniq:5602815566.jpg",
+      "modality": "image",
+      "type": "score",
+      "source": "koniq",
+      "line_number": 507874,
+      "input_ids_shape": [
+        1,
+        867
+      ],
+      "image_grid_thw": [
+        [
+          1,
+          48,
+          64
+        ]
+      ],
+      "_candidate_positions": [
+        [
+          801,
+          812,
+          823,
+          834,
+          845
+        ]
+      ]
+    },
+    {
+      "id": "tasksource:vision/met-meme/offensiveness:train:040f969d61e6b54f7aaac5f2:437004ba3497a904:2fd8b6d4cd85060123e8b917",
+      "modality": "image",
+      "type": "score",
+      "source": "tasksource:vision/met-meme/offensiveness",
+      "line_number": 913871,
+      "input_ids_shape": [
+        1,
+        158
+      ],
+      "image_grid_thw": [
+        [
+          1,
+          16,
+          16
+        ]
+      ],
+      "_candidate_positions": [
+        [
+          99,
+          112,
+          124,
+          136
+        ]
+      ]
+    },
+    {
+      "id": "rapidata-coherence:d3b0708116f8830c8f1eb6d8bcb13b90cfddfe0948f124dad1c4e7cf30e65ed5",
+      "modality": "image",
+      "type": "score",
+      "source": "Rapidata/human-coherence-preferences-images",
+      "line_number": 1481256,
+      "input_ids_shape": [
+        1,
+        2201
+      ],
+      "image_grid_thw": [
+        [
+          1,
+          64,
+          64
+        ],
+        [
+          1,
+          64,
+          64
+        ]
+      ],
+      "_candidate_positions": [
+        [
+          2103,
+          2122,
+          2141,
+          2160,
+          2179
+        ]
+      ]
+    },
+    {
+      "id": "17c5eb26b236dc2b41093891c83dd7cebfd5c23c7053776c43808a34a52619d7",
+      "modality": "image",
+      "type": "box",
+      "source": "jxu124/refcocoplus",
+      "line_number": 928181,
+      "input_ids_shape": [
+        1,
+        293
+      ],
+      "image_grid_thw": [
+        [
+          1,
+          26,
+          40
+        ]
+      ]
+    },
+    {
+      "id": "6cacf307bf1b5cb1a9c4dd3764766269f6a1872f8529eef5e6d43e46dee5621f",
+      "modality": "image",
+      "type": "box",
+      "source": "coco2017",
+      "line_number": 668985,
+      "input_ids_shape": [
+        1,
+        291
+      ],
+      "image_grid_thw": [
+        [
+          1,
+          26,
+          40
+        ]
+      ]
+    },
+    {
+      "id": "278a1c49f2297ea80280dfa0b526e4e7b71c9922be663da60e0b88c9c6e1c138",
+      "modality": "image",
+      "type": "box",
+      "source": "jxu124/refcoco",
+      "line_number": 589273,
+      "input_ids_shape": [
+        1,
+        332
+      ],
+      "image_grid_thw": [
+        [
+          1,
+          30,
+          40
+        ]
+      ]
+    },
+    {
+      "id": "clevrer:video_09884:descriptive:0",
+      "modality": "video",
+      "type": "choice",
+      "source": "CLEVRER",
+      "line_number": 11023,
+      "input_ids_shape": [
+        1,
+        695
+      ],
+      "video_grid_thw": [
+        [
+          4,
+          20,
+          30
+        ]
+      ],
+      "_candidate_positions": [
+        [
+          666,
+          673
+        ]
+      ]
+    },
+    {
+      "id": "nextqa:3536560404:8",
+      "modality": "video",
+      "type": "choice",
+      "source": "nextqa",
+      "line_number": 608171,
+      "input_ids_shape": [
+        1,
+        1322
+      ],
+      "video_grid_thw": [
+        [
+          4,
+          30,
+          40
+        ]
+      ],
+      "_candidate_positions": [
+        [
+          1267,
+          1275,
+          1284,
+          1293,
+          1300
+        ]
+      ]
+    },
+    {
+      "id": "clevrer:video_06890:descriptive:6",
+      "modality": "video",
+      "type": "choice",
+      "source": "CLEVRER",
+      "line_number": 14219,
+      "input_ids_shape": [
+        1,
+        693
+      ],
+      "video_grid_thw": [
+        [
+          4,
+          20,
+          30
+        ]
+      ],
+      "_candidate_positions": [
+        [
+          664,
+          671
+        ]
+      ]
+    },
+    {
+      "id": "v5-ssv2:166017:verify:0edbab6b16d59191",
+      "modality": "video",
+      "type": "noul",
+      "source": "ssv2:native-action-verification",
+      "line_number": 1464800,
+      "input_ids_shape": [
+        1,
+        302
+      ],
+      "video_grid_thw": [
+        [
+          2,
+          16,
+          26
+        ]
+      ],
+      "_candidate_positions": [
+        [
+          267,
+          280
+        ]
+      ]
+    },
+    {
+      "id": "clevrer:video_07868:descriptive:10",
+      "modality": "video",
+      "type": "noul",
+      "source": "CLEVRER",
+      "line_number": 748653,
+      "input_ids_shape": [
+        1,
+        707
+      ],
+      "video_grid_thw": [
+        [
+          4,
+          20,
+          30
+        ]
+      ],
+      "_candidate_positions": [
+        [
+          670,
+          685
+        ]
+      ]
+    },
+    {
+      "id": "ucf101-full:v_PushUps_g08_c02.avi",
+      "modality": "video",
+      "type": "noul",
+      "source": "ucf101-full",
+      "line_number": 410550,
+      "input_ids_shape": [
+        1,
+        254
+      ],
+      "video_grid_thw": [
+        [
+          2,
+          16,
+          20
+        ]
+      ],
+      "_candidate_positions": [
+        [
+          217,
+          232
+        ]
+      ]
+    },
+    {
+      "id": "videofeedback:0003567:dynamic degree",
+      "modality": "video",
+      "type": "score",
+      "source": "TIGER-Lab/VideoFeedback:annotated",
+      "line_number": 259275,
+      "input_ids_shape": [
+        1,
+        4049
+      ],
+      "video_grid_thw": [
+        [
+          8,
+          40,
+          48
+        ]
+      ],
+      "_candidate_positions": [
+        [
+          3983,
+          3997,
+          4011,
+          4027
+        ]
+      ]
+    },
+    {
+      "id": "konvid-mos:7700672030",
+      "modality": "video",
+      "type": "score",
+      "source": "MMSP/KoNViD-1k:native-mos",
+      "line_number": 1108835,
+      "input_ids_shape": [
+        1,
+        4266
+      ],
+      "video_grid_thw": [
+        [
+          8,
+          34,
+          60
+        ]
+      ],
+      "_candidate_positions": [
+        [
+          4188,
+          4202,
+          4216,
+          4230,
+          4244
+        ]
+      ]
+    },
+    {
+      "id": "divide-maxwell:1042.mp4",
+      "modality": "video",
+      "type": "score",
+      "source": "teowu/DIVIDE-MaxWell:official-train-MOS",
+      "line_number": 179154,
+      "input_ids_shape": [
+        1,
+        781
+      ],
+      "video_grid_thw": [
+        [
+          2,
+          30,
+          40
+        ]
+      ],
+      "_candidate_positions": [
+        [
+          663,
+          687,
+          711,
+          735,
+          759
+        ]
+      ]
+    }
+  ]
+}

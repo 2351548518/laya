@@ -119,6 +119,10 @@ covers four-GPU training, held-out calibration and evaluation.
 [Training guide](https://github.com/2351548518/laya/blob/main/docs/multimodal.md#head-warmup-and-lora-training) ·
 [Grounding](https://github.com/2351548518/laya/blob/main/docs/grounding.md) · [Commands](https://github.com/2351548518/laya/blob/main/scripts/multimodal/README.md)
 
+The v6 project guide includes architecture and training diagrams with tensor dimensions, labelled
+request examples, and a CPU walkthrough of the supervised losses.
+[v6 project guide (Chinese)](https://github.com/2351548518/laya/blob/main/docs/project-readme/index.md)
+
 ## GGUF deployment
 
 Use one language GGUF and its matching visual projector with the local llama.cpp-jev runtime.

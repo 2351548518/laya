@@ -666,11 +666,15 @@ def _slug(heading):
 
 
 def _headings(path):
+    """Fragment targets from Markdown headings and explicit anchors."""
     found = set()
     for line in read(path).splitlines():
         match = re.match(r"^#{1,6}\s+(.*?)\s*$", line)
         if match:
             found.add(_slug(match.group(1)))
+        anchor = re.fullmatch(r'<a name="([\w-]+)"></a>', line.strip())
+        if anchor:
+            found.add(anchor.group(1))
     return found
 
 

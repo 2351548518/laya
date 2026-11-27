@@ -1,0 +1,2320 @@
+{
+  "edition": "open-jev-omni-qwen-filtered-v6",
+  "train_sha256": "2d37aa072b74802bedc091ac858e3b9a9200c4782e18fd89832ccc9e285df7d0",
+  "io": [
+    {
+      "id": "tasksource:toxic-chat-toxicchat0124-toxicity-259fcfe274:train:4210",
+      "source": "tasksource:toxic-chat/toxicchat0124/toxicity",
+      "modality": "text",
+      "type": "choice",
+      "task": "text_choice_decision",
+      "line_number": 1425303,
+      "byte_offset": 6849414021,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:glue-sst2-a91549683f:train:15149",
+      "source": "tasksource:glue/sst2",
+      "modality": "text",
+      "type": "choice",
+      "task": "text_choice_decision",
+      "line_number": 1384423,
+      "byte_offset": 6766073980,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:financial-phrasebank-sentences-allagree-fb77247656:train:511",
+      "source": "tasksource:financial_phrasebank/sentences_allagree",
+      "modality": "text",
+      "type": "choice",
+      "task": "text_choice_decision",
+      "line_number": 1383678,
+      "byte_offset": 6764888456,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:go-emotions-simplified-c563c5a238:train:9616:noul-label-verification",
+      "source": "tasksource:go_emotions/simplified",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_noul_decision",
+      "line_number": 1387589,
+      "byte_offset": 6770802212,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:clinc-oos-plus-1b9b3d1a5a:train:15203:noul-label-verification",
+      "source": "tasksource:clinc_oos/plus",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_noul_decision",
+      "line_number": 1379513,
+      "byte_offset": 6756345753,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:dynahate-224d6896b5:train:1664:noul-label-verification",
+      "source": "tasksource:dynahate",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_noul_decision",
+      "line_number": 1382218,
+      "byte_offset": 6761210175,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:multilingual-AfriSenti-twitter-sentiment-twi-32a4496e5c:train:1486",
+      "source": "tasksource:multilingual/AfriSenti-twitter-sentiment/twi",
+      "modality": "text",
+      "type": "score",
+      "task": "text_affect_decision",
+      "line_number": 554444,
+      "byte_offset": 2489261228,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:multilingual-tweet-sentiment-multilingual-31edbb5b11:train:8470",
+      "source": "tasksource:multilingual/tweet_sentiment_multilingual",
+      "modality": "text",
+      "type": "score",
+      "task": "text_score_decision",
+      "line_number": 1396432,
+      "byte_offset": 6784807342,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:multilingual-AfriSenti-twitter-sentiment-ary-4c2d98e466:train:5541",
+      "source": "tasksource:multilingual/AfriSenti-twitter-sentiment/ary",
+      "modality": "text",
+      "type": "score",
+      "task": "text_score_decision",
+      "line_number": 1444840,
+      "byte_offset": 6897112723,
+      "question_id": "decision"
+    },
+    {
+      "id": "nayana:zh:document_10026_page_41:4",
+      "source": "Cognitive-Lab/NayanaOCR_Corpus_2025:extractive-mcq",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_document_decision",
+      "line_number": 1032798,
+      "byte_offset": 5247212532,
+      "question_id": "decision"
+    },
+    {
+      "id": "aokvqa-native:hjMqaofRj93ndSRibZqeZq",
+      "source": "HuggingFaceM4/A-OKVQA:native-mc",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_knowledge_reasoning_decision",
+      "line_number": 355446,
+      "byte_offset": 1335550675,
+      "question_id": "decision"
+    },
+    {
+      "id": "scienceqa-native:a0eaea2b9af55e19bd8bfb41cdf29ad2a30f63d6ce6b4e414f473bab78120eca",
+      "source": "derek-thomas/ScienceQA:native-image",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_choice_decision",
+      "line_number": 1349262,
+      "byte_offset": 6688122697,
+      "question_id": "decision"
+    },
+    {
+      "id": "vqa2-unanimous:525101015",
+      "source": "lmms-lab-encoder/VQAv2:unanimous-native-binary",
+      "modality": "image",
+      "type": "noul",
+      "task": "image_noul_decision",
+      "line_number": 1321141,
+      "byte_offset": 6586225764,
+      "question_id": "decision"
+    },
+    {
+      "id": "vqa2-train:384740002",
+      "source": "VQA-v2:official-train-consensus",
+      "modality": "image",
+      "type": "noul",
+      "task": "image_noul_decision",
+      "line_number": 1245713,
+      "byte_offset": 6398416240,
+      "question_id": "decision"
+    },
+    {
+      "id": "doclaynet:79f6a44c875a6992f27f85cb65b6cdc48c45a8ccc5c67c4bd3521a4bdf685ad8:presence:table",
+      "source": "docling-project/DocLayNet-v1.1",
+      "modality": "image",
+      "type": "noul",
+      "task": "image_noul_decision",
+      "line_number": 1203886,
+      "byte_offset": 6336444574,
+      "question_id": "decision"
+    },
+    {
+      "id": "koniq:5602815566.jpg",
+      "source": "koniq",
+      "modality": "image",
+      "type": "score",
+      "task": "image_score_decision",
+      "line_number": 507874,
+      "byte_offset": 2214264499,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:vision/met-meme/offensiveness:train:040f969d61e6b54f7aaac5f2:437004ba3497a904:2fd8b6d4cd85060123e8b917",
+      "source": "tasksource:vision/met-meme/offensiveness",
+      "modality": "image",
+      "type": "score",
+      "task": "image_score_decision",
+      "line_number": 913871,
+      "byte_offset": 4603306747,
+      "question_id": "decision"
+    },
+    {
+      "id": "rapidata-coherence:d3b0708116f8830c8f1eb6d8bcb13b90cfddfe0948f124dad1c4e7cf30e65ed5",
+      "source": "Rapidata/human-coherence-preferences-images",
+      "modality": "image",
+      "type": "score",
+      "task": "image_score_decision",
+      "line_number": 1481256,
+      "byte_offset": 6953687274,
+      "question_id": "decision"
+    },
+    {
+      "id": "17c5eb26b236dc2b41093891c83dd7cebfd5c23c7053776c43808a34a52619d7",
+      "source": "jxu124/refcocoplus",
+      "modality": "image",
+      "type": "box",
+      "task": "single_box_grounding",
+      "line_number": 928181,
+      "byte_offset": 4687176502,
+      "question_id": "ground"
+    },
+    {
+      "id": "6cacf307bf1b5cb1a9c4dd3764766269f6a1872f8529eef5e6d43e46dee5621f",
+      "source": "coco2017",
+      "modality": "image",
+      "type": "box",
+      "task": "single_box_grounding",
+      "line_number": 668985,
+      "byte_offset": 3162893633,
+      "question_id": "ground"
+    },
+    {
+      "id": "278a1c49f2297ea80280dfa0b526e4e7b71c9922be663da60e0b88c9c6e1c138",
+      "source": "jxu124/refcoco",
+      "modality": "image",
+      "type": "box",
+      "task": "single_box_grounding",
+      "line_number": 589273,
+      "byte_offset": 2696154098,
+      "question_id": "ground"
+    },
+    {
+      "id": "clevrer:video_09884:descriptive:0",
+      "source": "CLEVRER",
+      "modality": "video",
+      "type": "choice",
+      "task": "video_choice_decision",
+      "line_number": 11023,
+      "byte_offset": 27755025,
+      "question_id": "decision"
+    },
+    {
+      "id": "nextqa:3536560404:8",
+      "source": "nextqa",
+      "modality": "video",
+      "type": "choice",
+      "task": "video_count_decision",
+      "line_number": 608171,
+      "byte_offset": 2808808928,
+      "question_id": "decision"
+    },
+    {
+      "id": "clevrer:video_06890:descriptive:6",
+      "source": "CLEVRER",
+      "modality": "video",
+      "type": "choice",
+      "task": "video_choice_decision",
+      "line_number": 14219,
+      "byte_offset": 35789442,
+      "question_id": "decision"
+    },
+    {
+      "id": "v5-ssv2:166017:verify:0edbab6b16d59191",
+      "source": "ssv2:native-action-verification",
+      "modality": "video",
+      "type": "noul",
+      "task": "video_noul_decision",
+      "line_number": 1464800,
+      "byte_offset": 6928377027,
+      "question_id": "decision"
+    },
+    {
+      "id": "clevrer:video_07868:descriptive:10",
+      "source": "CLEVRER",
+      "modality": "video",
+      "type": "noul",
+      "task": "video_noul_decision",
+      "line_number": 748653,
+      "byte_offset": 3635061957,
+      "question_id": "decision"
+    },
+    {
+      "id": "ucf101-full:v_PushUps_g08_c02.avi",
+      "source": "ucf101-full",
+      "modality": "video",
+      "type": "noul",
+      "task": "video_noul_decision",
+      "line_number": 410550,
+      "byte_offset": 1642847037,
+      "question_id": "decision"
+    },
+    {
+      "id": "videofeedback:0003567:dynamic degree",
+      "source": "TIGER-Lab/VideoFeedback:annotated",
+      "modality": "video",
+      "type": "score",
+      "task": "video_dynamic_degree_decision",
+      "line_number": 259275,
+      "byte_offset": 1015059682,
+      "question_id": "decision"
+    },
+    {
+      "id": "konvid-mos:7700672030",
+      "source": "MMSP/KoNViD-1k:native-mos",
+      "modality": "video",
+      "type": "score",
+      "task": "video_score_decision",
+      "line_number": 1108835,
+      "byte_offset": 5870779972,
+      "question_id": "decision"
+    },
+    {
+      "id": "divide-maxwell:1042.mp4",
+      "source": "teowu/DIVIDE-MaxWell:official-train-MOS",
+      "modality": "video",
+      "type": "score",
+      "task": "video_visual_quality_decision",
+      "line_number": 179154,
+      "byte_offset": 762864956,
+      "question_id": "decision"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "tasksource:toxic-chat-toxicchat0124-toxicity-259fcfe274:train:4210",
+      "source": "tasksource:toxic-chat/toxicchat0124/toxicity",
+      "modality": "text",
+      "type": "choice",
+      "task": "text_choice_decision",
+      "line_number": 1425303,
+      "byte_offset": 6849414021,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:glue-sst2-a91549683f:train:15149",
+      "source": "tasksource:glue/sst2",
+      "modality": "text",
+      "type": "choice",
+      "task": "text_choice_decision",
+      "line_number": 1384423,
+      "byte_offset": 6766073980,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:financial-phrasebank-sentences-allagree-fb77247656:train:511",
+      "source": "tasksource:financial_phrasebank/sentences_allagree",
+      "modality": "text",
+      "type": "choice",
+      "task": "text_choice_decision",
+      "line_number": 1383678,
+      "byte_offset": 6764888456,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:multilingual-tweet-sentiment-multilingual-31edbb5b11:train:8470",
+      "source": "tasksource:multilingual/tweet_sentiment_multilingual",
+      "modality": "text",
+      "type": "score",
+      "task": "text_score_decision",
+      "line_number": 1396432,
+      "byte_offset": 6784807342,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:multilingual-AfriSenti-twitter-sentiment-twi-32a4496e5c:train:911",
+      "source": "tasksource:multilingual/AfriSenti-twitter-sentiment/twi",
+      "modality": "text",
+      "type": "score",
+      "task": "text_score_decision",
+      "line_number": 1393791,
+      "byte_offset": 6780332962,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:multilingual-AfriSenti-twitter-sentiment-ary-4c2d98e466:train:5541",
+      "source": "tasksource:multilingual/AfriSenti-twitter-sentiment/ary",
+      "modality": "text",
+      "type": "score",
+      "task": "text_score_decision",
+      "line_number": 1444840,
+      "byte_offset": 6897112723,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:go-emotions-simplified-c563c5a238:train:9616:noul-label-verification",
+      "source": "tasksource:go_emotions/simplified",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_noul_decision",
+      "line_number": 1387589,
+      "byte_offset": 6770802212,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:clinc-oos-plus-1b9b3d1a5a:train:15203:noul-label-verification",
+      "source": "tasksource:clinc_oos/plus",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_noul_decision",
+      "line_number": 1379513,
+      "byte_offset": 6756345753,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:dynahate-224d6896b5:train:1664:noul-label-verification",
+      "source": "tasksource:dynahate",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_noul_decision",
+      "line_number": 1382218,
+      "byte_offset": 6761210175,
+      "question_id": "decision"
+    },
+    {
+      "id": "agentdecision:w2ctrain-a7c839336620/when2call",
+      "source": "JevAgentHarness/AgentDecision-train",
+      "modality": "text",
+      "type": "choice",
+      "task": "tool_selection",
+      "line_number": 532386,
+      "byte_offset": 2358597455,
+      "question_id": "decision"
+    },
+    {
+      "id": "v4:0d679ad3441d29fe65040538f80ea85e11b91df18e1d74cb85fe0d44d664e9c5",
+      "source": "openbmb/UltraData-SFT-Agent-2609",
+      "modality": "text",
+      "type": "choice",
+      "task": "tool_selection",
+      "line_number": 765822,
+      "byte_offset": 3736644114,
+      "question_id": "decision"
+    },
+    {
+      "id": "toolace:afeef1ac3bc7521c11d4922fb7c82031e3c09470d5e8323484a83116edb86110:turn:1:tool",
+      "source": "Team-ACE/ToolACE",
+      "modality": "text",
+      "type": "choice",
+      "task": "tool_selection",
+      "line_number": 971551,
+      "byte_offset": 4944590971,
+      "question_id": "decision"
+    },
+    {
+      "id": "when2call:a705a83ae3c1faef1779535a3e81943a6868124266ceee636c2fa32104abfd70:invoke",
+      "source": "nvidia/When2Call:v6-next-action",
+      "modality": "text",
+      "type": "noul",
+      "task": "invoke_or_respond",
+      "line_number": 1249576,
+      "byte_offset": 6406226018,
+      "question_id": "decision"
+    },
+    {
+      "id": "toolace:8fe75c2527a42c7683ff8bcb1c83d40b586ce6be41ec9c2300ce2d64f16189e9:turn:1:invoke",
+      "source": "Team-ACE/ToolACE",
+      "modality": "text",
+      "type": "noul",
+      "task": "invoke_or_respond",
+      "line_number": 677511,
+      "byte_offset": 3212839149,
+      "question_id": "decision"
+    },
+    {
+      "id": "v4:061e27a363dd3ea1cce77d1ff4c37dc24e44dc3ea4ae47a1c5a34ab50e8541e9",
+      "source": "nvidia/Nemotron-SFT-Agentic-v4",
+      "modality": "text",
+      "type": "noul",
+      "task": "invoke_or_respond",
+      "line_number": 844297,
+      "byte_offset": 4196410202,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:HelpSteer-helpfulness-6699944564:train:15401:noul-label-verification",
+      "source": "tasksource:HelpSteer/helpfulness",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_response_quality_decision",
+      "line_number": 600408,
+      "byte_offset": 2762020543,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:HelpSteer-coherence-9acb01c9e1:train:23536:noul-label-verification",
+      "source": "tasksource:HelpSteer/coherence",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_response_quality_decision",
+      "line_number": 719146,
+      "byte_offset": 3460392104,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:HelpSteer-correctness-b6bde711ef:train:23293",
+      "source": "tasksource:HelpSteer/correctness",
+      "modality": "text",
+      "type": "choice",
+      "task": "text_response_quality_decision",
+      "line_number": 1073874,
+      "byte_offset": 5548375499,
+      "question_id": "decision"
+    },
+    {
+      "id": "v4:091480f22aa45fb53fdabaa541a22b73543d2ad92c220bb373228573787d02bf",
+      "source": "nvidia/Nemotron-Terminal-Corpus",
+      "modality": "text",
+      "type": "choice",
+      "task": "terminal_control",
+      "line_number": 808794,
+      "byte_offset": 3987125169,
+      "question_id": "decision"
+    },
+    {
+      "id": "v4:3f2c9180b2fba71859366c4c29ab57dd4d6a08b60a1f20c35c959c2d74a5be1a",
+      "source": "nvidia/Nemotron-Terminal-Corpus",
+      "modality": "text",
+      "type": "choice",
+      "task": "terminal_control",
+      "line_number": 884512,
+      "byte_offset": 4432806008,
+      "question_id": "decision"
+    },
+    {
+      "id": "v4:08e7ac14da4ba4b57d9a12a108e0dfa4c5288089ec50645712c174c1e08cae24",
+      "source": "nvidia/Nemotron-Terminal-Corpus",
+      "modality": "text",
+      "type": "choice",
+      "task": "terminal_control",
+      "line_number": 1137580,
+      "byte_offset": 6003860822,
+      "question_id": "decision"
+    },
+    {
+      "id": "helpsteer3-pref:af08bca39a14b181a2a2c3aaad7b0a944e9c9742e733053f67005e80c396c641",
+      "source": "nvidia/HelpSteer3:preference-native",
+      "modality": "text",
+      "type": "score",
+      "task": "text_pairwise_preference_strength",
+      "line_number": 1196043,
+      "byte_offset": 6299089692,
+      "question_id": "decision"
+    },
+    {
+      "id": "helpsteer3-pref:0897ca45302ec30db4a237d9effb0706418ca8c3f24f898dcfd1e9ee36caa6e2",
+      "source": "nvidia/HelpSteer3:preference-native",
+      "modality": "text",
+      "type": "score",
+      "task": "text_pairwise_preference_strength",
+      "line_number": 43302,
+      "byte_offset": 125943411,
+      "question_id": "decision"
+    },
+    {
+      "id": "helpsteer3-pref:214ab4f716534156c1b50081a077ae321498a38c1054af5db67bb040ec90adfd",
+      "source": "nvidia/HelpSteer3:preference-native",
+      "modality": "text",
+      "type": "score",
+      "task": "text_pairwise_preference_strength",
+      "line_number": 1194258,
+      "byte_offset": 6285128669,
+      "question_id": "decision"
+    },
+    {
+      "id": "agentrm-value:257324",
+      "source": "cheesewafer/AgentRM:native-state-value",
+      "modality": "text",
+      "type": "score",
+      "task": "agent_state_value",
+      "line_number": 1049041,
+      "byte_offset": 5309378412,
+      "question_id": "decision"
+    },
+    {
+      "id": "agentrm-value:62180",
+      "source": "cheesewafer/AgentRM:native-state-value",
+      "modality": "text",
+      "type": "score",
+      "task": "agent_state_value",
+      "line_number": 1054272,
+      "byte_offset": 5361843555,
+      "question_id": "decision"
+    },
+    {
+      "id": "agentrm-value:82041",
+      "source": "cheesewafer/AgentRM:native-state-value",
+      "modality": "text",
+      "type": "score",
+      "task": "agent_state_value",
+      "line_number": 1063540,
+      "byte_offset": 5444867593,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:go-emotions-simplified-c563c5a238:train:20516:noul-label-verification",
+      "source": "tasksource:go_emotions/simplified",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_affect_decision",
+      "line_number": 685675,
+      "byte_offset": 3261161991,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:poem-sentiment-b148f25f95:train:92:noul-label-verification",
+      "source": "tasksource:poem_sentiment",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_affect_decision",
+      "line_number": 609930,
+      "byte_offset": 2819064108,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:silicone-sem-a8f3a16c15:train:1311:noul-label-verification",
+      "source": "tasksource:silicone/sem",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_affect_decision",
+      "line_number": 454637,
+      "byte_offset": 1898787368,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:wiki-hop-original-e6f0da7fde:train:12654:noul-label-verification",
+      "source": "tasksource:wiki_hop/original",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_legal_policy_decision",
+      "line_number": 985517,
+      "byte_offset": 5026899601,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:social-i-qa-d41f9445c6:train:19683:noul-label-verification",
+      "source": "tasksource:social_i_qa",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_legal_policy_decision",
+      "line_number": 965916,
+      "byte_offset": 4911862122,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:PARADISE-b363cb34f2:train:29344:noul-label-verification",
+      "source": "tasksource:PARADISE",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_legal_policy_decision",
+      "line_number": 973846,
+      "byte_offset": 4958023886,
+      "question_id": "decision"
+    },
+    {
+      "id": "agentrefine:464383983d38beb9025298a65c54876fefa4ea53a6df524fa632c3ec3445e805:0:first",
+      "source": "fudayuan/AgentRefine-deepseek-4000",
+      "modality": "text",
+      "type": "choice",
+      "task": "error_step_localization",
+      "line_number": 450201,
+      "byte_offset": 1872616445,
+      "question_id": "decision"
+    },
+    {
+      "id": "v4:a8db66a39fcb5b735b003fd9b529a67a326a7ca0bf8a0055788ead46da19ff6f",
+      "source": "bingreeky/AgenTracer",
+      "modality": "text",
+      "type": "choice",
+      "task": "error_step_localization",
+      "line_number": 912291,
+      "byte_offset": 4594459656,
+      "question_id": "decision"
+    },
+    {
+      "id": "agentrefine:9080a8fc9943aacfae04aba571ee1eb471a47396b167cdb3c694196ceac999b8:0:first",
+      "source": "fudayuan/AgentRefine-deepseek-4000",
+      "modality": "text",
+      "type": "choice",
+      "task": "error_step_localization",
+      "line_number": 822890,
+      "byte_offset": 4070426320,
+      "question_id": "decision"
+    },
+    {
+      "id": "agentrefine:3c79bb3d65bdc9b909da7cbf67322297d0ae81d2273bfaa2c7c858517736efe7:0:latest",
+      "source": "fudayuan/AgentRefine-deepseek-4000",
+      "modality": "text",
+      "type": "noul",
+      "task": "observed_action_correctness",
+      "line_number": 704181,
+      "byte_offset": 3372030386,
+      "question_id": "decision"
+    },
+    {
+      "id": "agentrefine:e5a3c1cfef4f58c156202de052bf10b15e82dc94ed4e290c400810b15944b03c:0:latest",
+      "source": "fudayuan/AgentRefine-deepseek-4000",
+      "modality": "text",
+      "type": "noul",
+      "task": "observed_action_correctness",
+      "line_number": 1079001,
+      "byte_offset": 5599752224,
+      "question_id": "decision"
+    },
+    {
+      "id": "agentrefine:f2ad613a69c06c649f73a8084891a88d2318e10e9ef54787470c2cb73d9f06c5:0:latest",
+      "source": "fudayuan/AgentRefine-deepseek-4000",
+      "modality": "text",
+      "type": "noul",
+      "task": "observed_action_correctness",
+      "line_number": 1094306,
+      "byte_offset": 5752176596,
+      "question_id": "decision"
+    },
+    {
+      "id": "nemotron-safety-input:b9033514657849dd993b4bfeaef84d58",
+      "source": "nvidia/Nemotron-3.5-Content-Safety-Dataset",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_input_safety_decision",
+      "line_number": 1489059,
+      "byte_offset": 6988368646,
+      "question_id": "decision"
+    },
+    {
+      "id": "nemotron-safety-input:b029fd9edfdb49f691a36492e1e25654",
+      "source": "nvidia/Nemotron-3.5-Content-Safety-Dataset",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_input_safety_decision",
+      "line_number": 55744,
+      "byte_offset": 231853400,
+      "question_id": "decision"
+    },
+    {
+      "id": "nemotron-safety-input:0d917d3649a74f0ba4c44b31e87a0241",
+      "source": "nvidia/Nemotron-3.5-Content-Safety-Dataset",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_input_safety_decision",
+      "line_number": 1324926,
+      "byte_offset": 6595648775,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:clinc-oos-plus-1b9b3d1a5a:train:11246:noul-label-verification",
+      "source": "tasksource:clinc_oos/plus",
+      "modality": "text",
+      "type": "noul",
+      "task": "intent_routing",
+      "line_number": 835421,
+      "byte_offset": 4144361153,
+      "question_id": "decision"
+    },
+    {
+      "id": "jevify:massive/train/562",
+      "source": "jevify:massive",
+      "modality": "text",
+      "type": "choice",
+      "task": "intent_routing",
+      "line_number": 527263,
+      "byte_offset": 2328196310,
+      "question_id": "decision"
+    },
+    {
+      "id": "banking77-full-v5:33d59b2004ebf3288be1751e0db246553d2deb70a87f4b72a94d973d6b8eef63",
+      "source": "PolyAI/banking77:train-full77",
+      "modality": "text",
+      "type": "choice",
+      "task": "intent_routing",
+      "line_number": 1174105,
+      "byte_offset": 6171419752,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:sen-making-2-62b7d5fc4a:train:315:noul-label-verification",
+      "source": "tasksource:sen-making/2",
+      "modality": "text",
+      "type": "noul",
+      "task": "recovery_decision",
+      "line_number": 443804,
+      "byte_offset": 1835163997,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:semeval2014-absa-laptops-ef9b68be6a:train:116",
+      "source": "tasksource:semeval2014-absa/laptops",
+      "modality": "text",
+      "type": "choice",
+      "task": "recovery_decision",
+      "line_number": 527900,
+      "byte_offset": 2331831627,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:reclor-3f0b326481:train:4097:noul-label-verification",
+      "source": "tasksource:reclor",
+      "modality": "text",
+      "type": "noul",
+      "task": "recovery_decision",
+      "line_number": 874292,
+      "byte_offset": 4372563559,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:schema-guided-intent-3c604d923b:train:4931:noul-label-verification",
+      "source": "tasksource:schema-guided/intent",
+      "modality": "text",
+      "type": "noul",
+      "task": "declared_contract_validation",
+      "line_number": 572519,
+      "byte_offset": 2597644405,
+      "question_id": "decision"
+    },
+    {
+      "id": "v4:19294f7059e58ffad15ad39d84046824173c2f2b4eb942a8660dfc5aa977222f",
+      "source": "nvidia/Open-SWE-Traces",
+      "modality": "text",
+      "type": "noul",
+      "task": "declared_contract_validation",
+      "line_number": 492985,
+      "byte_offset": 2125398442,
+      "question_id": "decision"
+    },
+    {
+      "id": "v4:8521522f6de7bed944070f6a531444fc52fdfbcd1ef4c92ee3ff3c3e8981054d",
+      "source": "nvidia/Nemotron-SFT-Agentic-v4",
+      "modality": "text",
+      "type": "noul",
+      "task": "declared_contract_validation",
+      "line_number": 413245,
+      "byte_offset": 1658445421,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:multilingual-MLMA-hate-speech-ea81e6680f:train:4429:noul-label-verification",
+      "source": "tasksource:multilingual/MLMA_hate_speech",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_safety_decision",
+      "line_number": 887829,
+      "byte_offset": 4452736166,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:jigsaw-toxicity-47e658a77f:train:17513",
+      "source": "tasksource:jigsaw_toxicity",
+      "modality": "text",
+      "type": "choice",
+      "task": "text_safety_decision",
+      "line_number": 401750,
+      "byte_offset": 1593109006,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:toxic-chat-toxicchat0124-toxicity-259fcfe274:train:4172",
+      "source": "tasksource:toxic-chat/toxicchat0124/toxicity",
+      "modality": "text",
+      "type": "choice",
+      "task": "text_safety_decision",
+      "line_number": 1125068,
+      "byte_offset": 5946320968,
+      "question_id": "decision"
+    },
+    {
+      "id": "when2call:50db135f0a868d9fa8547eab5e64286369e63f5ee2c84194d5350c81ec2b6851:preference",
+      "source": "nvidia/When2Call:native-preference",
+      "modality": "text",
+      "type": "choice",
+      "task": "agent_response_preference",
+      "line_number": 147452,
+      "byte_offset": 558729527,
+      "question_id": "decision"
+    },
+    {
+      "id": "when2call:70f92bb745e24664ad430c57aa20b3e030a5e385d6dc3cd722ce9486bb5de794:preference",
+      "source": "nvidia/When2Call:native-preference",
+      "modality": "text",
+      "type": "choice",
+      "task": "agent_response_preference",
+      "line_number": 152297,
+      "byte_offset": 582017457,
+      "question_id": "decision"
+    },
+    {
+      "id": "when2call:96f92b1b506faed1dd0dc1b29a51f629ba5d44a490ea6ea4b37bc87f9ad16dd3:preference",
+      "source": "nvidia/When2Call:native-preference",
+      "modality": "text",
+      "type": "choice",
+      "task": "agent_response_preference",
+      "line_number": 150096,
+      "byte_offset": 571469381,
+      "question_id": "decision"
+    },
+    {
+      "id": "toolace:28d55be0b3f52b5035e12d90985d39e1872f656df03d5047489ac389be6ca512:schema:3:first",
+      "source": "ToolACE:verified_schema",
+      "modality": "text",
+      "type": "choice",
+      "task": "schema_error_localization",
+      "line_number": 737485,
+      "byte_offset": 3568622448,
+      "question_id": "decision"
+    },
+    {
+      "id": "v4:39c632e466c1f74923d242e25454053d9c3d13c02f5bc7df74fe5bbfdb77f9cf",
+      "source": "nvidia/Nemotron-SFT-Agentic-v4",
+      "modality": "text",
+      "type": "choice",
+      "task": "schema_error_localization",
+      "line_number": 741846,
+      "byte_offset": 3594524285,
+      "question_id": "decision"
+    },
+    {
+      "id": "v4:592e11327058829bd39b1c719a255eb28aa2f3173c6ab36d387a58a55faf6c10",
+      "source": "nvidia/Open-SWE-Traces",
+      "modality": "text",
+      "type": "choice",
+      "task": "schema_error_localization",
+      "line_number": 663722,
+      "byte_offset": 3131462367,
+      "question_id": "decision"
+    },
+    {
+      "id": "nemotron-safety-response:1701ae669584428da1ad3a2ce2581733",
+      "source": "nvidia/Nemotron-3.5-Content-Safety-Dataset",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_response_safety_decision",
+      "line_number": 1327955,
+      "byte_offset": 6602164262,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:PKU-SafeRLHF-safety-012bde6ebb:train:21455:noul-label-verification",
+      "source": "tasksource:PKU-SafeRLHF/safety",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_response_safety_decision",
+      "line_number": 733861,
+      "byte_offset": 3547756419,
+      "question_id": "decision"
+    },
+    {
+      "id": "nemotron-safety-response:7d5e042041e64655b9981e1a37c83372",
+      "source": "nvidia/Nemotron-3.5-Content-Safety-Dataset",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_response_safety_decision",
+      "line_number": 1326472,
+      "byte_offset": 6598999110,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:piqa-d56b703691:train:4066:noul-label-verification",
+      "source": "tasksource:piqa",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_planning_decision",
+      "line_number": 499692,
+      "byte_offset": 2165230723,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:goal-step-wikihow-step-f246da777f:train:11200:noul-label-verification",
+      "source": "tasksource:goal-step-wikihow/step",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_planning_decision",
+      "line_number": 579064,
+      "byte_offset": 2635517624,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:goal-step-wikihow-goal-17346b2d9d:train:18943:noul-label-verification",
+      "source": "tasksource:goal-step-wikihow/goal",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_planning_decision",
+      "line_number": 877815,
+      "byte_offset": 4392584416,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:riddle-sense-0c617de757:train:3187:noul-label-verification",
+      "source": "tasksource:riddle_sense",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_count_decision",
+      "line_number": 659646,
+      "byte_offset": 3107066937,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:wiki-hop-original-e6f0da7fde:train:10268:noul-label-verification",
+      "source": "tasksource:wiki_hop/original",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_count_decision",
+      "line_number": 465144,
+      "byte_offset": 1958857852,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:amazon-counterfactual-en-16c5c659fd:train:1419:noul-label-verification",
+      "source": "tasksource:amazon_counterfactual/en",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_count_decision",
+      "line_number": 993720,
+      "byte_offset": 5078648069,
+      "question_id": "decision"
+    },
+    {
+      "id": "helpsteer2-native:952b0ade936e6f3f57c9ce331e7be4e1c7f131566166e3e52caf7ed5ad9edcef:complexity",
+      "source": "nvidia/HelpSteer2:native-rating",
+      "modality": "text",
+      "type": "score",
+      "task": "text_style_score_decision",
+      "line_number": 1250248,
+      "byte_offset": 6410668566,
+      "question_id": "decision"
+    },
+    {
+      "id": "helpsteer2-native:07a3d61e22207c51d61fc1dafb3f823d7db60a31971c4668fd8477e2f9b5ffd4:verbosity",
+      "source": "nvidia/HelpSteer2:native-rating",
+      "modality": "text",
+      "type": "score",
+      "task": "text_style_score_decision",
+      "line_number": 1252074,
+      "byte_offset": 6422491362,
+      "question_id": "decision"
+    },
+    {
+      "id": "helpsteer2-native:1acb7b499314c588818dba8b10836d337875b3063fa524bed8e49977ace542b7:verbosity",
+      "source": "nvidia/HelpSteer2:native-rating",
+      "modality": "text",
+      "type": "score",
+      "task": "text_style_score_decision",
+      "line_number": 1253334,
+      "byte_offset": 6429573270,
+      "question_id": "decision"
+    },
+    {
+      "id": "v4:7d98cc0c98d2f2d2904c8d21a206a6182fe6e916906e5e0fc04e499b767ea9e5",
+      "source": "nvidia/Open-SWE-Traces",
+      "modality": "text",
+      "type": "noul",
+      "task": "episode_outcome_decision",
+      "line_number": 477566,
+      "byte_offset": 2032002074,
+      "question_id": "decision"
+    },
+    {
+      "id": "v4:47ac4120a54895b82d0807b63054c559dd56b0f94eb1563788a1a5eb5b83d3e7",
+      "source": "nvidia/Open-SWE-Traces",
+      "modality": "text",
+      "type": "noul",
+      "task": "episode_outcome_decision",
+      "line_number": 736247,
+      "byte_offset": 3561228455,
+      "question_id": "decision"
+    },
+    {
+      "id": "v4:1d25b490da630e62346cf8e521c69caf97c90816f69b66593fcdd796b3c7fc0f",
+      "source": "nvidia/Open-SWE-Traces",
+      "modality": "text",
+      "type": "noul",
+      "task": "episode_outcome_decision",
+      "line_number": 778040,
+      "byte_offset": 3807905247,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:multilingual-disrpt-tha-pdtb-tdtb-rels-2e20a61c83:train:737:noul-label-verification",
+      "source": "tasksource:multilingual/disrpt/tha.pdtb.tdtb.rels",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_temporal_decision",
+      "line_number": 400653,
+      "byte_offset": 1587044290,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:temporal-nli-0d8184c0f1:train:20956:noul-label-verification",
+      "source": "tasksource:temporal-nli",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_temporal_decision",
+      "line_number": 512601,
+      "byte_offset": 2241764373,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:disrpt-eng-dep-scidtb-rels-615591f14c:train:3486:noul-label-verification",
+      "source": "tasksource:disrpt/eng.dep.scidtb.rels",
+      "modality": "text",
+      "type": "noul",
+      "task": "text_temporal_decision",
+      "line_number": 407524,
+      "byte_offset": 1626279367,
+      "question_id": "decision"
+    },
+    {
+      "id": "agentdecision:jevgym-multi-30267-d60-near-strict/nearmiss_replace:12/stop:shadow",
+      "source": "JevAgentHarness/AgentDecision-train",
+      "modality": "text",
+      "type": "noul",
+      "task": "stop_or_continue",
+      "line_number": 565681,
+      "byte_offset": 2557401460,
+      "question_id": "decision"
+    },
+    {
+      "id": "v4:302041974c1fea298cc218eedd2be0332decfb64fb090d48701ed43e62f2920f:native-stop",
+      "source": "nvidia/Nemotron-Terminal-Corpus",
+      "modality": "text",
+      "type": "noul",
+      "task": "stop_or_continue",
+      "line_number": 1104431,
+      "byte_offset": 5846205516,
+      "question_id": "decision"
+    },
+    {
+      "id": "agentdecision:jevgym-multi-30375-d60-near-strict/nearmiss_replace:12/stop:shadow",
+      "source": "JevAgentHarness/AgentDecision-train",
+      "modality": "text",
+      "type": "noul",
+      "task": "stop_or_continue",
+      "line_number": 481375,
+      "byte_offset": 2055024037,
+      "question_id": "decision"
+    },
+    {
+      "id": "v4:0def757c4cfec22aaa552f5a9ddd22ba023a83e3cfc2eba4f4714e0975f64f27",
+      "source": "bingreeky/AgenTracer",
+      "modality": "text",
+      "type": "choice",
+      "task": "responsible_agent_localization",
+      "line_number": 488641,
+      "byte_offset": 2099817973,
+      "question_id": "decision"
+    },
+    {
+      "id": "v4:cefb6b25ad1549e8a7c7718c0b42b014b61bc72c025a6e39a0bdf98c40389ac9",
+      "source": "bingreeky/AgenTracer",
+      "modality": "text",
+      "type": "choice",
+      "task": "responsible_agent_localization",
+      "line_number": 495535,
+      "byte_offset": 2140904628,
+      "question_id": "decision"
+    },
+    {
+      "id": "v4:d4ee72bcdcbeab904aaf0a2d6024cf5a220960d9c9b94c378bd881bf7ae233dc",
+      "source": "bingreeky/AgenTracer",
+      "modality": "text",
+      "type": "choice",
+      "task": "responsible_agent_localization",
+      "line_number": 871664,
+      "byte_offset": 4357872156,
+      "question_id": "decision"
+    },
+    {
+      "id": "agentdecision:jevgym-clarify-30266-d60-near-strict/nearmiss_replace:3/tool_params",
+      "source": "JevAgentHarness/AgentDecision-train",
+      "modality": "text",
+      "type": "choice",
+      "task": "tool_argument_selection",
+      "line_number": 1110440,
+      "byte_offset": 5879380839,
+      "question_id": "decision"
+    },
+    {
+      "id": "toolace-argument:394:3:exportType",
+      "source": "Team-ACE/ToolACE:native-enum-arguments",
+      "modality": "text",
+      "type": "choice",
+      "task": "tool_argument_selection",
+      "line_number": 1324110,
+      "byte_offset": 6593073303,
+      "question_id": "decision"
+    },
+    {
+      "id": "pivot-enum:ca64560bf84bfb73aa116803efe2877080c7f7af4b411bd465c1ada0450337dd",
+      "source": "nvidia/Nemotron-RL-Agentic-Function-Calling-Pivot-v1:native-enum-arguments",
+      "modality": "text",
+      "type": "choice",
+      "task": "tool_argument_selection",
+      "line_number": 359299,
+      "byte_offset": 1351942220,
+      "question_id": "decision"
+    },
+    {
+      "id": "sharc-rule:5d213788677ac257575b8f3a0d0cf99d8e3517ce",
+      "source": "UCLNLP/sharc:native-rule-decision",
+      "modality": "text",
+      "type": "choice",
+      "task": "text_policy_decision",
+      "line_number": 1103578,
+      "byte_offset": 5838044080,
+      "question_id": "decision"
+    },
+    {
+      "id": "sharc-rule:98cd0149dff03921521433700359c56fe6103dd9",
+      "source": "UCLNLP/sharc:native-rule-decision",
+      "modality": "text",
+      "type": "choice",
+      "task": "text_policy_decision",
+      "line_number": 1103918,
+      "byte_offset": 5839038456,
+      "question_id": "decision"
+    },
+    {
+      "id": "sharc-rule:5799cdd746c76b7c42a5af1d2d30a077d6e44ac5",
+      "source": "UCLNLP/sharc:native-rule-decision",
+      "modality": "text",
+      "type": "choice",
+      "task": "text_policy_decision",
+      "line_number": 1103546,
+      "byte_offset": 5837949663,
+      "question_id": "decision"
+    },
+    {
+      "id": "routellm-routing:2752",
+      "source": "routellm/gpt4_dataset:quality-threshold-routing",
+      "modality": "text",
+      "type": "choice",
+      "task": "text_routing_decision",
+      "line_number": 1102646,
+      "byte_offset": 5835118212,
+      "question_id": "decision"
+    },
+    {
+      "id": "routellm-routing:1234",
+      "source": "routellm/gpt4_dataset:quality-threshold-routing",
+      "modality": "text",
+      "type": "choice",
+      "task": "text_routing_decision",
+      "line_number": 1102311,
+      "byte_offset": 5833996958,
+      "question_id": "decision"
+    },
+    {
+      "id": "routellm-routing:1045",
+      "source": "routellm/gpt4_dataset:quality-threshold-routing",
+      "modality": "text",
+      "type": "choice",
+      "task": "text_routing_decision",
+      "line_number": 1102270,
+      "byte_offset": 5833859957,
+      "question_id": "decision"
+    },
+    {
+      "id": "17c5eb26b236dc2b41093891c83dd7cebfd5c23c7053776c43808a34a52619d7",
+      "source": "jxu124/refcocoplus",
+      "modality": "image",
+      "type": "box",
+      "task": "single_box_grounding",
+      "line_number": 928181,
+      "byte_offset": 4687176502,
+      "question_id": "ground"
+    },
+    {
+      "id": "6cacf307bf1b5cb1a9c4dd3764766269f6a1872f8529eef5e6d43e46dee5621f",
+      "source": "coco2017",
+      "modality": "image",
+      "type": "box",
+      "task": "single_box_grounding",
+      "line_number": 668985,
+      "byte_offset": 3162893633,
+      "question_id": "ground"
+    },
+    {
+      "id": "278a1c49f2297ea80280dfa0b526e4e7b71c9922be663da60e0b88c9c6e1c138",
+      "source": "jxu124/refcoco",
+      "modality": "image",
+      "type": "box",
+      "task": "single_box_grounding",
+      "line_number": 589273,
+      "byte_offset": 2696154098,
+      "question_id": "ground"
+    },
+    {
+      "id": "vqa2-train:361394001",
+      "source": "VQA-v2:official-train-consensus",
+      "modality": "image",
+      "type": "score",
+      "task": "image_count_decision",
+      "line_number": 1240246,
+      "byte_offset": 6390848038,
+      "question_id": "decision"
+    },
+    {
+      "id": "doclaynet:965df27ee0e4ddba67b464c83b85a042c18973b7fc612c1371007f9bc3b2f4a2:count:table",
+      "source": "docling-project/DocLayNet-v1.1",
+      "modality": "image",
+      "type": "score",
+      "task": "image_count_decision",
+      "line_number": 1202933,
+      "byte_offset": 6334793789,
+      "question_id": "decision"
+    },
+    {
+      "id": "valen:chartqa:chartqa:train-00000-of-00003-49492f364babfa44.parquet:1735",
+      "source": "valen:chartqa",
+      "modality": "image",
+      "type": "noul",
+      "task": "image_count_decision",
+      "line_number": 929835,
+      "byte_offset": 4696725629,
+      "question_id": "decision"
+    },
+    {
+      "id": "nlvr2-native:train-11569-1-0",
+      "source": "pingzhili/nlvr2:native-pair",
+      "modality": "image",
+      "type": "noul",
+      "task": "image_pair_consistency_decision",
+      "line_number": 336989,
+      "byte_offset": 1275169027,
+      "question_id": "decision"
+    },
+    {
+      "id": "nlvr2-native:train-8832-2-0",
+      "source": "pingzhili/nlvr2:native-pair",
+      "modality": "image",
+      "type": "noul",
+      "task": "image_pair_consistency_decision",
+      "line_number": 341690,
+      "byte_offset": 1291645018,
+      "question_id": "decision"
+    },
+    {
+      "id": "nlvr2-native:train-7284-3-0",
+      "source": "pingzhili/nlvr2:native-pair",
+      "modality": "image",
+      "type": "noul",
+      "task": "image_pair_consistency_decision",
+      "line_number": 298749,
+      "byte_offset": 1141154705,
+      "question_id": "decision"
+    },
+    {
+      "id": "scienceqa-native:a0eaea2b9af55e19bd8bfb41cdf29ad2a30f63d6ce6b4e414f473bab78120eca",
+      "source": "derek-thomas/ScienceQA:native-image",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_choice_decision",
+      "line_number": 1349262,
+      "byte_offset": 6688122697,
+      "question_id": "decision"
+    },
+    {
+      "id": "scienceqa:train:7721",
+      "source": "derek-thomas/ScienceQA",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_choice_decision",
+      "line_number": 978709,
+      "byte_offset": 4986300262,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:vision/intergps:train:210da2d03f74f60e7506ef21:dd932838ef5b8600:ac32ee6be426620bc2e035ea",
+      "source": "tasksource:vision/intergps",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_choice_decision",
+      "line_number": 682709,
+      "byte_offset": 3243959139,
+      "question_id": "decision"
+    },
+    {
+      "id": "vqa2-unanimous:525101015",
+      "source": "lmms-lab-encoder/VQAv2:unanimous-native-binary",
+      "modality": "image",
+      "type": "noul",
+      "task": "image_noul_decision",
+      "line_number": 1321141,
+      "byte_offset": 6586225764,
+      "question_id": "decision"
+    },
+    {
+      "id": "vqa2-train:384740002",
+      "source": "VQA-v2:official-train-consensus",
+      "modality": "image",
+      "type": "noul",
+      "task": "image_noul_decision",
+      "line_number": 1245713,
+      "byte_offset": 6398416240,
+      "question_id": "decision"
+    },
+    {
+      "id": "doclaynet:79f6a44c875a6992f27f85cb65b6cdc48c45a8ccc5c67c4bd3521a4bdf685ad8:presence:table",
+      "source": "docling-project/DocLayNet-v1.1",
+      "modality": "image",
+      "type": "noul",
+      "task": "image_noul_decision",
+      "line_number": 1203886,
+      "byte_offset": 6336444574,
+      "question_id": "decision"
+    },
+    {
+      "id": "hiertext-word:388b7b3b07a7993f:1:0:2",
+      "source": "google-research-datasets/HierText:word-transcription",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_visual_text_decision",
+      "line_number": 1019725,
+      "byte_offset": 5204073003,
+      "question_id": "decision"
+    },
+    {
+      "id": "hiertext-word:bffd87adc021c63d:5:7:0",
+      "source": "google-research-datasets/HierText:word-transcription",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_visual_text_decision",
+      "line_number": 1031596,
+      "byte_offset": 5243241197,
+      "question_id": "decision"
+    },
+    {
+      "id": "hiertext-word:6ba6243e041b6796:1:10:0",
+      "source": "google-research-datasets/HierText:word-transcription",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_visual_text_decision",
+      "line_number": 1022842,
+      "byte_offset": 5214356946,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:vision/met-meme/offensiveness:train:040f969d61e6b54f7aaac5f2:437004ba3497a904:2fd8b6d4cd85060123e8b917",
+      "source": "tasksource:vision/met-meme/offensiveness",
+      "modality": "image",
+      "type": "score",
+      "task": "image_score_decision",
+      "line_number": 913871,
+      "byte_offset": 4603306747,
+      "question_id": "decision"
+    },
+    {
+      "id": "koniq:5602815566.jpg",
+      "source": "koniq",
+      "modality": "image",
+      "type": "score",
+      "task": "image_score_decision",
+      "line_number": 507874,
+      "byte_offset": 2214264499,
+      "question_id": "decision"
+    },
+    {
+      "id": "valen:vqav2:vqav2:265799001",
+      "source": "valen:vqav2",
+      "modality": "image",
+      "type": "score",
+      "task": "image_score_decision",
+      "line_number": 696639,
+      "byte_offset": 3326413918,
+      "question_id": "decision"
+    },
+    {
+      "id": "aokvqa-native:hjMqaofRj93ndSRibZqeZq",
+      "source": "HuggingFaceM4/A-OKVQA:native-mc",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_knowledge_reasoning_decision",
+      "line_number": 355446,
+      "byte_offset": 1335550675,
+      "question_id": "decision"
+    },
+    {
+      "id": "aokvqa-native:dEVMmigGqhKhyZsBjs2du3",
+      "source": "HuggingFaceM4/A-OKVQA:native-mc",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_knowledge_reasoning_decision",
+      "line_number": 354406,
+      "byte_offset": 1332391227,
+      "question_id": "decision"
+    },
+    {
+      "id": "aokvqa-native:gPGXR2BLzn673i6XYE7ECR",
+      "source": "HuggingFaceM4/A-OKVQA:native-mc",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_knowledge_reasoning_decision",
+      "line_number": 355096,
+      "byte_offset": 1334487097,
+      "question_id": "decision"
+    },
+    {
+      "id": "arxivqa:cs-50712",
+      "source": "MMInstruction/ArxivQA:native-mcq",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_scientific_figure_decision",
+      "line_number": 1040310,
+      "byte_offset": 5271264800,
+      "question_id": "decision"
+    },
+    {
+      "id": "arxivqa:cs-46416",
+      "source": "MMInstruction/ArxivQA:native-mcq",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_scientific_figure_decision",
+      "line_number": 1036430,
+      "byte_offset": 5258838998,
+      "question_id": "decision"
+    },
+    {
+      "id": "arxivqa:stat-1562",
+      "source": "MMInstruction/ArxivQA:native-mcq",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_scientific_figure_decision",
+      "line_number": 1033315,
+      "byte_offset": 5248861727,
+      "question_id": "decision"
+    },
+    {
+      "id": "nemotron-safety-input:ce195af3b005424d8a25efbfc3980f73",
+      "source": "nvidia/Nemotron-3.5-Content-Safety-Dataset",
+      "modality": "image",
+      "type": "noul",
+      "task": "image_input_safety_decision",
+      "line_number": 56983,
+      "byte_offset": 235872208,
+      "question_id": "decision"
+    },
+    {
+      "id": "nemotron-safety-input:ead091094bc243c4b508776fd531bcda",
+      "source": "nvidia/Nemotron-3.5-Content-Safety-Dataset",
+      "modality": "image",
+      "type": "noul",
+      "task": "image_input_safety_decision",
+      "line_number": 67542,
+      "byte_offset": 270100563,
+      "question_id": "decision"
+    },
+    {
+      "id": "nemotron-safety-input:6d77ae40038743f385e34d6c39281b49",
+      "source": "nvidia/Nemotron-3.5-Content-Safety-Dataset",
+      "modality": "image",
+      "type": "noul",
+      "task": "image_input_safety_decision",
+      "line_number": 59536,
+      "byte_offset": 244143562,
+      "question_id": "decision"
+    },
+    {
+      "id": "nemotron-safety-response:ff044628204848b2ba32ca8d56a54f5e",
+      "source": "nvidia/Nemotron-3.5-Content-Safety-Dataset",
+      "modality": "image",
+      "type": "noul",
+      "task": "image_response_safety_decision",
+      "line_number": 62501,
+      "byte_offset": 253742502,
+      "question_id": "decision"
+    },
+    {
+      "id": "nemotron-safety-response:608bc6efea6b4c8990035baf3cf91520",
+      "source": "nvidia/Nemotron-3.5-Content-Safety-Dataset",
+      "modality": "image",
+      "type": "noul",
+      "task": "image_response_safety_decision",
+      "line_number": 59082,
+      "byte_offset": 242675351,
+      "question_id": "decision"
+    },
+    {
+      "id": "nemotron-safety-response:dc3d717887644d30a69079b93f6848ec",
+      "source": "nvidia/Nemotron-3.5-Content-Safety-Dataset",
+      "modality": "image",
+      "type": "noul",
+      "task": "image_response_safety_decision",
+      "line_number": 65326,
+      "byte_offset": 262922680,
+      "question_id": "decision"
+    },
+    {
+      "id": "android-control:13641:0:action",
+      "source": "google-research/android_control:native-action",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_agent_action_selection",
+      "line_number": 141803,
+      "byte_offset": 527012201,
+      "question_id": "decision"
+    },
+    {
+      "id": "android-control:17301:0:action",
+      "source": "google-research/android_control:native-action",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_agent_action_selection",
+      "line_number": 142553,
+      "byte_offset": 530141823,
+      "question_id": "decision"
+    },
+    {
+      "id": "android-control:9885:0:action",
+      "source": "google-research/android_control:native-action",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_agent_action_selection",
+      "line_number": 141103,
+      "byte_offset": 524213060,
+      "question_id": "decision"
+    },
+    {
+      "id": "nemotron-coco-verification:940914ed-4a24-4fad-b50a-9f51f8a5b931",
+      "source": "nvidia/Nemotron-Image-Training-v3.5:coco_count_spatial_qa",
+      "modality": "image",
+      "type": "noul",
+      "task": "image_answer_verification",
+      "line_number": 1000618,
+      "byte_offset": 5114532683,
+      "question_id": "verify"
+    },
+    {
+      "id": "nemotron-coco-verification:d9e802c7-cae2-416e-a190-abfb2a630b10",
+      "source": "nvidia/Nemotron-Image-Training-v3.5:coco_count_spatial_qa",
+      "modality": "image",
+      "type": "noul",
+      "task": "image_answer_verification",
+      "line_number": 85613,
+      "byte_offset": 360303742,
+      "question_id": "verify"
+    },
+    {
+      "id": "nemotron-coco-verification:89e4b176-77d3-418a-8288-9507c9d837c5",
+      "source": "nvidia/Nemotron-Image-Training-v3.5:coco_count_spatial_qa",
+      "modality": "image",
+      "type": "noul",
+      "task": "image_answer_verification",
+      "line_number": 91253,
+      "byte_offset": 377135079,
+      "question_id": "verify"
+    },
+    {
+      "id": "valen:chartqa:chartqa:train-00000-of-00003-49492f364babfa44.parquet:3758",
+      "source": "valen:chartqa",
+      "modality": "image",
+      "type": "noul",
+      "task": "image_chart_decision",
+      "line_number": 990840,
+      "byte_offset": 5060869461,
+      "question_id": "decision"
+    },
+    {
+      "id": "valen:chartqa:chartqa:train-00000-of-00003-49492f364babfa44.parquet:318",
+      "source": "valen:chartqa",
+      "modality": "image",
+      "type": "noul",
+      "task": "image_chart_decision",
+      "line_number": 487352,
+      "byte_offset": 2091928682,
+      "question_id": "decision"
+    },
+    {
+      "id": "valen:chartqa:chartqa:train-00000-of-00003-49492f364babfa44.parquet:202",
+      "source": "valen:chartqa",
+      "modality": "image",
+      "type": "noul",
+      "task": "image_chart_decision",
+      "line_number": 500697,
+      "byte_offset": 2171704951,
+      "question_id": "decision"
+    },
+    {
+      "id": "valen:vqav2:vqav2:265938006",
+      "source": "valen:vqav2",
+      "modality": "image",
+      "type": "noul",
+      "task": "image_planning_decision",
+      "line_number": 794724,
+      "byte_offset": 3904619644,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:vision/gameqa/mcq:train:c4d57c76b1bb3a68c3f59d67:8948257caedda347:34040:2",
+      "source": "tasksource:vision/gameqa/mcq",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_planning_decision",
+      "line_number": 638829,
+      "byte_offset": 2986330540,
+      "question_id": "decision"
+    },
+    {
+      "id": "valen:gameqa:gameqa:sokoban-data-00093-00003:3",
+      "source": "valen:gameqa",
+      "modality": "image",
+      "type": "score",
+      "task": "image_planning_decision",
+      "line_number": 559860,
+      "byte_offset": 2521836340,
+      "question_id": "decision"
+    },
+    {
+      "id": "nayana:zh:document_10026_page_41:4",
+      "source": "Cognitive-Lab/NayanaOCR_Corpus_2025:extractive-mcq",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_document_decision",
+      "line_number": 1032798,
+      "byte_offset": 5247212532,
+      "question_id": "decision"
+    },
+    {
+      "id": "valen:docvqa:docvqa:21562",
+      "source": "valen:docvqa",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_document_decision",
+      "line_number": 845076,
+      "byte_offset": 4200835356,
+      "question_id": "decision"
+    },
+    {
+      "id": "nayana:zh:document_10043_page_10:4",
+      "source": "Cognitive-Lab/NayanaOCR_Corpus_2025:extractive-mcq",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_document_decision",
+      "line_number": 1032808,
+      "byte_offset": 5247245885,
+      "question_id": "decision"
+    },
+    {
+      "id": "nemotron-coco:102c2ad4-88d6-48d6-8925-a85765cdeb5c",
+      "source": "nvidia/Nemotron-Image-Training-v3.5:coco_count_spatial_qa",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_spatial_decision",
+      "line_number": 82239,
+      "byte_offset": 350229992,
+      "question_id": "decision"
+    },
+    {
+      "id": "nemotron-coco:9d0691fc-b93b-4a13-bf61-01556e3a3e25",
+      "source": "nvidia/Nemotron-Image-Training-v3.5:coco_count_spatial_qa",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_spatial_decision",
+      "line_number": 93913,
+      "byte_offset": 385077966,
+      "question_id": "decision"
+    },
+    {
+      "id": "nemotron-coco:f1b628c1-c7f3-42c7-95a6-ed0696187b02",
+      "source": "nvidia/Nemotron-Image-Training-v3.5:coco_count_spatial_qa",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_spatial_decision",
+      "line_number": 97030,
+      "byte_offset": 394382791,
+      "question_id": "decision"
+    },
+    {
+      "id": "26d57aba0bf124f047b8a1b0d919543fe37232710c9d09945e5cde504669eaae:point-correction",
+      "source": "coco2017:native-point-feedback",
+      "modality": "image",
+      "type": "noul",
+      "task": "recovery_decision",
+      "line_number": 1105422,
+      "byte_offset": 5858233213,
+      "question_id": "decision"
+    },
+    {
+      "id": "3025637ae963347d8e95d39b80464de542df710a9b60fa69424ed4cda4356fc8:point-correction",
+      "source": "jxu124/refcocoplus:native-point-feedback",
+      "modality": "image",
+      "type": "noul",
+      "task": "recovery_decision",
+      "line_number": 1317896,
+      "byte_offset": 6574826643,
+      "question_id": "decision"
+    },
+    {
+      "id": "3b1d34477699fb348c7f7db9f7a4f221488b5c6b4d27085ba0b4418301ce11e7:point-correction",
+      "source": "jxu124/refcoco:native-point-feedback",
+      "modality": "image",
+      "type": "noul",
+      "task": "recovery_decision",
+      "line_number": 1317536,
+      "byte_offset": 6573854508,
+      "question_id": "decision"
+    },
+    {
+      "id": "valen:vqav2:vqav2:502543001",
+      "source": "valen:vqav2",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_affect_decision",
+      "line_number": 963563,
+      "byte_offset": 4898377269,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:vision/met-meme/sentiment:train:f7ac9f5527d60f400d00eb85:deb31058d7640c2a:48bb203892adc3f77479b450",
+      "source": "tasksource:vision/met-meme/sentiment",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_affect_decision",
+      "line_number": 699971,
+      "byte_offset": 3346851548,
+      "question_id": "decision"
+    },
+    {
+      "id": "raf-expression:train_00049_aligned.jpg",
+      "source": "deanngkl/raf-db-7emotions:native-expression",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_affect_decision",
+      "line_number": 1106908,
+      "byte_offset": 5865324327,
+      "question_id": "decision"
+    },
+    {
+      "id": "gameqa-primary:pyramidchess-mcq-00425-StateInfo:0",
+      "source": "OpenMOSS-Team/GameQA-140K:native-long-tail-mcq",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_legal_policy_decision",
+      "line_number": 1106053,
+      "byte_offset": 5860393965,
+      "question_id": "decision"
+    },
+    {
+      "id": "valen:gameqa:gameqa:pyramidchess-mcq-00352-StateInfo:0",
+      "source": "valen:gameqa",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_legal_policy_decision",
+      "line_number": 407091,
+      "byte_offset": 1623965563,
+      "question_id": "decision"
+    },
+    {
+      "id": "tasksource:vision/gameqa/mcq:train:dab5b985f166f9a8ed2b8213:00b2f76fe232afb9:80910:0",
+      "source": "tasksource:vision/gameqa/mcq",
+      "modality": "image",
+      "type": "choice",
+      "task": "image_legal_policy_decision",
+      "line_number": 426756,
+      "byte_offset": 1736422373,
+      "question_id": "decision"
+    },
+    {
+      "id": "android-control:16574:1:scroll-direction",
+      "source": "google-research/android_control:native-action",
+      "modality": "image",
+      "type": "choice",
+      "task": "tool_argument_selection",
+      "line_number": 138579,
+      "byte_offset": 514281056,
+      "question_id": "decision"
+    },
+    {
+      "id": "android-control:18807:1:scroll-direction",
+      "source": "google-research/android_control:native-action",
+      "modality": "image",
+      "type": "choice",
+      "task": "tool_argument_selection",
+      "line_number": 1324096,
+      "byte_offset": 6593034029,
+      "question_id": "decision"
+    },
+    {
+      "id": "android-control:2345:2:scroll-direction",
+      "source": "google-research/android_control:native-action",
+      "modality": "image",
+      "type": "choice",
+      "task": "tool_argument_selection",
+      "line_number": 1110207,
+      "byte_offset": 5875546717,
+      "question_id": "decision"
+    },
+    {
+      "id": "clevrer:video_09884:descriptive:0",
+      "source": "CLEVRER",
+      "modality": "video",
+      "type": "choice",
+      "task": "video_choice_decision",
+      "line_number": 11023,
+      "byte_offset": 27755025,
+      "question_id": "decision"
+    },
+    {
+      "id": "nextqa:3824469712:7",
+      "source": "nextqa",
+      "modality": "video",
+      "type": "choice",
+      "task": "video_choice_decision",
+      "line_number": 646415,
+      "byte_offset": 3030777037,
+      "question_id": "decision"
+    },
+    {
+      "id": "ucf101-full:v_Mixing_g19_c04.avi",
+      "source": "ucf101-full",
+      "modality": "video",
+      "type": "choice",
+      "task": "video_choice_decision",
+      "line_number": 41229,
+      "byte_offset": 110117365,
+      "question_id": "decision"
+    },
+    {
+      "id": "v5-ssv2:166017:verify:0edbab6b16d59191",
+      "source": "ssv2:native-action-verification",
+      "modality": "video",
+      "type": "noul",
+      "task": "video_noul_decision",
+      "line_number": 1464800,
+      "byte_offset": 6928377027,
+      "question_id": "decision"
+    },
+    {
+      "id": "clevrer:video_07868:descriptive:10",
+      "source": "CLEVRER",
+      "modality": "video",
+      "type": "noul",
+      "task": "video_noul_decision",
+      "line_number": 748653,
+      "byte_offset": 3635061957,
+      "question_id": "decision"
+    },
+    {
+      "id": "ucf101-full:v_PushUps_g08_c02.avi",
+      "source": "ucf101-full",
+      "modality": "video",
+      "type": "noul",
+      "task": "video_noul_decision",
+      "line_number": 410550,
+      "byte_offset": 1642847037,
+      "question_id": "decision"
+    },
+    {
+      "id": "videofeedback:0000409:visual quality",
+      "source": "TIGER-Lab/VideoFeedback:annotated",
+      "modality": "video",
+      "type": "score",
+      "task": "video_visual_quality_decision",
+      "line_number": 183017,
+      "byte_offset": 775040242,
+      "question_id": "decision"
+    },
+    {
+      "id": "divide-maxwell:1042.mp4",
+      "source": "teowu/DIVIDE-MaxWell:official-train-MOS",
+      "modality": "video",
+      "type": "score",
+      "task": "video_visual_quality_decision",
+      "line_number": 179154,
+      "byte_offset": 762864956,
+      "question_id": "decision"
+    },
+    {
+      "id": "lsvq:ia-batch9/North_Hudson_Village_Board_October_5_2010.mp4",
+      "source": "LIVE-LSVQ:train-MOS",
+      "modality": "video",
+      "type": "score",
+      "task": "video_visual_quality_decision",
+      "line_number": 251864,
+      "byte_offset": 991801304,
+      "question_id": "decision"
+    },
+    {
+      "id": "videofeedback:1002292:temporal consistency",
+      "source": "TIGER-Lab/VideoFeedback:annotated",
+      "modality": "video",
+      "type": "score",
+      "task": "video_temporal_consistency_decision",
+      "line_number": 224343,
+      "byte_offset": 905166181,
+      "question_id": "decision"
+    },
+    {
+      "id": "videofeedback:1004947:temporal consistency",
+      "source": "TIGER-Lab/VideoFeedback:annotated",
+      "modality": "video",
+      "type": "score",
+      "task": "video_temporal_consistency_decision",
+      "line_number": 253005,
+      "byte_offset": 995379468,
+      "question_id": "decision"
+    },
+    {
+      "id": "videofeedback:6001846:temporal consistency",
+      "source": "TIGER-Lab/VideoFeedback:annotated",
+      "modality": "video",
+      "type": "score",
+      "task": "video_temporal_consistency_decision",
+      "line_number": 176464,
+      "byte_offset": 754411005,
+      "question_id": "decision"
+    },
+    {
+      "id": "videofeedback:1001981:factual consistency",
+      "source": "TIGER-Lab/VideoFeedback:annotated",
+      "modality": "video",
+      "type": "score",
+      "task": "video_factual_consistency_decision",
+      "line_number": 242486,
+      "byte_offset": 962306747,
+      "question_id": "decision"
+    },
+    {
+      "id": "videofeedback:3005126:factual consistency",
+      "source": "TIGER-Lab/VideoFeedback:annotated",
+      "modality": "video",
+      "type": "score",
+      "task": "video_factual_consistency_decision",
+      "line_number": 277718,
+      "byte_offset": 1073159774,
+      "question_id": "decision"
+    },
+    {
+      "id": "videofeedback:7002253:factual consistency",
+      "source": "TIGER-Lab/VideoFeedback:annotated",
+      "modality": "video",
+      "type": "score",
+      "task": "video_factual_consistency_decision",
+      "line_number": 257930,
+      "byte_offset": 1010820444,
+      "question_id": "decision"
+    },
+    {
+      "id": "videofeedback:7001687:text-to-video alignment",
+      "source": "TIGER-Lab/VideoFeedback:annotated",
+      "modality": "video",
+      "type": "score",
+      "task": "video_text_alignment_decision",
+      "line_number": 178099,
+      "byte_offset": 759545656,
+      "question_id": "decision"
+    },
+    {
+      "id": "videofeedback:4001248:text-to-video alignment",
+      "source": "TIGER-Lab/VideoFeedback:annotated",
+      "modality": "video",
+      "type": "score",
+      "task": "video_text_alignment_decision",
+      "line_number": 196364,
+      "byte_offset": 817006053,
+      "question_id": "decision"
+    },
+    {
+      "id": "videofeedback:6003419:text-to-video alignment",
+      "source": "TIGER-Lab/VideoFeedback:annotated",
+      "modality": "video",
+      "type": "score",
+      "task": "video_text_alignment_decision",
+      "line_number": 267050,
+      "byte_offset": 1039545987,
+      "question_id": "decision"
+    },
+    {
+      "id": "videofeedback:0003567:dynamic degree",
+      "source": "TIGER-Lab/VideoFeedback:annotated",
+      "modality": "video",
+      "type": "score",
+      "task": "video_dynamic_degree_decision",
+      "line_number": 259275,
+      "byte_offset": 1015059682,
+      "question_id": "decision"
+    },
+    {
+      "id": "videofeedback:1006317:dynamic degree",
+      "source": "TIGER-Lab/VideoFeedback:annotated",
+      "modality": "video",
+      "type": "score",
+      "task": "video_dynamic_degree_decision",
+      "line_number": 1336818,
+      "byte_offset": 6656986781,
+      "question_id": "decision"
+    },
+    {
+      "id": "videofeedback:2003514:dynamic degree",
+      "source": "TIGER-Lab/VideoFeedback:annotated",
+      "modality": "video",
+      "type": "score",
+      "task": "video_dynamic_degree_decision",
+      "line_number": 262148,
+      "byte_offset": 1024082758,
+      "question_id": "decision"
+    },
+    {
+      "id": "v5-nextqa:8223287911:8:verify:bf2123be129dabaf",
+      "source": "nextqa:native-answer-verification",
+      "modality": "video",
+      "type": "noul",
+      "task": "video_causal_decision",
+      "line_number": 1473948,
+      "byte_offset": 6942077221,
+      "question_id": "decision"
+    },
+    {
+      "id": "clevrer:video_09430:explanatory:11:0",
+      "source": "CLEVRER",
+      "modality": "video",
+      "type": "noul",
+      "task": "video_causal_decision",
+      "line_number": 4943,
+      "byte_offset": 12438243,
+      "question_id": "decision"
+    },
+    {
+      "id": "v5-nextqa:3497637415:7:verify:912181db93460a47",
+      "source": "nextqa:native-answer-verification",
+      "modality": "video",
+      "type": "noul",
+      "task": "video_causal_decision",
+      "line_number": 1472866,
+      "byte_offset": 6940391274,
+      "question_id": "decision"
+    },
+    {
+      "id": "clevrer:video_09707:counterfactual:14:0",
+      "source": "CLEVRER",
+      "modality": "video",
+      "type": "noul",
+      "task": "video_counterfactual_decision",
+      "line_number": 8088,
+      "byte_offset": 20363831,
+      "question_id": "decision"
+    },
+    {
+      "id": "clevrer:video_01356:counterfactual:14:0",
+      "source": "CLEVRER",
+      "modality": "video",
+      "type": "noul",
+      "task": "video_counterfactual_decision",
+      "line_number": 324,
+      "byte_offset": 812468,
+      "question_id": "decision"
+    },
+    {
+      "id": "clevrer:video_08344:counterfactual:14:1",
+      "source": "CLEVRER",
+      "modality": "video",
+      "type": "noul",
+      "task": "video_counterfactual_decision",
+      "line_number": 728643,
+      "byte_offset": 3517277775,
+      "question_id": "decision"
+    },
+    {
+      "id": "clevrer:video_05470:descriptive:3",
+      "source": "CLEVRER",
+      "modality": "video",
+      "type": "score",
+      "task": "video_count_decision",
+      "line_number": 997901,
+      "byte_offset": 5092420900,
+      "question_id": "decision"
+    },
+    {
+      "id": "nextqa:3536560404:8",
+      "source": "nextqa",
+      "modality": "video",
+      "type": "choice",
+      "task": "video_count_decision",
+      "line_number": 608171,
+      "byte_offset": 2808808928,
+      "question_id": "decision"
+    },
+    {
+      "id": "clevrer:video_00470:descriptive:8",
+      "source": "CLEVRER",
+      "modality": "video",
+      "type": "score",
+      "task": "video_count_decision",
+      "line_number": 996351,
+      "byte_offset": 5088808612,
+      "question_id": "decision"
+    },
+    {
+      "id": "ferv-expression:Conflict_Sad_0040",
+      "source": "NoahMartinezXiang/2022_FERV39k:native-expression-16f",
+      "modality": "video",
+      "type": "choice",
+      "task": "video_affect_decision",
+      "line_number": 1323376,
+      "byte_offset": 6591396045,
+      "question_id": "decision"
+    },
+    {
+      "id": "ferv-expression:Crime_Fear_0121",
+      "source": "NoahMartinezXiang/2022_FERV39k:native-expression-16f",
+      "modality": "video",
+      "type": "choice",
+      "task": "video_affect_decision",
+      "line_number": 1322769,
+      "byte_offset": 6590102702,
+      "question_id": "decision"
+    },
+    {
+      "id": "ferv-expression:Contest_Fear_0079",
+      "source": "NoahMartinezXiang/2022_FERV39k:native-expression-16f",
+      "modality": "video",
+      "type": "choice",
+      "task": "video_affect_decision",
+      "line_number": 1323756,
+      "byte_offset": 6592206809,
+      "question_id": "decision"
+    },
+    {
+      "id": "konvid-mos:7700672030",
+      "source": "MMSP/KoNViD-1k:native-mos",
+      "modality": "video",
+      "type": "score",
+      "task": "video_score_decision",
+      "line_number": 1108835,
+      "byte_offset": 5870779972,
+      "question_id": "decision"
+    },
+    {
+      "id": "konvid-mos:6929069239",
+      "source": "MMSP/KoNViD-1k:native-mos",
+      "modality": "video",
+      "type": "score",
+      "task": "video_score_decision",
+      "line_number": 1108602,
+      "byte_offset": 5870077285,
+      "question_id": "decision"
+    },
+    {
+      "id": "konvid-mos:4842303128",
+      "source": "MMSP/KoNViD-1k:native-mos",
+      "modality": "video",
+      "type": "score",
+      "task": "video_score_decision",
+      "line_number": 1108861,
+      "byte_offset": 5870858364,
+      "question_id": "decision"
+    }
+  ],
+  "gemma_audio": [
+    {
+      "id": "audio-jev:rlcd-ami-ES2013b-0132ddccdc9d1770deea-next_speaker",
+      "source": "audio-jev:next_speaker",
+      "modality": "audio",
+      "type": "choice",
+      "parquet": "data/train/train-00036.parquet",
+      "row_group": 2,
+      "row_in_group": 1666,
+      "question_id": "decision"
+    },
+    {
+      "id": "audiomcq-v5:7abdbf61f5d1f1bfaef98a4c5b8c987ede18284744d8b092afa336c07183d341",
+      "source": "inclusionAI/AudioMCQ",
+      "modality": "audio",
+      "type": "choice",
+      "parquet": "data/train/train-00053.parquet",
+      "row_group": 9,
+      "row_in_group": 1249,
+      "question_id": "decision"
+    },
+    {
+      "id": "speech-commands:0d6d7360:off:0d6d7360_nohash_4.wav",
+      "source": "speech-commands",
+      "modality": "audio",
+      "type": "choice",
+      "parquet": "data/train/train-00021.parquet",
+      "row_group": 5,
+      "row_in_group": 1242,
+      "question_id": "decision"
+    },
+    {
+      "id": "audio-jev:rlcd-ami-ES2015b-f39a6b8f7c50a0593837-speech_activity",
+      "source": "audio-jev:speech_activity",
+      "modality": "audio",
+      "type": "noul",
+      "parquet": "data/train/train-00009.parquet",
+      "row_group": 2,
+      "row_in_group": 963,
+      "question_id": "decision"
+    },
+    {
+      "id": "fsd50k:395407:dominant:/m/01j3sz",
+      "source": "fsd50k",
+      "modality": "audio",
+      "type": "noul",
+      "parquet": "data/train/train-00012.parquet",
+      "row_group": 7,
+      "row_in_group": 808,
+      "question_id": "decision"
+    },
+    {
+      "id": "speech-commands:98170b49:dog:98170b49_nohash_0.wav",
+      "source": "speech-commands",
+      "modality": "audio",
+      "type": "noul",
+      "parquet": "data/train/train-00031.parquet",
+      "row_group": 1,
+      "row_in_group": 1211,
+      "question_id": "decision"
+    },
+    {
+      "id": "audio-jev:rlcd-ami-ES2008b-9c095476614c0c1f288b-speaker_count",
+      "source": "audio-jev:speaker_count",
+      "modality": "audio",
+      "type": "score",
+      "parquet": "data/train/train-00049.parquet",
+      "row_group": 7,
+      "row_in_group": 733,
+      "question_id": "decision"
+    },
+    {
+      "id": "meld:dia10_utt1:sentiment",
+      "source": "declare-lab/MELD",
+      "modality": "audio",
+      "type": "score",
+      "parquet": "data/train/train-00025.parquet",
+      "row_group": 6,
+      "row_in_group": 1893,
+      "question_id": "decision"
+    },
+    {
+      "id": "fsd50k:406720:prominence:/m/07q7njn",
+      "source": "fsd50k",
+      "modality": "audio",
+      "type": "score",
+      "parquet": "data/train/train-00014.parquet",
+      "row_group": 1,
+      "row_in_group": 882,
+      "question_id": "decision"
+    }
+  ]
+}

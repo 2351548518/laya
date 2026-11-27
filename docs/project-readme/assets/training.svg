@@ -1,0 +1,239 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="2216" viewBox="0 0 1320 2216"
+     role="img" aria-labelledby="title description" xml:lang="zh-CN">
+  <title id="title">Qwen3.5-4B v6 两阶段监督训练</title>
+  <desc id="description">从原始 Qwen3.5-4B 初始化，先更新候选评分和单框定位头，再用最佳预热检查点开始联合 LoRA 微调。图中展开 LoRA 的矩阵形状、四卡各自的微批和两类监督损失、按全局样本数加权的梯度求和，以及开发集选模和续训快照。</desc>
+  <defs>
+    <style>
+      text {
+        fill: #252e3b;
+        font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      }
+      .center { text-anchor: middle; }
+      .end { text-anchor: end; }
+      .title { font-size: 39px; font-weight: 700; }
+      .heading { font-size: 25px; font-weight: 700; }
+      .label { font-size: 22px; font-weight: 600; }
+      .small { font-size: 19px; fill: #3f4b59; }
+      .code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
+      .shape { font-size: 21px; font-weight: 600; }
+      .panel { stroke: #35404e; stroke-width: 2.4; }
+      .module { stroke: #465261; stroke-width: 1.9; }
+      .note { stroke: #7f8e9b; stroke-width: 1.5; }
+      .flow, .arrow { fill: none; stroke: #35404e; stroke-width: 2.3; }
+      .arrow { marker-end: url(#arrow); }
+      .zoom { stroke: #778b99; stroke-width: 2.15; stroke-dasharray: 8 6; }
+    </style>
+    <marker id="arrow" markerWidth="11" markerHeight="11" refX="10.6" refY="5.5"
+            orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0 11 5.5 0 11Z" fill="#35404e"/>
+    </marker>
+  </defs>
+
+  <rect width="1320" height="2216" fill="#fdfdfa"/>
+  <text x="660" y="56" class="title center">Qwen3.5-4B v6 两阶段监督训练</text>
+  <text x="660" y="88" class="small center">B 为微批样本数 · L 为左填充后的序列长度 · K 为补齐后的候选数 · N 为全局窗口的实际样本数</text>
+
+  <g id="initialization">
+    <rect x="36" y="112" width="1248" height="76" rx="9" class="panel" fill="#f3e4cc"/>
+    <text x="660" y="144" class="heading center">从原始 Qwen3.5-4B 初始化</text>
+    <text x="660" y="171" class="small center">设定 seed 105 · 新建候选评分头和 single-v1 单框定位头</text>
+    <path d="M420 188V215" class="arrow"/>
+  </g>
+
+  <!-- Phase transition from the best warmup head weights. -->
+  <g id="stages">
+    <rect x="36" y="215" width="766" height="171" rx="13" class="panel" fill="#e8efe4"/>
+    <text x="58" y="249" class="heading">阶段一 · 头部预热</text>
+    <text x="58" y="278" class="small"><tspan class="code">warmup.jsonl</tspan> · 30,720 条 · 1 epoch · 480 次更新</text>
+    <rect x="58" y="294" width="348" height="44" rx="6" class="module" fill="#deebde"/>
+    <rect x="430" y="294" width="350" height="44" rx="6" class="module" fill="#f4f4f2"/>
+    <text x="232" y="323" class="label center">更新候选评分头和单框头</text>
+    <text x="605" y="323" class="label center">冻结基座及视觉 Merger</text>
+    <text x="58" y="366" class="small">头部峰值学习率 <tspan class="code">3e-4</tspan> · 每卡微批最多 4 条 · 每 160 步评测</text>
+    <path d="M420 386V413" class="arrow"/>
+
+    <rect x="36" y="413" width="766" height="70" rx="9" class="panel" fill="#fff"/>
+    <text x="420" y="442" class="label center">载入 <tspan class="code">head/best</tspan> · 新建 LoRA 与 AdamW</text>
+    <text x="420" y="467" class="small center">预热选模 · 决策模态宏平均准确率与单框 Acc@IoU≥0.5 等权平均</text>
+    <path d="M420 483V510" class="arrow"/>
+
+    <rect x="36" y="510" width="766" height="167" rx="13" class="panel" fill="#e1eaf5"/>
+    <text x="58" y="544" class="heading">阶段二 · 联合 LoRA SFT</text>
+    <text x="58" y="573" class="small"><tspan class="code">train.jsonl</tspan> · 1,500,000 条 · 1 epoch · 23,438 次更新</text>
+    <rect x="58" y="589" width="348" height="44" rx="6" class="module" fill="#d9e8f6"/>
+    <rect x="430" y="589" width="350" height="44" rx="6" class="module" fill="#f4f4f2"/>
+    <text x="232" y="618" class="label center">更新 LoRA、Merger 与读出头</text>
+    <text x="605" y="618" class="label center">冻结原语言权重和视觉编码器</text>
+    <text x="58" y="657" class="small">峰值学习率　LoRA <tspan class="code">5e-5</tspan> · 头部 <tspan class="code">2e-4</tspan> · Merger <tspan class="code">2e-5</tspan></text>
+    <path d="M420 677V716" class="arrow"/>
+  </g>
+
+  <!-- Enlarged view of one adapted language projection. -->
+  <g id="lora-shapes">
+    <path d="M802 602H842" class="zoom" fill="none"/>
+    <rect x="842" y="215" width="442" height="462" rx="13" class="zoom" fill="#f6f9fa"/>
+    <text x="864" y="250" class="heading">联合 SFT 的 LoRA</text>
+    <text x="864" y="278" class="small">以门控全注意力的 <tspan class="code">o_proj</tspan> 为例</text>
+    <text x="864" y="305" class="small code">rank = 32 · alpha = 64 · scale = 2</text>
+
+    <rect x="864" y="325" width="398" height="45" rx="6" class="module" fill="#fff"/>
+    <text x="1063" y="355" class="label center">输入 x <tspan class="shape code">[B, L, 4096]</tspan></text>
+    <path d="M1063 370V384 M959 384H1167" class="flow"/>
+    <circle cx="1063" cy="384" r="3.4" fill="#35404e"/>
+    <path d="M959 384V401" class="arrow"/>
+    <path d="M1167 384V401" class="arrow"/>
+
+    <rect x="864" y="401" width="190" height="89" rx="6" class="module" fill="#f3efeb"/>
+    <text x="959" y="430" class="label center">冻结 W₀</text>
+    <text x="959" y="454" class="small center">权重 <tspan class="code">[2560, 4096]</tspan></text>
+    <text x="959" y="478" class="small center">输出 <tspan class="code">[B, L, 2560]</tspan></text>
+    <rect x="1072" y="401" width="190" height="89" rx="6" class="module" fill="#dae8f6"/>
+    <text x="1167" y="430" class="label center">训练 Aₗ</text>
+    <text x="1167" y="454" class="small center">权重 <tspan class="code">[32, 4096]</tspan></text>
+    <text x="1167" y="478" class="small center">输出 <tspan class="code">[B, L, 32]</tspan></text>
+
+    <path d="M1167 490V509" class="arrow"/>
+    <rect x="1072" y="509" width="190" height="54" rx="6" class="module" fill="#dae8f6"/>
+    <text x="1167" y="533" class="label center">训练 Bₗ</text>
+    <text x="1167" y="554" class="small center">权重 <tspan class="code">[2560, 32]</tspan></text>
+
+    <path d="M959 490V583" class="arrow"/>
+    <path d="M1167 563V583" class="arrow"/>
+    <rect x="864" y="583" width="398" height="72" rx="7" class="module" fill="#f5e9ce"/>
+    <text x="1063" y="612" class="label center">输出 x(W₀ + 2 BₗAₗ)ᵀ</text>
+    <text x="1063" y="641" class="shape code center">[B, L, 2560]</text>
+  </g>
+
+  <!-- Both phases use the same optimizer-window structure. -->
+  <g id="optimizer-window">
+    <rect x="36" y="716" width="1248" height="1228" rx="14" class="zoom" fill="#f8fafb"/>
+    <text x="60" y="751" class="heading">两阶段共用的一次参数更新</text>
+    <text x="1260" y="751" class="small end">每个窗口开始时清空梯度</text>
+
+    <rect x="60" y="774" width="1200" height="78" rx="8" class="panel" fill="#f3e4cc"/>
+    <text x="660" y="807" class="heading center">打乱行序后取全局窗口 <tspan class="shape code">N ≤ 64</tspan></text>
+    <text x="660" y="835" class="small center">按模态、任务和准入 token 估算四卡工作量 · SFT 最后一个窗口有 32 条</text>
+    <path d="M660 852V871 M202 871H1118" class="flow"/>
+    <circle cx="660" cy="871" r="3.4" fill="#35404e"/>
+    <path d="M202 871V889" class="arrow"/>
+    <path d="M507 871V889" class="arrow"/>
+    <path d="M813 871V889" class="arrow"/>
+    <path d="M1118 871V889" class="arrow"/>
+
+    <g class="module" fill="#eee9f4">
+      <rect x="62" y="889" width="280" height="57" rx="6"/>
+      <rect x="367" y="889" width="280" height="57" rx="6"/>
+      <rect x="673" y="889" width="280" height="57" rx="6"/>
+      <rect x="978" y="889" width="280" height="57" rx="6"/>
+    </g>
+    <g class="label center">
+      <text x="202" y="914">rank 0 · GPU 2</text>
+      <text x="507" y="914">rank 1 · GPU 3</text>
+      <text x="813" y="914">rank 2 · GPU 4</text>
+      <text x="1118" y="914">rank 3 · GPU 5</text>
+    </g>
+    <g class="small center">
+      <text x="202" y="936">本卡分到 N₀ 条</text>
+      <text x="507" y="936">本卡分到 N₁ 条</text>
+      <text x="813" y="936">本卡分到 N₂ 条</text>
+      <text x="1118" y="936">本卡分到 N₃ 条</text>
+    </g>
+    <path d="M202 946V974 M507 946V974 M813 946V974 M1118 946V974" class="zoom" fill="none"/>
+
+    <!-- Each rank groups and trains its own micro-batches before the collective. -->
+    <g id="per-rank">
+      <rect x="62" y="974" width="1196" height="736" rx="12" class="zoom" fill="#fff"/>
+      <text x="84" y="1002" class="heading">各 rank 独立执行</text>
+      <text x="1236" y="1002" class="small end">N₀ + N₁ + N₂ + N₃ = N</text>
+
+      <rect x="84" y="1016" width="1152" height="90" rx="7" class="module" fill="#e9edf5"/>
+      <text x="660" y="1045" class="label center">按读出头与媒体字段组批 · 左填充到微批最长序列</text>
+      <text x="660" y="1072" class="small center">B 最多 4（预热）或 2（SFT） · <tspan class="shape code">B × L ≤ 16,384</tspan></text>
+      <text x="660" y="1095" class="small center">例如两条长度 8,178 与 8,150 的样本 → <tspan class="code">[2, 8178]</tspan> · 共 16,356 token</text>
+      <path d="M660 1106V1131" class="arrow"/>
+
+      <rect x="84" y="1131" width="1152" height="99" rx="7" class="module" fill="#f3e4cc"/>
+      <text x="660" y="1163" class="label center">Qwen 前向 · <tspan class="code">input_ids</tspan> 与掩码 <tspan class="shape code">[B, L]</tspan></text>
+      <text x="660" y="1190" class="small center">读出头共享形状 <tspan class="shape code">H [B, L, 2560]</tspan> · 各微批走对应任务分支</text>
+      <text x="660" y="1215" class="small center">SFT 启用激活检查点 · <tspan class="code">B × L ≥ 3072</tspan> 时将反向所需的保存张量卸载到 CPU</text>
+      <path d="M660 1230V1246 M359 1246H961" class="flow"/>
+      <circle cx="660" cy="1246" r="3.4" fill="#35404e"/>
+      <path d="M359 1246V1265" class="arrow"/>
+      <path d="M961 1246V1265" class="arrow"/>
+
+      <!-- Decision supervision -->
+      <g id="decision-loss">
+        <rect x="84" y="1265" width="550" height="312" rx="10" class="panel" fill="#e9eff5"/>
+        <text x="105" y="1299" class="heading">候选决策监督</text>
+        <text x="105" y="1328" class="shape code">[B, L, 2560] → [B, K] logits</text>
+        <text x="105" y="1354" class="small">还原候选顺序，目标分布与掩码均为 <tspan class="code">[B, K]</tspan></text>
+        <text x="105" y="1380" class="small">屏蔽填充候选后在 K 轴做 softmax</text>
+        <text x="105" y="1406" class="label">预热 · soft CE + 0.1 RPS + 0.5 Brier</text>
+        <text x="105" y="1432" class="small">SFT 只用 soft CE · RPS 项仅用于 score</text>
+
+        <rect x="105" y="1450" width="508" height="66" rx="6" class="note" fill="#fff"/>
+        <text x="121" y="1476" class="small code">p = [0.1, 0.7, 0.2]   y = [0, 1, 0]</text>
+        <text x="121" y="1502" class="small">该选择样本的预热损失 0.4267 · SFT 损失 0.3567</text>
+        <text x="105" y="1550" class="label">逐样本 <tspan class="shape code">[B]</tspan> → 微批平均损失</text>
+      </g>
+
+      <!-- Single image box supervision -->
+      <g id="box-loss">
+        <rect x="686" y="1265" width="550" height="312" rx="10" class="panel" fill="#f0eaf4"/>
+        <text x="707" y="1299" class="heading">图像单框监督</text>
+        <text x="707" y="1328" class="shape code">[B, L, 2560] → [B, 1, 4] + [B, 1]</text>
+        <text x="707" y="1354" class="small">归一化 xyxy 坐标与质量 logit</text>
+        <text x="707" y="1380" class="small">两阶段共用单框损失 · 有效空框只计算质量项</text>
+        <text x="707" y="1406" class="label">5 × L1 + 2 × (1 − GIoU) + 0.5 × BCE</text>
+        <text x="707" y="1432" class="small">质量目标为 detach(IoU) · 有效空目标的质量目标为 0</text>
+
+        <rect x="707" y="1450" width="508" height="66" rx="6" class="note" fill="#fff"/>
+        <text x="723" y="1476" class="small">当 <tspan class="code">L1 = 0.2</tspan>、<tspan class="code">GIoU = 2/3</tspan>、质量 logit 为 0</text>
+        <text x="723" y="1502" class="small code">1 + 2/3 + 0.5 ln 2 ≈ 2.0132</text>
+        <text x="707" y="1550" class="label">逐样本 <tspan class="shape code">[B]</tspan> → 微批平均损失</text>
+      </g>
+
+      <path d="M359 1577V1595H961V1577" class="flow"/>
+      <path d="M660 1595V1614" class="arrow"/>
+      <circle cx="660" cy="1595" r="3.4" fill="#35404e"/>
+      <rect x="84" y="1614" width="1152" height="71" rx="7" class="module" fill="#deeee5"/>
+      <text x="660" y="1643" class="label center">各微批损失乘 B/N 后反向，累积本卡梯度</text>
+      <text x="660" y="1672" class="small center"><tspan class="shape code">g_rank = Σ (B/N) × ∇L_micro</tspan> · 2 条微批在 64 条窗口中的权重为 2/64</text>
+    </g>
+
+    <path d="M660 1685V1738" class="arrow"/>
+    <rect x="62" y="1738" width="1196" height="68" rx="8" class="panel" fill="#deeee5"/>
+    <text x="660" y="1767" class="label center">四卡梯度求和 · FP32 梯度桶</text>
+    <text x="660" y="1794" class="shape code center">all_reduce(SUM) → g = g₀ + g₁ + g₂ + g₃</text>
+    <path d="M660 1806V1834" class="arrow"/>
+
+    <rect x="62" y="1834" width="1196" height="91" rx="8" class="panel" fill="#f5e9ce"/>
+    <text x="660" y="1864" class="heading center">全局梯度范数按上限 1.0 裁剪 → fused AdamW 更新一次</text>
+    <text x="660" y="1891" class="small center">每组 LR = 该组峰值 × 调度因子 · 前 5% 步线性升至峰值，再余弦降到 10%</text>
+    <text x="660" y="1915" class="small center">学习率预热步数 · 阶段一 24 步 · 阶段二 1,171 步</text>
+  </g>
+
+  <!-- The same SFT updates feed model selection and independent resume snapshots. -->
+  <g id="evaluation-and-resume">
+    <path d="M660 1925V1963 M340 1963H980" class="flow"/>
+    <circle cx="660" cy="1963" r="3.4" fill="#35404e"/>
+    <path d="M340 1963V1982" class="arrow"/>
+    <path d="M980 1963V1982" class="arrow"/>
+
+    <rect x="36" y="1982" width="608" height="202" rx="10" class="panel" fill="#e1eaf5"/>
+    <text x="58" y="2016" class="heading">SFT 开发集选模 · <tspan class="code">sft/best</tspan></text>
+    <text x="58" y="2045" class="small">首步前、每 500 步及结束时评测</text>
+    <text x="58" y="2073" class="small">1,624 条决策 · 512 条定位记录（449 条正框）</text>
+    <text x="58" y="2101" class="small">A 为决策模态宏平均 · G 为单框 Acc@IoU≥0.5</text>
+    <text x="58" y="2129" class="label">按调和分 <tspan class="shape code">2AG/(A+G)</tspan> 提升选优</text>
+    <text x="58" y="2157" class="small">相对起点 · 各模态降幅 ≤3 个百分点 · 定位 ≤5 个百分点</text>
+
+    <rect x="676" y="1982" width="608" height="202" rx="10" class="panel" fill="#eee9f4"/>
+    <text x="698" y="2016" class="heading">SFT 续训快照</text>
+    <text x="698" y="2045" class="small">每 250 步、训练中评测后及最终步保存</text>
+    <text x="698" y="2073" class="small">保存可训练权重、AdamW 状态及评测记录</text>
+    <text x="698" y="2101" class="small">保存采样顺序、进度、各 rank 随机状态和选模权重</text>
+    <text x="698" y="2129" class="small">完成后更新 <tspan class="code">checkpoint_latest.json</tspan></text>
+    <text x="698" y="2157" class="small">保留最近两份完整快照</text>
+  </g>
+</svg>

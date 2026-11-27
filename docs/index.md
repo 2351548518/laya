@@ -17,6 +17,7 @@ Install the source checkout, download the released checkpoint and run the first 
 | To | Read |
 |---|---|
 | run or train native text, image, audio and video decisions | [Native multimodal decisions](multimodal.md) |
+| inspect the v6 architecture, tensor dimensions and training examples in Chinese | [v6 project guide](project-readme/index.md) |
 | try native prediction and inspect example training records | [Runnable examples](https://github.com/2351548518/laya/tree/main/examples) and the [native Notebook](https://github.com/2351548518/laya/blob/main/notebooks/laya_native_multimodal.ipynb) |
 | send media to your local server from Python or TypeScript | [Native media SDKs](multimodal-clients.md) |
 | predict from a terminal with a trained local model | [Native multimodal CLI](cli-mcp.md#native-multimodal-checkpoint) |

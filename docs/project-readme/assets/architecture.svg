@@ -1,0 +1,385 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="1320" height="1928" viewBox="0 0 1320 1928"
+     role="img" aria-labelledby="title description" xml:lang="zh-CN">
+  <title id="title">Qwen3.5-4B v6 多模态决策模型的张量维度</title>
+  <desc id="description">从下往上展示文本、图像和视频。视觉 patch 先从 1536 维投影到 1024 维，每四个空间 patch 合并为一个 2560 维视觉向量。32 层语言骨干保持批大小、序列长度和 2560 维隐藏宽度。右侧展开 Gated DeltaNet 和门控全注意力的内部形状。候选头输出每批每候选的分数，单框头输出一个四坐标框与一个质量分。</desc>
+  <defs>
+    <style>
+      text {
+        fill: #252e3b;
+        font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      }
+      .center { text-anchor: middle; }
+      .end { text-anchor: end; }
+      .title { font-size: 39px; font-weight: 700; }
+      .model { font-size: 31px; font-weight: 700; }
+      .heading { font-size: 25px; font-weight: 700; }
+      .label { font-size: 22px; font-weight: 600; }
+      .small { font-size: 19px; fill: #3f4b59; }
+      .code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
+      .shape { font-size: 21px; font-weight: 600; }
+      .panel { stroke: #35404e; stroke-width: 2.4; }
+      .module { stroke: #465261; stroke-width: 1.9; }
+      .chip { stroke: #465261; stroke-width: 1.6; }
+      .flow, .arrow { fill: none; stroke: #35404e; stroke-width: 2.3; }
+      .arrow { marker-end: url(#arrow); }
+      .zoom { stroke: #778b99; stroke-width: 2.15; stroke-dasharray: 8 6; }
+      .text-token { fill: #dcdcf4; }
+      .image-token { fill: #f2c8b8; }
+      .video-token { fill: #bfe6e2; }
+      .state { fill: #fff; }
+      .candidate-state { fill: #f7deb0; }
+      .last-state { fill: #d6e4f6; }
+    </style>
+    <marker id="arrow" markerWidth="11" markerHeight="11" refX="10.6" refY="5.5"
+            orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0 11 5.5 0 11Z" fill="#35404e"/>
+    </marker>
+    <rect id="token" width="27" height="29" rx="3"/>
+    <rect id="state" width="29" height="32" rx="3"/>
+  </defs>
+
+  <rect width="1320" height="1928" fill="#fdfdfa"/>
+  <text x="660" y="56" class="title center">Qwen3.5-4B v6 多模态决策模型</text>
+  <text x="660" y="88" class="small center">B 为批大小 · L 为左填充后的序列长度 · K 为补齐后的候选数 · P 为当前视觉张量的 patch 总数</text>
+
+  <!-- Structured outputs -->
+  <g id="outputs">
+    <rect x="36" y="112" width="716" height="80" rx="9" class="panel" fill="#f5e9ce"/>
+    <text x="394" y="140" class="heading center">choice · noul · score</text>
+    <text x="394" y="163" class="small center">候选轴 softmax → <tspan class="code">[B, K]</tspan> 概率</text>
+    <text x="394" y="183" class="small center">所选项 · P(true) · 期望评分</text>
+
+    <rect x="786" y="112" width="498" height="80" rx="9" class="panel" fill="#f5e9ce"/>
+    <text x="1035" y="140" class="heading center">图像单框定位</text>
+    <text x="1035" y="163" class="small center">归一化 xyxy <tspan class="code">[B, 1, 4]</tspan> · 质量分 <tspan class="code">[B, 1]</tspan></text>
+    <text x="1035" y="183" class="small center">坐标 sigmoid 后排序 · 质量分取 sigmoid</text>
+    <g aria-hidden="true">
+      <rect x="1222" y="122" width="42" height="29" rx="3" class="chip" fill="#fcf8ee"/>
+      <path d="M1224 145h38" stroke="#aab7a8" stroke-width="1.4"/>
+      <circle cx="1243" cy="136.5" r="5.8" fill="#b0c5a6"/>
+      <rect x="1234" y="128" width="18" height="17" fill="none" stroke="#a25353" stroke-width="1.9"/>
+    </g>
+  </g>
+
+  <!-- Batch and candidate dimensions are preserved up to the scaled dot products. -->
+  <g id="decision-head">
+    <rect x="36" y="216" width="716" height="330" rx="15" class="panel" fill="#e9eff5"/>
+    <text x="59" y="254" class="heading">共享候选评分头</text>
+    <text x="728" y="252" class="small code end">CandidateScorer</text>
+
+    <rect x="144" y="276" width="500" height="70" rx="7" class="module" fill="#f7dfba"/>
+    <text x="394" y="305" class="label center">可学习缩放 × 点积 · 屏蔽填充候选</text>
+    <text x="394" y="331" class="shape code center">[B, K, 256] · [B, 1, 256] → [B, K]</text>
+
+    <rect x="60" y="368" width="322" height="69" rx="7" class="module" fill="#dae8f6"/>
+    <text x="221" y="397" class="label center">候选线性层 · L2 归一化</text>
+    <text x="221" y="424" class="shape code center">[B, K, 256]</text>
+
+    <rect x="406" y="368" width="322" height="69" rx="7" class="module" fill="#dae8f6"/>
+    <text x="567" y="397" class="label center">查询线性层 · L2 归一化</text>
+    <text x="567" y="424" class="shape code center">[B, 256]</text>
+
+    <rect x="60" y="459" width="322" height="69" rx="7" class="module" fill="#fff"/>
+    <text x="221" y="488" class="label center">按位置 <tspan class="code">[B, K]</tspan> 取候选</text>
+    <text x="221" y="515" class="shape code center">[B, K, 2560]</text>
+
+    <rect x="406" y="459" width="322" height="69" rx="7" class="module" fill="#fff"/>
+    <text x="567" y="488" class="label center">取最后一个位置</text>
+    <text x="567" y="515" class="shape code center">[B, 2560]</text>
+
+    <path d="M221 459V437" class="arrow"/>
+    <path d="M567 459V437" class="arrow"/>
+    <path d="M221 368V346" class="arrow"/>
+    <path d="M567 368V346" class="arrow"/>
+    <path d="M394 276V192" class="arrow"/>
+  </g>
+
+  <!-- The slot axis is created after the final linear projection. -->
+  <g id="box-head">
+    <rect x="786" y="216" width="498" height="330" rx="15" class="panel" fill="#f0eaf4"/>
+    <text x="810" y="254" class="heading">单框定位头</text>
+    <text x="1260" y="252" class="small code end">GroundingHead</text>
+
+    <rect x="812" y="276" width="446" height="70" rx="7" class="module" fill="#f3dcdb"/>
+    <text x="1035" y="305" class="label center">插入单框轴 · 拆成坐标和质量</text>
+    <text x="1035" y="331" class="shape code center">[B, 1, 5] → [B, 1, 4] + [B, 1]</text>
+
+    <rect x="812" y="368" width="446" height="69" rx="7" class="module" fill="#e7ddef"/>
+    <text x="1035" y="397" class="label center">LayerNorm → Linear → GELU → Linear</text>
+    <text x="1035" y="424" class="shape code center">[B, 2560] → [B, 256] → [B, 5]</text>
+
+    <rect x="812" y="459" width="446" height="69" rx="7" class="module" fill="#fff"/>
+    <text x="1035" y="488" class="label center">按 attention_mask 取末尾有效位置</text>
+    <text x="1035" y="515" class="shape code center">[B, 2560]</text>
+
+    <path d="M1035 459V437" class="arrow"/>
+    <path d="M1035 368V346" class="arrow"/>
+    <path d="M1035 276V192" class="arrow"/>
+  </g>
+
+  <!-- The selected states come from the same hidden-state tensor layout. -->
+  <g id="hidden-states">
+    <rect x="36" y="624" width="776" height="88" rx="9" class="module" fill="#fafbfc"/>
+    <g class="chip state">
+      <use xlink:href="#state" x="60" y="638"/>
+      <use xlink:href="#state" x="146" y="638"/>
+      <use xlink:href="#state" x="189" y="638"/>
+      <use xlink:href="#state" x="232" y="638"/>
+      <use xlink:href="#state" x="318" y="638"/>
+      <use xlink:href="#state" x="361" y="638"/>
+      <use xlink:href="#state" x="404" y="638"/>
+      <use xlink:href="#state" x="447" y="638"/>
+      <use xlink:href="#state" x="538" y="638"/>
+      <use xlink:href="#state" x="581" y="638"/>
+      <use xlink:href="#state" x="624" y="638"/>
+      <use xlink:href="#state" x="667" y="638"/>
+    </g>
+    <text x="507" y="661" class="label center">…</text>
+    <rect x="101" y="638" width="32" height="32" rx="3" class="chip candidate-state"/>
+    <rect x="273" y="638" width="32" height="32" rx="3" class="chip candidate-state"/>
+    <rect x="748" y="638" width="40" height="32" rx="3" class="chip last-state"/>
+    <text x="117" y="661" class="small center">C₁</text>
+    <text x="289" y="661" class="small center">C₂</text>
+    <text x="768" y="661" class="small center">hₜ</text>
+    <text x="424" y="697" class="label center">末层隐藏状态 <tspan class="shape code">[B, L, 2560]</tspan></text>
+
+    <path d="M117 638V588H289V638" class="flow"/>
+    <path d="M221 588V528" class="arrow"/>
+    <circle cx="221" cy="588" r="3.5" fill="#35404e"/>
+    <path d="M768 638V574H1035V528" class="arrow"/>
+    <path d="M768 574H567V528" class="arrow"/>
+    <circle cx="768" cy="574" r="3.5" fill="#35404e"/>
+  </g>
+
+  <g id="language-backbone">
+    <rect x="36" y="747" width="776" height="88" rx="10" class="panel" fill="#f3e4cc"/>
+    <text x="424" y="784" class="model center">Qwen3.5-4B 语言骨干</text>
+    <text x="424" y="816" class="label center">32 层 · <tspan class="shape code">[B, L, 2560] → [B, L, 2560]</tspan></text>
+    <path d="M424 747V712" class="arrow"/>
+  </g>
+
+  <!-- Enlarged decoder layer group and the two mixer variants. -->
+  <g id="decoder-layer-group">
+    <path d="M812 755L848 747 M812 827L848 883" class="zoom" fill="none"/>
+    <rect x="848" y="747" width="436" height="691" rx="13" class="zoom" fill="#f6f9fa"/>
+    <text x="869" y="782" class="heading">语言骨干展开</text>
+    <text x="869" y="811" class="small">三层 GDN 接一层 GQA，重复 8 次</text>
+    <g class="module" fill="#e8efe4">
+      <rect x="869" y="827" width="84" height="43" rx="5"/>
+      <rect x="972" y="827" width="84" height="43" rx="5"/>
+      <rect x="1075" y="827" width="84" height="43" rx="5"/>
+    </g>
+    <rect x="1178" y="827" width="84" height="43" rx="5" class="module" fill="#e1eaf5"/>
+    <g class="label center">
+      <text x="911" y="856">GDN</text>
+      <text x="1014" y="856">GDN</text>
+      <text x="1117" y="856">GDN</text>
+      <text x="1220" y="856">GQA</text>
+    </g>
+    <path d="M953 848H972" class="arrow"/>
+    <path d="M1056 848H1075" class="arrow"/>
+    <path d="M1159 848H1178" class="arrow"/>
+
+    <rect x="869" y="892" width="393" height="122" rx="7" class="module" fill="#fff"/>
+    <text x="885" y="922" class="label">每层的 RMSNorm 与残差连接</text>
+    <text x="885" y="948" class="small code">u = x + Mixer(RMSNorm(x))</text>
+    <text x="885" y="974" class="small code">y = u + MLP(RMSNorm(u))</text>
+    <text x="885" y="999" class="small">门控 MLP <tspan class="code">2560 → 9216 → 2560</tspan></text>
+
+    <rect x="869" y="1031" width="393" height="191" rx="7" class="module" fill="#e8efe4"/>
+    <text x="885" y="1061" class="label">线性注意力 · Gated DeltaNet</text>
+    <text x="885" y="1088" class="small">融合 QKV <tspan class="code">2560 → 8192</tspan> · 因果卷积 <tspan class="code">k=4</tspan></text>
+    <text x="885" y="1112" class="small">Q、K 各 <tspan class="code">[B, L, 16, 128]</tspan></text>
+    <text x="885" y="1136" class="small">V 与独立投影 z 各 <tspan class="code">[B, L, 32, 128]</tspan></text>
+    <text x="885" y="1160" class="small">门控 a、b 各 <tspan class="code">[B, L, 32]</tspan></text>
+    <text x="885" y="1184" class="small">Delta Rule → z 门控 → 输出投影</text>
+    <text x="885" y="1209" class="shape code">[B, L, 4096] → [B, L, 2560]</text>
+
+    <rect x="869" y="1239" width="393" height="180" rx="7" class="module" fill="#e1eaf5"/>
+    <text x="885" y="1269" class="label">全注意力 · 门控 GQA</text>
+    <text x="885" y="1295" class="small">Q 与门控 <tspan class="code">2560 → 8192 = 2×4096</tspan></text>
+    <text x="885" y="1319" class="small">Q <tspan class="code">[B, 16, L, 256]</tspan></text>
+    <text x="885" y="1343" class="small">K、V 各 <tspan class="code">[B, 4, L, 256]</tspan></text>
+    <text x="885" y="1367" class="small">Q/K 用 M-RoPE · 因果 GQA · 输出门控</text>
+    <text x="885" y="1398" class="shape code">[B, L, 4096] → [B, L, 2560]</text>
+  </g>
+
+  <!-- Visual features replace their reserved token embeddings. -->
+  <g id="mixed-sequence">
+    <rect x="36" y="870" width="776" height="137" rx="9" class="module" fill="#fafbfc"/>
+    <text x="58" y="903" class="label">嵌入序列</text>
+    <text x="788" y="904" class="shape code end">inputs_embeds [B, L, 2560]</text>
+    <g class="chip text-token">
+      <use xlink:href="#token" x="60" y="917"/>
+      <use xlink:href="#token" x="94" y="917"/>
+      <use xlink:href="#token" x="128" y="917"/>
+      <use xlink:href="#token" x="298" y="917"/>
+      <use xlink:href="#token" x="332" y="917"/>
+      <use xlink:href="#token" x="468" y="917"/>
+      <use xlink:href="#token" x="604" y="917"/>
+      <use xlink:href="#token" x="638" y="917"/>
+      <use xlink:href="#token" x="672" y="917"/>
+      <use xlink:href="#token" x="706" y="917"/>
+      <use xlink:href="#token" x="740" y="917"/>
+      <rect x="60" y="969" width="14" height="14" rx="1"/>
+    </g>
+    <g class="chip image-token">
+      <use xlink:href="#token" x="162" y="917"/>
+      <use xlink:href="#token" x="196" y="917"/>
+      <use xlink:href="#token" x="230" y="917"/>
+      <use xlink:href="#token" x="264" y="917"/>
+      <rect x="163" y="969" width="14" height="14" rx="1"/>
+    </g>
+    <g class="chip video-token">
+      <use xlink:href="#token" x="366" y="917"/>
+      <use xlink:href="#token" x="400" y="917"/>
+      <use xlink:href="#token" x="434" y="917"/>
+      <use xlink:href="#token" x="502" y="917"/>
+      <use xlink:href="#token" x="536" y="917"/>
+      <use xlink:href="#token" x="570" y="917"/>
+      <rect x="266" y="969" width="14" height="14" rx="1"/>
+    </g>
+    <text x="83" y="982" class="small">文本</text>
+    <text x="186" y="982" class="small">图像</text>
+    <text x="289" y="982" class="small">视频</text>
+    <text x="788" y="982" class="small end">视觉向量按占位位置写入</text>
+    <path d="M424 870V835" class="arrow"/>
+  </g>
+
+  <!-- Text and vision feature paths. -->
+  <g id="embeddings">
+    <rect x="36" y="1044" width="300" height="107" rx="8" class="panel" fill="#eae2f1"/>
+    <text x="186" y="1078" class="heading center">词嵌入</text>
+    <text x="186" y="1107" class="shape code center">[B, L] → [B, L, 2560]</text>
+    <text x="186" y="1134" class="small center">词表 <tspan class="code">248,320 × 2,560</tspan></text>
+    <path d="M186 1044V1007" class="arrow"/>
+
+    <rect x="374" y="1044" width="438" height="119" rx="8" class="panel" fill="#deeee5"/>
+    <text x="593" y="1076" class="heading center">视觉 Merger · 空间 2×2</text>
+    <text x="593" y="1107" class="shape code center">[P, 1024] → [P/4, 4096]</text>
+    <text x="593" y="1137" class="small center">MLP <tspan class="shape code">[P/4, 4096] → [P/4, 2560]</tspan></text>
+    <path d="M593 1044V1007" class="arrow"/>
+
+    <rect x="374" y="1194" width="438" height="96" rx="8" class="panel" fill="#eaf0df"/>
+    <text x="593" y="1226" class="heading center">共享视觉编码器 · 24 层</text>
+    <text x="593" y="1253" class="small center">16 头 × 64 维 · MLP 1024 → 4096 → 1024</text>
+    <text x="593" y="1277" class="shape code center">[P, 1024] → [P, 1024]</text>
+    <path d="M593 1194V1163" class="arrow"/>
+
+    <rect x="374" y="1321" width="438" height="117" rx="8" class="panel" fill="#eff3e9"/>
+    <text x="593" y="1350" class="heading center">Conv3d Patch Embed</text>
+    <text x="593" y="1377" class="shape code center">[P, 1536] → [P, 3, 2, 16, 16]</text>
+    <text x="593" y="1403" class="shape code center">[P, 1024, 1, 1, 1] → [P, 1024]</text>
+    <text x="593" y="1427" class="small center">核与步幅 <tspan class="code">2×16×16</tspan></text>
+    <path d="M593 1321V1290" class="arrow"/>
+  </g>
+
+  <g id="merge-example">
+    <path d="M374 1117H354V1222H336" class="zoom" fill="none"/>
+    <rect x="108" y="1198" width="228" height="240" rx="10" class="zoom" fill="#f6f9fa"/>
+    <text x="222" y="1230" class="label center">空间 2×2 合并</text>
+    <text x="222" y="1254" class="small center">同一格内 · 逐块归一化</text>
+    <g class="module" fill="#eaf0df">
+      <rect x="161" y="1265" width="57" height="36" rx="4"/>
+      <rect x="226" y="1265" width="57" height="36" rx="4"/>
+      <rect x="161" y="1309" width="57" height="36" rx="4"/>
+      <rect x="226" y="1309" width="57" height="36" rx="4"/>
+    </g>
+    <g class="small code center">
+      <text x="189.5" y="1290">1024</text>
+      <text x="254.5" y="1290">1024</text>
+      <text x="189.5" y="1334">1024</text>
+      <text x="254.5" y="1334">1024</text>
+    </g>
+    <path d="M222 1350V1369" class="arrow"/>
+    <rect x="140" y="1369" width="164" height="47" rx="6" class="module" fill="#deeee5"/>
+    <text x="222" y="1399" class="label center">拼接 <tspan class="code">[4096]</tspan></text>
+  </g>
+
+  <g id="processor">
+    <rect x="36" y="1497" width="1248" height="94" rx="9" class="panel" fill="#e9edf5"/>
+    <text x="660" y="1532" class="heading center">Qwen 多模态处理器与批处理</text>
+    <text x="660" y="1559" class="small center"><tspan class="code">input_ids</tspan> 和 <tspan class="code">attention_mask [B, L]</tspan> · 上限 16,384 token</text>
+    <text x="660" y="1582" class="small center">媒体网格 <tspan class="code">(Tg, Hg, Wg)</tspan> · 展开媒体占位符 · 定位候选标记</text>
+    <path d="M66 1497V1151" class="arrow"/>
+    <text x="83" y="1479" class="small code">input_ids [B, L]</text>
+    <path d="M593 1497V1438" class="arrow"/>
+    <text x="610" y="1462" class="small">像素 patch <tspan class="code">[P, 1536]</tspan></text>
+    <text x="610" y="1486" class="small code">P = Σ(Tg × Hg × Wg)</text>
+  </g>
+
+  <!-- Representative v6 requests. Thumbnails are schematic. -->
+  <g id="examples">
+    <g class="module" fill="#fff">
+      <rect x="36" y="1634" width="392" height="253" rx="9"/>
+      <rect x="464" y="1634" width="392" height="253" rx="9"/>
+      <rect x="892" y="1634" width="392" height="253" rx="9"/>
+    </g>
+    <g aria-hidden="true">
+      <rect x="55" y="1653" width="85" height="63" rx="4" class="chip" fill="#eeeaf6"/>
+      <rect x="66" y="1664" width="42" height="6" rx="2" fill="#9d90b4"/>
+      <path d="M66 1678H128 M66 1686H120 M66 1694H127 M66 1702H106"
+            stroke="#998db0" stroke-width="2.2" stroke-linecap="round"/>
+
+      <rect x="483" y="1653" width="93" height="63" rx="4" fill="#f5e7d6"/>
+      <circle cx="558" cy="1667" r="6" fill="#d6a16c"/>
+      <path d="M484 1689 503 1673 519 1686 537 1676 575 1697V1715H484Z" fill="#c6d6bf"/>
+      <path d="M484 1704 513 1693 535 1697 562 1688 575 1697V1715H484Z" fill="#94ad93"/>
+      <rect x="483" y="1653" width="93" height="63" rx="4" class="chip" fill="none"/>
+
+      <rect x="937" y="1652" width="81" height="45" rx="3" class="chip" fill="#c1d7d6"/>
+      <path d="M941 1687H1014" stroke="#8eacab" stroke-width="1.6"/>
+      <circle cx="994" cy="1674" r="6.5" fill="#be886a"/>
+      <rect x="924" y="1662" width="81" height="45" rx="3" class="chip" fill="#d5e3de"/>
+      <path d="M928 1697H1001" stroke="#8eacab" stroke-width="1.6"/>
+      <circle cx="968" cy="1684" r="6.5" fill="#be886a"/>
+      <rect x="911" y="1672" width="81" height="45" rx="3" class="chip" fill="#e8eeea"/>
+      <path d="M915 1707H988" stroke="#8eacab" stroke-width="1.6"/>
+      <circle cx="941" cy="1694" r="6.5" fill="#be886a"/>
+    </g>
+    <text x="158" y="1693" class="heading">文本单选</text>
+    <text x="594" y="1693" class="heading">图像是非</text>
+    <text x="1036" y="1680" class="heading">16 帧视频评分</text>
+    <text x="1036" y="1708" class="small">两帧一组，共 8 个时间格</text>
+
+    <g class="small">
+      <text x="55" y="1742" class="code">input_ids</text>
+      <text x="55" y="1773">骨干状态</text>
+      <text x="55" y="1804">候选位置</text>
+      <text x="55" y="1835">候选状态</text>
+      <text x="55" y="1866">决策 logits</text>
+      <text x="483" y="1742">THW 网格</text>
+      <text x="483" y="1773">patch → 视觉 token</text>
+      <text x="483" y="1804" class="code">input_ids</text>
+      <text x="483" y="1835">骨干状态</text>
+      <text x="483" y="1866">决策 logits</text>
+      <text x="911" y="1742">THW 网格</text>
+      <text x="911" y="1773">patch → 视觉 token</text>
+      <text x="911" y="1804" class="code">input_ids</text>
+      <text x="911" y="1835">骨干状态</text>
+      <text x="911" y="1866">决策 logits</text>
+    </g>
+    <g class="shape code end">
+      <text x="409" y="1742">[1, 60]</text>
+      <text x="409" y="1773">[1, 60, 2560]</text>
+      <text x="409" y="1804">[31, 38]</text>
+      <text x="409" y="1835">[1, 2, 2560]</text>
+      <text x="409" y="1866">[1, 2]</text>
+      <text x="837" y="1742">1 × 40 × 30</text>
+      <text x="837" y="1773">1200 → 300</text>
+      <text x="837" y="1804">[1, 369]</text>
+      <text x="837" y="1835">[1, 369, 2560]</text>
+      <text x="837" y="1866">[1, 2]</text>
+      <text x="1265" y="1742">8 × 40 × 48</text>
+      <text x="1265" y="1773">15360 → 3840</text>
+      <text x="1265" y="1804">[1, 4049]</text>
+      <text x="1265" y="1835">[1, 4049, 2560]</text>
+      <text x="1265" y="1866">[1, 4]</text>
+    </g>
+    <path d="M232 1634V1591" class="arrow"/>
+    <path d="M660 1634V1591" class="arrow"/>
+    <path d="M1088 1634V1591" class="arrow"/>
+    <text x="660" y="1910" class="small center">缩略图为示意。网格和序列长度来自 v6 处理器实测，后续形状按模型配置与源码推导。</text>
+  </g>
+</svg>
