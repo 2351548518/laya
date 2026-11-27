@@ -72,7 +72,7 @@ def main():
     saved=json.loads(checkpoint.read_text()) if checkpoint.exists() else {}
     source=saved.get('backbone',args.model)
     model_type=json.loads((Path(source)/'config.json').read_text())['model_type']
-    if model_type not in {'gemma4','qwen3_5'}:raise ValueError('v5 supports Gemma4 or Qwen3.5')
+    if model_type not in {'gemma4','qwen3_5'}:raise ValueError('joint training requires Gemma 4 or Qwen3.5')
     if args.visual_only!=(model_type=='qwen3_5'):
         raise ValueError('Qwen3.5 requires --visual-only; Gemma4 keeps the full-omni recipe')
     if args.qwen_training_delta and model_type!='qwen3_5':

@@ -179,20 +179,19 @@ class _IndexedGroundingRows:
             self.offsets.frombytes(offsets)
         self.stream = self.path.open('rb')
         self.version = version
-        if self._version(self.stream) != self.version:
+        if self._version(os.fstat(self.stream.fileno())) != self.version:
             self.stream.close()
             raise ValueError("training file changed while building or sharing its index: " + str(self.path))
 
     @staticmethod
-    def _version(stream):
-        stat = os.fstat(stream.fileno())
-        return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns
+    def _version(info):
+        return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
 
     def _build_index(self, validate_split):
         offset = 0
         digest = hashlib.sha256()
         with self.path.open('rb') as stream:
-            version = self._version(stream)
+            version = self._version(os.fstat(stream.fileno()))
             for line_number, line in enumerate(stream, 1):
                 digest.update(line)
                 if line.strip() and not line.lstrip().startswith(b"#"):
@@ -204,7 +203,7 @@ class _IndexedGroundingRows:
                         raise ValueError("%s:%d: %s" % (self.path, line_number, error)) from error
                     self.offsets.append(offset)
                 offset += len(line)
-            if self._version(stream) != version:
+            if self._version(os.fstat(stream.fileno())) != version:
                 raise ValueError("training file changed during validation: " + str(self.path))
         self.offsets.append(offset)
         if len(self.offsets) == 1:
@@ -215,7 +214,11 @@ class _IndexedGroundingRows:
         return self.version, self.sha256, self.offsets.tobytes()
 
     def check_unchanged(self):
-        if self._version(self.stream) != self.version:
+        try:
+            path_version = self._version(self.path.stat())
+        except FileNotFoundError:
+            path_version = None
+        if path_version != self.version or self._version(os.fstat(self.stream.fileno())) != self.version:
             raise ValueError("indexed training file changed during training: " + str(self.path))
 
     def __len__(self):
@@ -230,7 +233,9 @@ class _IndexedGroundingRows:
                                 self.path.parent, verify_media=False)
 
     def __iter__(self):
-        yield from read_records(self.path, verify_media=False)
+        self.check_unchanged()
+        for index in range(len(self)):
+            yield self[index]
 
 
 def _shared_indexed_rows(path, validate_split, ctx):
@@ -485,18 +490,22 @@ def _decision_batch_loss(agent,chunk,inputs,config):
         if q.get('option_order') is not None:
             logits=logits[torch.argsort(torch.as_tensor(q['option_order'],device=agent.device))]
         aligned.append(F.pad(logits,(0,width-k),value=-1e4));targets.append(list(values)+[0.]*(width-k))
+        if not config.replay_kl_weight:
+            continue
         reference=row.get('replay_reference');valid=False
         if reference is not None:
             if row.get('replay_reference_identity')!=example_hash(row,qid,qdef):raise ValueError('replay reference input/options changed')
             if len(reference)!=k:raise ValueError('replay reference option order/size mismatch')
             valid=int(max(range(k),key=lambda i:reference[i]))==int(max(range(k),key=lambda i:values[i])) and max(reference)>=.5
         references.append((list(reference) if reference is not None else [0.]*k)+[0.]*(width-k));accepted.append(valid)
+    use_reference = any(accepted)
     mask=torch.tensor([[i<len(item[4]) for i in range(width)] for item in chunk],device=agent.device)
     loss,_=decision_loss(torch.stack(aligned),torch.tensor(targets,device=agent.device,dtype=torch.float32),mask,
         torch.tensor([QTYPES[item[3]['t']] for item in chunk],device=agent.device),
         ordinal_weight=config.decision_ordinal_weight,brier_weight=config.decision_brier_weight,
-        reference=torch.tensor(references,device=agent.device,dtype=torch.float32),
-        reference_mask=torch.tensor(accepted,device=agent.device),kl_weight=config.replay_kl_weight)
+        reference=torch.tensor(references,device=agent.device,dtype=torch.float32) if use_reference else None,
+        reference_mask=torch.tensor(accepted,device=agent.device) if use_reference else None,
+        kl_weight=config.replay_kl_weight)
     return loss
 
 

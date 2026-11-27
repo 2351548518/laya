@@ -147,7 +147,8 @@ use `warmup.jsonl` with the same development files.
 Prepared Qwen exports can record the processor, native token count and context budget in
 `training_admission`. Match the processor and budget to the run configuration. For local
 JSONL without these records, the standalone trainer accepts `--allow-unadmitted` and still
-checks the input modality and token limit.
+checks the input modality and `max_len`. The `max_micro_tokens` setting limits packing multiple
+records into a padded micro-batch. A single input can run independently up to `max_len`.
 
 ## Head warmup and LoRA training
 

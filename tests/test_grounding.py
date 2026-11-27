@@ -1,4 +1,5 @@
 """Geometry, set assignment, standard Box schema and non-generative native integration."""
+import os
 from types import SimpleNamespace
 
 import numpy as np
@@ -248,6 +249,60 @@ def test_grounding_rows_cannot_silently_discard_extra_questions(tmp_path):
     q={'type':'box','instructions':'the mug'}
     path.write_text(json.dumps({'state': '', 'questions':{'a':q,'b':q}})+'\n')
     with pytest.raises(ValueError,match='exactly one'):load_grounding_rows(path)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="requires renaming or removing an open dataset")
+@pytest.mark.parametrize("change", ["replace", "remove"])
+def test_indexed_grounding_rows_detect_changed_path(tmp_path, change):
+    import json
+    from laya.grounding_train import _IndexedGroundingRows
+
+    path = tmp_path / "train.jsonl"
+    row = {"id": "original", "state": "Packing station",
+           "questions": {"q": {"type": "noul", "instructions": "Ready?"}}, "expected": {"q": True}}
+    path.write_text(json.dumps(row) + "\n")
+    rows = _IndexedGroundingRows(path, lambda row: None)
+    with rows.stream:
+        rows.check_unchanged()
+        assert next(iter(rows))["id"] == "original"
+        if change == "replace":
+            replacement = tmp_path / "replacement.jsonl"
+            replacement.write_text(json.dumps({**row, "id": "updated!"}) + "\n")
+            replacement.replace(path)
+        else:
+            path.unlink()
+        with pytest.raises(ValueError, match="indexed training file changed"):
+            rows.check_unchanged()
+        with pytest.raises(ValueError, match="indexed training file changed"):
+            list(rows)
+
+
+def test_decision_batch_checks_reference_only_when_kl_enabled(monkeypatch):
+    from laya import multimodal_train
+    from laya.grounding_train import _decision_batch_loss
+
+    calls = []
+
+    def example_hash(*args):
+        calls.append(args)
+        return "current"
+
+    monkeypatch.setattr(multimodal_train, "example_hash", example_hash)
+    logits = torch.tensor([[.3, .7]]).log().requires_grad_()
+    agent = SimpleNamespace(device=torch.device("cpu"), _logits=lambda inputs, width: logits)
+    row = {"replay_reference": [.1, .9], "replay_reference_identity": "stale"}
+    qdef = {"type": "noul", "instructions": "Ready?"}
+    chunk = [(row, "q", qdef, {"t": "noul"}, [0., 1.])]
+
+    loss = _decision_batch_loss(agent, chunk, {}, GroundingTrainConfig(replay_kl_weight=0.))
+    torch.testing.assert_close(loss, -logits.log_softmax(-1)[0, 1])
+    assert not calls
+
+    config = GroundingTrainConfig(replay_kl_weight=.2)
+    with pytest.raises(ValueError, match="reference input/options changed"):
+        _decision_batch_loss(agent, chunk, {}, config)
+    row["replay_reference_identity"] = "current"
+    assert _decision_batch_loss(agent, chunk, {}, config) > loss
 
 
 def test_retention_guard_checks_every_modality():
