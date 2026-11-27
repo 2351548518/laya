@@ -1,4 +1,4 @@
-"""Metric math, dataset parsing and regression comparison for laya.evals. No weights.
+"""Metric math, dataset parsing and regression comparison for laya_multimodal.evals. No weights.
 
 Run: python -m pytest tests/test_evals.py -q
 """
@@ -16,9 +16,9 @@ import numpy as np
 
 import pytest
 
-import laya
-from laya import evals
-from laya.evals import (
+import laya_multimodal
+from laya_multimodal import evals
+from laya_multimodal.evals import (
     ChoiceAccuracy,
     Dataset,
     EvalError,
@@ -112,9 +112,9 @@ def test_a_boolean_confidence_is_not_a_probability():
 # `confidence` -- a different quantity on a different scale (#394), which the docstring used to call
 # "the calibrated confidence Laya reports ... on every answer type" while docs/evals.md told the
 # operator the same. The shape that really arrives without the field is the strict Jev wire contract:
-# `LAYA_JEV_STRICT` drops it (`laya/serve.py::_project_jev_strict`, documented in docs/http-api.md).
+# `LAYA_JEV_STRICT` drops it (`laya_multimodal/serve.py::_project_jev_strict`, documented in docs/http-api.md).
 # So the stripped answers below are made by the server's own projector rather than hand-written -- a
-# hand copy could drift from what the server serves and this gate would still pass. `laya.serve`
+# hand copy could drift from what the server serves and this gate would still pass. `laya_multimodal.serve`
 # imports with neither fastapi nor torch at module scope, which is why it is affordable here.
 
 _CONTRACT_PROBS = {"choice": [0.95, 0.03, 0.02], "score": [0.05, 0.90, 0.05], "noul": [0.13, 0.87]}
@@ -124,12 +124,12 @@ _CONTRACT_LABEL = {"choice": "billing", "score": "mid", "noul": True}
 
 
 def _agent_answer(kind):
-    """The answer dict `laya/agent.py` publishes, built the way the decoder builds it: entropy
+    """The answer dict `laya_multimodal/agent.py` publishes, built the way the decoder builds it: entropy
     `confidence` for `choice` and `score`, `max(p_true, 1 - p_true)` for `noul`, and
-    `answer_confidence` = max(p) -- see laya/agent.py:1373, :1392, :1400."""
+    `answer_confidence` = max(p) -- see laya_multimodal/agent.py:1373, :1392, :1400."""
     p = _CONTRACT_PROBS[kind]
     argmax = max(range(len(p)), key=lambda i: p[i])
-    from laya.common import confidence_from_probs
+    from laya_multimodal.common import confidence_from_probs
     conf = (round(max(p[1], 1.0 - p[1]), 4) if kind == "noul"
             else round(confidence_from_probs(np.asarray(p), len(p)), 4))
     answer = {"confidence": conf, "answer_confidence": round(float(p[argmax]), 4),
@@ -147,7 +147,7 @@ def _agent_answer(kind):
 def _contract_shapes():
     """`(full, strict)` -- the payload the agents publish, and the same payload put through the
     projector that serves the strict Jev contract."""
-    from laya.serve import _project_jev_strict
+    from laya_multimodal.serve import _project_jev_strict
     full = {kind: _agent_answer(kind) for kind in _CONTRACT_PROBS}
     strict = _project_jev_strict({"model": "stub", "answers": dict(full),
                                   "usage": {"prompt_tokens": 1, "completion_tokens": 1}})["answers"]
@@ -224,7 +224,7 @@ def test_the_docs_name_the_fallback_and_refuse_to_call_the_shipped_number_calibr
             / "docs" / "evals.md").read_text(encoding="utf-8")
     prose = " ".join(page.split())
     assert "the calibrated probability Laya reports on every answer type" not in prose
-    assert "`laya.evals._answer_confidence`" in prose, "the page names the function it describes"
+    assert "`laya_multimodal.evals._answer_confidence`" in prose, "the page names the function it describes"
     assert "then\n`max(p, 1 - p)`" in page or "then `max(p, 1 - p)`" in prose
     assert "LAYA_JEV_STRICT" in prose and "over-confident" in prose
     assert "## Which confidence a metric reads" in page, "the fallback needs a home, not a footnote"
@@ -443,7 +443,7 @@ def test_a_0d_confidence_still_answers():
     """A bare scalar used to answer, and indexing it with an argsort result raises.
 
     Reachable only from the library entry point, and `_aggregate` always builds lists -- but an
-    `IndexError` escaping `laya-evals` exits 1, which is the code that means "the model regressed".
+    `IndexError` escaping `laya-multimodal eval` exits 1, which is the code that means "the model regressed".
     """
     assert selective_accuracy(np.float64(0.5), np.True_, 0.5) == pytest.approx(1.0)
     assert aurc(np.float64(0.5), np.False_) == pytest.approx(1.0)
@@ -487,7 +487,7 @@ def test_a_relative_rule_refuses_a_baseline_from_the_old_coverage_definition(tmp
     invalidate a baseline. A definition change is not a patch release, so this refuses on the
     key's ABSENCE.
     """
-    from laya import _eval_policy
+    from laya_multimodal import _eval_policy
 
     policy = _eval_policy.load_policy(_write_gate_policy(
         tmp_path, {"slice": {"language": "zh"}, "metric": "selective_accuracy@50",
@@ -514,7 +514,7 @@ def test_the_refusal_is_limited_to_metrics_a_cut_can_move(tmp_path):
 
     Sweeping them into the refusal would break every committed baseline for no reason.
     """
-    from laya import _eval_policy
+    from laya_multimodal import _eval_policy
 
     candidate = EvalReport(**_coverage_gate_report(0.10, evals.COVERAGE_METRIC_DEFINITION,
                                                    metric="ece"))
@@ -532,7 +532,7 @@ def test_the_refusal_is_limited_to_metrics_a_cut_can_move(tmp_path):
 
 def test_an_absolute_rule_needs_no_baseline_and_is_unaffected(tmp_path):
     """Only the relative comparison is across definitions; a `min` reads this run alone."""
-    from laya import _eval_policy
+    from laya_multimodal import _eval_policy
 
     policy = _eval_policy.load_policy(_write_gate_policy(
         tmp_path, {"slice": {"language": "zh"}, "metric": "selective_accuracy@50",
@@ -551,7 +551,7 @@ def test_a_stale_candidate_is_refused_as_well_as_a_stale_baseline(tmp_path):
     this open, and it is the easier of the two to reach by accident: a CI artifact produced by a
     pinned older `laya`, or an archived report re-checked after the baseline was regenerated.
     """
-    from laya import _eval_policy
+    from laya_multimodal import _eval_policy
 
     policy = _eval_policy.load_policy(_write_gate_policy(
         tmp_path, {"slice": {"language": "zh"}, "metric": "selective_accuracy@50",
@@ -602,7 +602,7 @@ def test_the_refusal_bounds_a_hostile_recorded_definition(tmp_path):
     attacker-controlled content on its way into a log. Five megabytes in the field produced a
     five-megabyte failure line before this was bounded.
     """
-    from laya import _eval_policy
+    from laya_multimodal import _eval_policy
 
     policy = _eval_policy.load_policy(_write_gate_policy(
         tmp_path, {"slice": {"language": "zh"}, "metric": "selective_accuracy@50",
@@ -724,7 +724,7 @@ def test_selective_metrics_reach_the_report():
 
 
 def test_percentiles_use_nearest_rank():
-    from laya.evals import _percentiles
+    from laya_multimodal.evals import _percentiles
 
     # Nearest-rank 95th percentile is the ceil(0.95 * n)-th smallest value (1-indexed).
     # `int(n * 0.95)` used to return the (0.95n + 1)-th value whenever n is a multiple of 20.
@@ -769,9 +769,9 @@ def test_dataset_from_jsonl_reads_a_file_that_starts_with_a_bom(tmp_path):
 
     A `utf-8` read leaves that BOM as U+FEFF on line 1, so `json.loads` refused the whole document
     with `"...:1 is not valid JSON: Unexpected UTF-8 BOM (decode using utf-8-sig)"` -- a refusal
-    that names the fix this reader could have applied itself. `laya/cli.py` (--questions, --batch
-    and stdin), `laya/train.py` and `laya/evidence.py` open a caller's file with `utf-8-sig` for
-    exactly this reason, and the comment in `laya/cli.py` claims "the other file readers in this
+    that names the fix this reader could have applied itself. `laya_multimodal/cli.py` (--questions, --batch
+    and stdin), `laya_multimodal/train.py` and `laya_multimodal/evidence.py` open a caller's file with `utf-8-sig` for
+    exactly this reason, and the comment in `laya_multimodal/cli.py` claims "the other file readers in this
     repo" do too; this was the dataset door that did not.
     """
     rows = [
@@ -864,8 +864,8 @@ def test_dataset_names_an_unreadable_file_as_an_evalerror(tmp_path, monkeypatch)
 # A row built in Python never passes through `Example.from_dict`, which is the only place these three
 # checks were made: `questions` and `expected` must be objects, and every `expected` key must name a
 # question that is actually there. Every reader takes the two fields as mappings, so a row that
-# skipped the checks reached `evaluate`'s scoring loop (`laya/evals.py:1205`), `questions_fingerprint`
-# (`laya/evals.py::questions_fingerprint`) or an opt-in door's `_validate_dataset` as an unhandled
+# skipped the checks reached `evaluate`'s scoring loop (`laya_multimodal/evals.py:1205`), `questions_fingerprint`
+# (`laya_multimodal/evals.py::questions_fingerprint`) or an opt-in door's `_validate_dataset` as an unhandled
 # ``AttributeError`` -- or got as far as the runner and came back as a verdict *about the runner*.
 # `Dataset` is the one door all four readers share, so the refusal names the row and lands before a
 # call is paid for.
@@ -910,7 +910,7 @@ def test_dataset_refuses_a_row_that_is_not_a_row(row, name):
         Dataset([row])
     assert str(exc.value) == (
         "example 0 must be an Example, got %s with no 'questions'; build each row with "
-        "laya.evals.Example(...) or Example.from_dict(...)" % name)
+        "laya_multimodal.evals.Example(...) or Example.from_dict(...)" % name)
 
 
 def test_the_non_row_refusal_names_the_offender_and_the_missing_field():
@@ -923,7 +923,7 @@ def test_the_non_row_refusal_names_the_offender_and_the_missing_field():
         Dataset([Example("s1", Q, {"intent": "a"}), QuestionsOnly()])
     assert str(exc.value) == (
         "example 1 must be an Example, got QuestionsOnly with no 'expected'; build each row "
-        "with laya.evals.Example(...) or Example.from_dict(...)")
+        "with laya_multimodal.evals.Example(...) or Example.from_dict(...)")
 
 
 def test_a_non_row_is_refused_on_what_the_door_reads_not_on_its_type():
@@ -1140,7 +1140,7 @@ def test_markdown_escapes_a_pipe_in_a_slice_label():
     """A `|` in a group label is cell content, not a column boundary.
 
     `tags` are any string the dataset author wrote -- `Example.from_dict` coerces them with `str`
-    rather than restricting them -- and this report is what a reader of `laya-evals run --markdown`
+    rather than restricting them -- and this report is what a reader of `laya-multimodal eval run --markdown`
     pairs numbers against. An unescaped pipe made that row one cell wider than its header, so every
     figure after the label moved one header to the left and the last was dropped: `choice_accuracy`
     showed the label's own second half, and the row that lost a value lost it silently.
@@ -1363,7 +1363,7 @@ def test_evaluate_batches_a_pass_through_wrapper_positionally():
 #
 # `Agent.predict_batch` and `Router.predict_batch` group similarly sized states inside a bounded
 # `batch_size` since #294, and `research/` reports 2.15x over 10,000 tickets from it with no answer
-# changing. `laya-evals run --batch-size` could bound a pass but not group one, so the harness that
+# changing. `laya-multimodal eval run --batch-size` could bound a pass but not group one, so the harness that
 # exists to measure cost could not ask for the cheaper shape of the same pass.
 
 UNSENT = object()   # a value no caller can send, so a default distinguishes "absent" from False
@@ -1471,7 +1471,7 @@ def test_a_pass_through_wrapper_is_given_the_knob():
 # `answer["choice"] / ["noul"] / ["score"]` as the raw argmax, so every metric in `_aggregate`
 # reads the same numbers at every threshold. What the harness forwards is the *claim* the
 # report makes: `report.config["timing"]["min_confidence"]` names the threshold and
-# `["min_confidence_sent"]` asserts the call carried it. A `laya-evals run` that could not pass
+# `["min_confidence_sent"]` asserts the call carried it. A `laya-multimodal eval run` that could not pass
 # the kwarg through had no way to publish that claim on a real Router -- the exact class of
 # thing this harness exists to be.
 
@@ -1623,7 +1623,7 @@ def test_min_confidence_and_sort_by_length_are_independent_controls():
 
 def test_cli_min_confidence_forwards_through_evaluate(monkeypatch, tmp_path):
     """The flag has to actually reach `evaluate`, not sit in the parser."""
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     seen = {}
     real_evaluate = evals_cli.evals.evaluate
@@ -1641,7 +1641,7 @@ def test_cli_min_confidence_forwards_through_evaluate(monkeypatch, tmp_path):
 
 def test_cli_min_confidence_out_of_range_is_a_usage_error(monkeypatch, tmp_path, capsys):
     """A mistyped `--min-confidence 1.5` must exit 2 with core's message, not traceback."""
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     _fake_router(monkeypatch, {})
     dataset = _write_dataset(tmp_path, [{"state": "s", "questions": Q, "expected": {"intent": "a"}}])
@@ -1653,7 +1653,7 @@ def test_cli_min_confidence_out_of_range_is_a_usage_error(monkeypatch, tmp_path,
 
 def test_cli_min_confidence_zero_is_accepted(monkeypatch, tmp_path):
     """A gate at zero is a legal ask; `if args.min_confidence` would drop it before the call."""
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     seen = {}
     real_evaluate = evals_cli.evals.evaluate
@@ -1679,7 +1679,7 @@ def test_cli_min_confidence_zero_is_accepted(monkeypatch, tmp_path):
 
 
 class AgentShapedRunner:
-    """What `laya.load()` returns: `predict` is `system_one` -- no `model`, no `**kwargs`."""
+    """What `laya_multimodal.load()` returns: `predict` is `system_one` -- no `model`, no `**kwargs`."""
 
     def __init__(self, by_state):
         self.by_state = by_state
@@ -1857,7 +1857,7 @@ def _timed_pair(monkeypatch, batch_size):
     Returns (report, runner): the runner's own `chunks` is the witness that the grouping the test
     asserts is the grouping the harness really issued.
     """
-    import laya.evals as evals_module
+    import laya_multimodal.evals as evals_module
 
     dataset = Dataset([Example("s1", Q, {"intent": "a"}), Example("s2", Q, {"intent": "a"}),
                        Example("s3", Q, {"intent": "a"}), Example("s4", QWIDE, {"intent": "a"})])
@@ -1898,7 +1898,7 @@ def test_the_throughput_share_keeps_its_own_metric(monkeypatch):
 
 
 def test_a_latency_gate_cannot_pass_a_run_where_nothing_finished_in_time(monkeypatch):
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     solo, _ = _timed_pair(monkeypatch, None)
     batched, _ = _timed_pair(monkeypatch, 8)
@@ -1939,7 +1939,7 @@ def test_timing_facts_record_what_the_harness_did(monkeypatch):
 
 def test_a_requested_batch_size_is_not_a_batched_run(monkeypatch):
     """The report records the grouping it achieved, so a runner that cannot batch cannot hide it."""
-    import laya.evals as evals_module
+    import laya_multimodal.evals as evals_module
 
     class Untimed(StubRunner):
         pass
@@ -1961,7 +1961,7 @@ def test_a_batched_call_that_raises_is_still_recorded_as_batched(monkeypatch):
     one shared forward and lost it indistinguishable from a run that never shared a call at all --
     the one mode where `docs/evals.md` says the block has to be right.
     """
-    import laya.evals as evals_module
+    import laya_multimodal.evals as evals_module
 
     class RaisingBatch(TimedRunner):
         def predict_batch(self, states, questions, model=None, batch_size=None):
@@ -2089,7 +2089,7 @@ def test_compare_fails_when_a_baseline_metric_is_missing():
 def test_a_nan_metric_fails_every_gate():
     """Every comparison with NaN is False, so a NaN metric used to pass --min, --max and the
     baseline comparison alike."""
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     nan = float("nan")
     report = EvalReport(overall={"score_mae": nan, "mean_confidence": nan})
@@ -2215,11 +2215,11 @@ def test_compare_refuses_a_tolerance_that_cannot_fail():
 def test_cli_exits_2_for_a_malformed_baseline_or_report(tmp_path, capsys):
     """A broken artifact is exit code 2; exit 1 is what a quality failure is worth.
 
-    Before, `laya-evals compare report.json --baseline {}` exited 0 with nothing compared, and
+    Before, `laya-multimodal eval compare report.json --baseline {}` exited 0 with nothing compared, and
     `--baseline 5` died in a traceback that exited 1 -- indistinguishable from a regression to the
     CI job reading it.
     """
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     fresh = tmp_path / "report.json"
     fresh.write_text(json.dumps({"overall": {"choice_accuracy": 0.9}}))
@@ -2239,7 +2239,7 @@ def test_cli_exits_2_for_a_malformed_baseline_or_report(tmp_path, capsys):
         assert evals_cli.main(["compare", str(broken), "--baseline", str(good)]) == 2, raw
 
     printed = capsys.readouterr().err
-    assert "laya-evals: baseline has no metrics to compare" in printed
+    assert "laya-multimodal eval: baseline has no metrics to compare" in printed
     assert "Traceback" not in printed
 
     # A well-formed pair still compares, and still exits 1 only when the numbers moved.
@@ -2250,7 +2250,7 @@ def test_cli_exits_2_for_a_malformed_baseline_or_report(tmp_path, capsys):
 
 
 def test_cli_rejects_a_nan_limit_or_tolerance(capsys):
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     with pytest.raises(EvalError, match="not a number"):
         evals_cli._parse_pairs(["choice_accuracy=nan"])
@@ -2268,7 +2268,7 @@ def test_cli_rejects_a_nan_limit_or_tolerance(capsys):
 
 def test_cli_rejects_an_infinite_limit_or_tolerance(capsys):
     """`inf` disables a gate exactly as `nan` does, and arrives without anyone typing "inf"."""
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     # Every spelling `float()` answers with a non-finite number, plus the overflow that is the
     # reason this is not only a typo case: `--max ece=1e999` parses clean and means no cap.
@@ -2302,14 +2302,14 @@ def test_an_infinite_limit_would_have_decided_nothing():
     """The harm the guard above prevents, pinned so relaxing it cannot go quiet.
 
     Without the refusal these are the values `_check_thresholds` computes from a non-finite limit,
-    and each one is a pass: `laya-evals` would exit 0 having gated nothing. A test that asserts them
+    and each one is a pass: `laya-multimodal eval` would exit 0 having gated nothing. A test that asserts them
     is not asserting correct behaviour -- it is the witness that the guard's absence was a defect.
 
     `compare` had the same hole on its tolerance map, one layer below the CLI guard, and it no
     longer computes a pass from Infinity: it refuses it. See
     `test_compare_refuses_a_tolerance_that_cannot_fail`.
     """
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     inf = float("inf")
     assert evals_cli._check_thresholds({"ece": 0.42}, {}, {"ece": inf}) == []
@@ -2326,7 +2326,7 @@ def test_a_choice_threshold_never_reads_the_noul_number():
     states the rule the same way: a threshold naming an absent metric reports it missing "rather than
     passing on a number that was never computed".
     """
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     noul_only = {"noul_accuracy": 0.6667, "ece": 0.1}
     for mins, maxs in (({"choice_accuracy": 0.5}, {}), ({"choice_accuracy": 0.9}, {}),
@@ -2352,7 +2352,7 @@ def test_cli_run_gates_a_noul_only_dataset_by_the_flag_that_means_it(monkeypatch
     so the ergonomics the substitution was standing in for stay intact while a threshold that names a
     metric explicitly is answered by that metric or by a missing-metric failure.
     """
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     _patch_router(monkeypatch, {"flag": {"flag": noul_answer(0.9)}})
     dataset = _write_dataset(tmp_path, [{"state": "flag", "questions": QNOUL,
@@ -2392,7 +2392,7 @@ def test_evaluate_records_what_it_measured():
                                   "s2": {"intent": choice_answer("a")}}), dataset)
     config = report.config
     assert config["schema"] == evals.REPORT_SCHEMA
-    assert config["laya_version"] == laya.__version__
+    assert config["laya_version"] == laya_multimodal.__version__
     assert len(config["questions_sha256"]) == 64, "the question schema is part of the identity"
 
     # Determinism: the identity must carry nothing time-bearing, or a re-run of the same dataset
@@ -2413,7 +2413,7 @@ def test_questions_fingerprint_follows_the_question_not_the_row():
     because option order and label rename flip answers.
 
     The scope of the last claim is the fingerprint, not the gate. `dataset_sha256` is compared
-    too, and adding a row changes the file's bytes, so through `laya-evals run` a longer dataset
+    too, and adding a row changes the file's bytes, so through `laya-multimodal eval run` a longer dataset
     is correctly refused. The fingerprint being row-independent is what lets a programmatic
     caller see that the *questions* did not change.
     """
@@ -2436,10 +2436,10 @@ def test_questions_fingerprint_covers_the_instructions():
     two questions the model answers differently.
 
     `native question formatting` renders `"%s question: %s" % (q["type"], instructions)` into the
-    tokenized head, `laya/agent.py::DecisionAgent._check_question` makes the field mandatory ("add the
+    tokenized head, `laya_multimodal/agent.py::DecisionAgent._check_question` makes the field mandatory ("add the
     text the model should answer"), and Laya's own identity key for sharing forward passes,
-    `laya/router.py::_question_schema`, hashes the whole questions dict, instructions included --
-    as does this module's own batch grouping at `laya/evals.py::evaluate`.
+    `laya_multimodal/router.py::_question_schema`, hashes the whole questions dict, instructions included --
+    as does this module's own batch grouping at `laya_multimodal/evals.py::evaluate`.
     `tests/test_router_batch.py:543` pins that rewording alone moves a row to its own batch group.
     Leaving it out made the one field this contract exists to protect the one field it ignored.
     """
@@ -2468,12 +2468,12 @@ def test_questions_fingerprint_covers_the_instructions():
 def test_questions_fingerprint_hashes_every_distinct_question_not_the_last_row_per_id():
     """One `qid` asked two ways is two questions, and both have to reach the digest.
 
-    `laya/evals.py::questions_fingerprint` collects each question's canonical JSON into a *set*,
+    `laya_multimodal/evals.py::questions_fingerprint` collects each question's canonical JSON into a *set*,
     not a `{qid: schema}` map. That distinction is load-bearing rather than incidental: a dataset
-    may carry the same `qid` under different bodies, because `laya/evals.py::Dataset.from_jsonl`
+    may carry the same `qid` under different bodies, because `laya_multimodal/evals.py::Dataset.from_jsonl`
     parses each row's `questions` on its own and never compares rows to rows -- verified against a
     two-row file that reuses `intent` with different `criteria`, which loads -- and
-    `laya/evals.py::evaluate` groups rows by their own questions dict. A map would then keep only
+    `laya_multimodal/evals.py::evaluate` groups rows by their own questions dict. A map would then keep only
     the last row's spelling and drop the variant from the identity, so a run that asked both would
     hash alike with a baseline that asked one. That is the comparison this key exists to refuse.
 
@@ -2497,7 +2497,7 @@ def test_questions_fingerprint_is_the_same_digest_in_every_process():
     """The schemas are hashed in sorted order, so two runs of one dataset agree.
 
     CPython salts `str` hashes per process (`PYTHONHASHSEED`), and a `set` iterates in hash order,
-    so `laya/evals.py::questions_fingerprint` sorting its schemas before feeding `sha256` is what
+    so `laya_multimodal/evals.py::questions_fingerprint` sorting its schemas before feeding `sha256` is what
     makes the digest a run identity rather than a per-process artefact. Drop the `sorted()` and one
     dataset still digests to a single value inside the process that asked for it, so nothing that only
     re-reads its own fingerprint notices. What breaks is the identity between two builds of the *same*
@@ -2506,8 +2506,8 @@ def test_questions_fingerprint_is_the_same_digest_in_every_process():
     a bucket, which depends on the process's salt. Measured on the mutant: at `PYTHONHASHSEED` 0, 1 and
     7 the row-order asserts below fire, at 2 and 42 the process happens to avoid the collision and it is
     the children that disagree with this one. Either way the digest is not portable, and
-    `questions_sha256` is the field `laya/evals.py::EvalReport.comparable_to` refuses a baseline on, so
-    two invocations of `laya-evals run` over an unchanged dataset would disagree and no run could be
+    `questions_sha256` is the field `laya_multimodal/evals.py::EvalReport.comparable_to` refuses a baseline on, so
+    two invocations of `laya-multimodal eval run` over an unchanged dataset would disagree and no run could be
     compared to a baseline. That is why this test pins both the in-process order and a committed
     literal read by fresh interpreters: neither alone fails at every salt.
     """
@@ -2527,9 +2527,9 @@ def test_questions_fingerprint_is_the_same_digest_in_every_process():
             "the order questions are encountered in moved the identity"
 
     # An eight-question dataset, hashed by a fresh interpreter with a salted string hash.
-    root = pathlib.Path(laya.__file__).resolve().parent.parent
+    root = pathlib.Path(laya_multimodal.__file__).resolve().parent.parent
     child = """
-from laya.evals import Dataset, Example, questions_fingerprint
+from laya_multimodal.evals import Dataset, Example, questions_fingerprint
 def question(index):
     return {"type": "choice", "instructions": "Question %d" % index,
             "criteria": {"a": "alpha %d" % index, "b": "beta %d" % index}}
@@ -2553,7 +2553,7 @@ print(questions_fingerprint(dataset))
 def test_questions_fingerprint_normalizes_instructions_the_way_the_engine_does():
     """Two questions that render the same text are the same question, whatever their JSON shape.
 
-    `laya/agent.py::DecisionAgent._to_internal` turns a non-string `instructions` into
+    `laya_multimodal/agent.py::DecisionAgent._to_internal` turns a non-string `instructions` into
     `json.dumps(ins, ensure_ascii=False)` before tokenizing, and `tests/test_criteria.py:229-251`
     pins why: the default `ensure_ascii=True` escaped non-ASCII to literal `\\uXXXX` and a German
     question answered noul=0.1652 as a dict against 0.2650 as the identical plain string. The
@@ -2708,11 +2708,11 @@ def _write_dataset(tmp_path, rows):
 
 
 def test_cli_validate_and_dispatch(tmp_path):
-    from laya import cli, evals_cli
+    from laya_multimodal import cli, evals_cli
 
     good = _write_dataset(tmp_path, [{"state": "s", "questions": Q, "expected": {"intent": "a"}}])
     assert evals_cli.main(["validate", good]) == 0
-    assert cli.main(["eval", "validate", good]) == 0, "`laya eval` dispatches to laya-evals"
+    assert cli.main(["eval", "validate", good]) == 0, "`laya-multimodal eval` dispatches to laya-multimodal eval"
 
     bad = tmp_path / "bad.jsonl"
     bad.write_text("{not json\n", encoding="utf-8")
@@ -2726,13 +2726,13 @@ def test_cli_writes_redirected_output_as_utf8(tmp_path, monkeypatch):
     """`validate` prints question ids and `run --slice` prints tags: the caller's own text.
 
     Redirected stdout is encoded with the locale's codec by default (cp1252 on Windows), so
-    `laya-evals validate data.jsonl > out.txt` died with a UnicodeEncodeError traceback on a
+    `laya-multimodal eval validate data.jsonl > out.txt` died with a UnicodeEncodeError traceback on a
     dataset whose question id is not Latin -- and with exit 1, the code docs/evals.md keeps for
     a quality failure. The latin-1 wrapper stands in for that codec, so this fails on any OS
-    without the fix. Both entry points are checked because `laya eval` returns before the line
+    without the fix. Both entry points are checked because `laya-multimodal eval` returns before the line
     that sets stdout in `cli.main`.
     """
-    from laya import cli, evals_cli
+    from laya_multimodal import cli, evals_cli
 
     qid = "श्रेणी"
     dataset = _write_dataset(tmp_path, [{"state": "s", "questions": {qid: Q["intent"]},
@@ -2747,7 +2747,7 @@ def test_cli_writes_redirected_output_as_utf8(tmp_path, monkeypatch):
 
 
 def test_cli_compare_exit_codes(tmp_path):
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     (tmp_path / "report.json").write_text(json.dumps({"overall": {"choice_accuracy": 0.80}}))
     (tmp_path / "baseline.json").write_text(json.dumps({"overall": {"choice_accuracy": 0.79}}))
@@ -2766,7 +2766,7 @@ def test_cli_separates_a_usage_error_from_a_quality_failure(tmp_path, capsys):
     not tell "my dataset is malformed" from "the model regressed" -- and a missing file escaped
     as a raw traceback, a third outcome the docs never mention.
     """
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     report = tmp_path / "report.json"
     report.write_text(json.dumps({"overall": {"choice_accuracy": 0.80}}))
@@ -2808,7 +2808,7 @@ def _write_raw(tmp_path, name, text):
 
 
 def test_cli_compare_fails_on_an_empty_report(tmp_path, capsys):
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     (tmp_path / "report.json").write_text(json.dumps({"overall": {}}))
     (tmp_path / "baseline.json").write_text(json.dumps({"overall": {"choice_accuracy": 0.79}}))
@@ -2819,7 +2819,7 @@ def test_cli_compare_fails_on_an_empty_report(tmp_path, capsys):
 
 
 def test_cli_rejects_a_malformed_tolerance():
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     with pytest.raises(EvalError):
         evals_cli._parse_pairs(["choice_accuracy"])
@@ -2832,7 +2832,7 @@ def test_cli_run_records_the_run_identity(monkeypatch, tmp_path):
     read the result as a diff. That only works if the report carries the dataset's bytes and the
     question schema, not just the path, and if it records the gate the numbers came out of.
     """
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     _patch_router(monkeypatch)
     dataset = _write_dataset(tmp_path, RUN_ROWS)
@@ -2841,7 +2841,7 @@ def test_cli_run_records_the_run_identity(monkeypatch, tmp_path):
                            "--tolerance", "choice_accuracy=0.02", "--json", str(out)]) == 0
     config = json.loads(out.read_text(encoding="utf-8"))["config"]
     assert config["schema"] == evals.REPORT_SCHEMA
-    assert config["laya_version"] == laya.__version__
+    assert config["laya_version"] == laya_multimodal.__version__
     assert config["dataset"] == dataset, "the path stays a name; the hash carries the bytes"
     assert config["dataset_sha256"] == evals.file_fingerprint(dataset)
     assert config["questions_sha256"] == evals.questions_fingerprint(evals.Dataset.from_jsonl(dataset))
@@ -2862,7 +2862,7 @@ def test_cli_run_an_unwritable_output_path_is_a_usage_error(monkeypatch, tmp_pat
     `FileNotFoundError`, so it escapes every handler and leaves a traceback and exit 1 for a run
     that wrote nothing. Same mistake, two different codes.
     """
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     real_open = open                      # captured before any patch below delegates to it
     _patch_router(monkeypatch)
@@ -2915,7 +2915,7 @@ def test_cli_report_reads_refuse_an_unreadable_report_with_code_2(monkeypatch, t
     a baseline tolerance failed" -- so a CI job could not tell a corrupt artifact from a regression.
     The message has to name the path, because three of those four errors do not.
     """
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     real_open = open                      # captured before any patch below delegates to it
     document = json.dumps({"overall": {"choice_accuracy": 0.5}, "slices": {}, "cases": []})
@@ -2983,11 +2983,11 @@ def test_load_report_reads_a_file_that_starts_with_a_bom(tmp_path):
     `_load_report` opened `utf-8`, so a report re-saved through a Windows editor arrived with a BOM,
     `json.load` refused it, and the tool answered `cannot read report ... Unexpected UTF-8 BOM
     (decode using utf-8-sig)` with exit 2 -- a usage error whose own text names the decoding this
-    reader could have asked for. `laya/cli.py` and `laya/evidence.py` open a caller's file with
+    reader could have asked for. `laya_multimodal/cli.py` and `laya_multimodal/evidence.py` open a caller's file with
     `utf-8-sig` for exactly this reason; the refusal paths above are unchanged, since a BOM is not a
     file that cannot be read.
     """
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     document = {"overall": {"choice_accuracy": 0.5}, "slices": {}, "cases": []}
     path = tmp_path / "bom-report.json"
@@ -3011,7 +3011,7 @@ def test_cli_dataset_reads_refuse_an_unreadable_dataset_with_code_2(monkeypatch,
     is not JSON, is included so this PR cannot be read as moving the goalposts: same door, same code,
     different reason, and the reason is what the message says.
     """
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     real_open = open                      # captured before any patch below delegates to it
 
@@ -3069,7 +3069,7 @@ def test_cli_run_refuses_a_baseline_from_a_different_dataset(monkeypatch, tmp_pa
     promoted was never measured on the data the gate claims to have validated. A pass here is
     arithmetic, not evidence.
     """
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     _patch_router(monkeypatch)
     original = _write_dataset(tmp_path, RUN_ROWS)
@@ -3095,7 +3095,7 @@ def test_cli_run_still_accepts_a_baseline_with_no_identity(monkeypatch, tmp_path
     comes from `research/eval/` and has no `config.schema`. A key missing on one side is unknown,
     not a conflict -- otherwise this change would break the repo's own CI on its first run.
     """
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     _patch_router(monkeypatch)
     dataset = _write_dataset(tmp_path, RUN_ROWS)
@@ -3108,7 +3108,7 @@ def test_cli_run_still_accepts_a_baseline_with_no_identity(monkeypatch, tmp_path
 
 
 def test_cli_compare_refuses_two_different_runs(tmp_path, capsys):
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     report = {"config": {"schema": evals.REPORT_SCHEMA, "dataset_sha256": "a" * 64,
                          "questions_sha256": "q" * 64},
@@ -3131,8 +3131,8 @@ def test_questions_fingerprint_covers_labels():
     """`labels` decides the option text, so it belongs in the key.
 
     The same argument `test_questions_fingerprint_covers_the_instructions` makes for
-    `instructions`. `laya/agent.py::DecisionAgent._check_question` validates `labels` through
-    `laya/common.py::_resolve_noul_labels`, `laya/agent.py::DecisionAgent._to_internal` carries it into
+    `instructions`. `laya_multimodal/agent.py::DecisionAgent._check_question` validates `labels` through
+    `laya_multimodal/common.py::_resolve_noul_labels`, `laya_multimodal/agent.py::DecisionAgent._to_internal` carries it into
     the internal question, and the resolver is what produces the option text the model actually
     reads. Two question sets differing only in
     `labels` therefore ask the model different things, and hashing them alike let the gate pass
@@ -3150,7 +3150,7 @@ def test_questions_fingerprint_covers_labels():
          "true": "approved: the customer asked for money back"}))
     assert custom != default, "a change in `labels` left the fingerprint unchanged"
     # And the change is real: these are not two spellings of one thing.
-    from laya.common import _resolve_noul_labels
+    from laya_multimodal.common import _resolve_noul_labels
     assert _resolve_noul_labels() != _resolve_noul_labels(
         {"false": "denied: no money was requested",
          "true": "approved: the customer asked for money back"})
@@ -3159,7 +3159,7 @@ def test_questions_fingerprint_covers_labels():
 def test_questions_fingerprint_keeps_criteria_order():
     """A choice question's criteria order is positional, so two orders are two questions.
 
-    `examples/hooks/cache.py:22-25` states the rule and `laya/router.py::_question_schema`
+    `examples/hooks/cache.py:22-25` states the rule and `laya_multimodal/router.py::_question_schema`
     applies it with `sort_keys=False`. Worth pinning here for the dict
     form: `json.dumps(sort_keys=True)` reorders *dict keys* and leaves *lists* alone, so a
     list-valued `criteria` -- the shape a dataset row has -- was already safe. The flag only
@@ -3178,7 +3178,7 @@ def test_questions_fingerprint_keeps_criteria_order():
 def test_questions_fingerprint_covers_option_order():
     """`option_order` moves what the model reads and re-maps the answer, so it is a fifth field.
 
-    `laya/agent.py::DecisionAgent._check_question` accepts only a permutation of the option indices,
+    `laya_multimodal/agent.py::DecisionAgent._check_question` accepts only a permutation of the option indices,
     `Agent._to_internal` copies it into the internal question, and from there it reaches
     `native processor` (the tokenized head) and `unpermute_probs` on the way back, so
     a permuted question is a different question in exactly the sense this key exists to notice.
@@ -3208,7 +3208,7 @@ def test_questions_fingerprint_covers_option_order():
            evals.questions_fingerprint(with_order([1, 0])), "two orders hashed alike"
 
     # The field is real on the way in, not an artefact of the hash: the engine carries it.
-    from laya.agent import Agent
+    from laya_multimodal.agent import Agent
     assert "option_order" not in Agent._to_internal(question()["pick"])
     assert Agent._to_internal(question([1, 0])["pick"])["option_order"] == [1, 0]
 
@@ -3222,11 +3222,11 @@ def test_a_top_level_schema_on_the_candidate_still_refuses(tmp_path, capsys):
     `_identity_of` reads a report's identity from `config` *or* the top level, and its own comment
     says why: `research/evals/act_head_eval.py` puts `schema` there. But `comparable_to` applied
     it to the baseline only -- the candidate's identity came from `self.config`, and
-    `laya/evals_cli.py` had already dropped a top-level `schema` when it built the `EvalReport`.
+    `laya_multimodal/evals_cli.py` had already dropped a top-level `schema` when it built the `EvalReport`.
     So the *same* disagreement was refused when the candidate stated it in `config` and passed
     when it stated it at the top level.
     """
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     def write(name, doc):
         (tmp_path / name).write_text(json.dumps(doc), encoding="utf-8")
@@ -3265,12 +3265,12 @@ RUN_ANSWERS = {
 
 
 def _patch_router(monkeypatch, answers=None):
-    """Replace the checkpoint-loading `Router`, so `laya-evals run` needs no weights.
+    """Replace the checkpoint-loading `Router`, so `laya-multimodal eval run` needs no weights.
 
     Returns the list the stand-in appends to when it is constructed, so a test can show a bad flag
     fails before anything loads.
     """
-    import laya
+    import laya_multimodal
 
     built: list = []
 
@@ -3281,7 +3281,7 @@ def _patch_router(monkeypatch, answers=None):
         def predict(self, state, questions, model=None):
             return {"model": model or "stub", "answers": (answers or RUN_ANSWERS)[state]}
 
-    monkeypatch.setattr(laya, "Router", FakeRouter)
+    monkeypatch.setattr(laya_multimodal, "Router", FakeRouter)
     return built
 
 
@@ -3291,7 +3291,7 @@ def _overall(stdout):
 
 
 def test_cli_score_within_publishes_the_documented_metric(monkeypatch, tmp_path, capsys):
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     _patch_router(monkeypatch)
     dataset = _write_dataset(tmp_path, RUN_ROWS)
@@ -3303,7 +3303,7 @@ def test_cli_score_within_publishes_the_documented_metric(monkeypatch, tmp_path,
 
 
 def test_cli_score_within_is_repeatable_per_column(monkeypatch, tmp_path, capsys):
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     _patch_router(monkeypatch)
     dataset = _write_dataset(tmp_path, RUN_ROWS)
@@ -3314,7 +3314,7 @@ def test_cli_score_within_is_repeatable_per_column(monkeypatch, tmp_path, capsys
 
 
 def test_cli_score_within_gate_decides_on_the_number(monkeypatch, tmp_path, capsys):
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     _patch_router(monkeypatch)
     dataset = _write_dataset(tmp_path, RUN_ROWS)
@@ -3327,7 +3327,7 @@ def test_cli_score_within_gate_decides_on_the_number(monkeypatch, tmp_path, caps
 
 
 def test_cli_score_within_without_score_rows_says_so(monkeypatch, tmp_path, capsys):
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     _patch_router(monkeypatch)
     rows = [row for row in RUN_ROWS if row["state"] in ("intent", "flag")]
@@ -3340,7 +3340,7 @@ def test_cli_score_within_without_score_rows_says_so(monkeypatch, tmp_path, caps
 
 
 def test_cli_rejects_an_unusable_tolerance_before_loading_a_checkpoint(monkeypatch, tmp_path, capsys):
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     built = _patch_router(monkeypatch)
     dataset = _write_dataset(tmp_path, RUN_ROWS)
@@ -3356,7 +3356,7 @@ def test_cli_rejects_an_unusable_tolerance_before_loading_a_checkpoint(monkeypat
 
 
 def test_cli_records_the_requested_tolerances(monkeypatch, tmp_path):
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     _patch_router(monkeypatch)
     dataset = _write_dataset(tmp_path, RUN_ROWS)
@@ -3372,7 +3372,7 @@ def test_docs_and_the_cli_name_the_same_flags():
     import argparse
     from pathlib import Path
 
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     page = (Path(__file__).resolve().parent.parent / "docs" / "evals.md").read_text(encoding="utf-8")
     registered: set = set()
@@ -3409,17 +3409,17 @@ SHA = "55cf4c4ebb4ebe31b2550e8bdf3bd21b99753851"
 
 
 def _fake_router(monkeypatch, recorded):
-    """Replace `laya.Router` with a weight-free stand-in that records how `_cmd_run` built it.
+    """Replace `laya_multimodal.Router` with a weight-free stand-in that records how `_cmd_run` built it.
 
     It validates checkpoint names the way `Router.__init__` does and resolves a forced `--model` the
     way `Router.resolve` does, both by calling the same `normalise_name`, so the fake refuses a typo
     for the real reason.
     """
-    import laya
+    import laya_multimodal
 
     class FakeRouter:
         def __init__(self, device=None, preload=None, revision=None, revisions=None):
-            from laya.router import normalise_name
+            from laya_multimodal.router import normalise_name
             recorded.update(device=device, preload=preload, revision=revision,
                             revisions={normalise_name(k): v for k, v in (revisions or {}).items()})
 
@@ -3427,7 +3427,7 @@ def _fake_router(monkeypatch, recorded):
             # `_cmd_run` resolves `--model` against the Router that answers, so the stand-in has to
             # resolve too. It takes no `models=`, so its registry is the built-in table, and that is
             # exactly what `normalise_name` checks.
-            from laya.router import normalise_name
+            from laya_multimodal.router import normalise_name
             return normalise_name(name)
 
         def predict(self, state, questions, model=None, min_confidence=None):
@@ -3438,11 +3438,11 @@ def _fake_router(monkeypatch, recorded):
 
         loaded_revisions = {"multimodal": SHA}
 
-    monkeypatch.setattr(laya, "Router", FakeRouter)
+    monkeypatch.setattr(laya_multimodal, "Router", FakeRouter)
 
 
 def test_cli_forwards_the_pin_and_records_the_commit_that_answered(tmp_path, monkeypatch):
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     recorded = {}
     _fake_router(monkeypatch, recorded)
@@ -3457,7 +3457,7 @@ def test_cli_forwards_the_pin_and_records_the_commit_that_answered(tmp_path, mon
 
 
 def test_cli_bare_revision_pins_every_checkpoint(tmp_path, monkeypatch):
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     recorded = {}
     _fake_router(monkeypatch, recorded)
@@ -3470,7 +3470,7 @@ def test_cli_bare_revision_pins_every_checkpoint(tmp_path, monkeypatch):
 
 def test_cli_records_an_implicitly_pinned_run_too(tmp_path, monkeypatch):
     """Record the resolved revision when the caller leaves checkpoint selection at its default."""
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     recorded = {}
     _fake_router(monkeypatch, recorded)
@@ -3482,7 +3482,7 @@ def test_cli_records_an_implicitly_pinned_run_too(tmp_path, monkeypatch):
 
 
 def test_cli_rejects_a_typo_in_a_pinned_checkpoint_name(tmp_path, monkeypatch, capsys):
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     recorded = {}
     _fake_router(monkeypatch, recorded)
@@ -3499,7 +3499,7 @@ def test_cli_rejects_a_typo_in_a_pinned_checkpoint_name(tmp_path, monkeypatch, c
 
 def test_cli_accepts_a_checkpoint_alias_in_a_pin(tmp_path, monkeypatch):
     """`Router` owns the checkpoint aliases, including `default`."""
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     recorded = {}
     _fake_router(monkeypatch, recorded)
@@ -3511,7 +3511,7 @@ def test_cli_accepts_a_checkpoint_alias_in_a_pin(tmp_path, monkeypatch):
 # ------------------------------------------------------------------ --model checkpoint name
 def test_cli_rejects_a_typo_in_the_forced_checkpoint_name(tmp_path, monkeypatch, capsys):
     """`--model` is resolved by the first row, so a typo used to escape as a traceback and exit 1."""
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     recorded = {}
     _fake_router(monkeypatch, recorded)
@@ -3534,7 +3534,7 @@ def test_cli_rejects_a_typo_in_the_forced_checkpoint_name(tmp_path, monkeypatch,
 
 def test_cli_accepts_a_checkpoint_alias_for_the_forced_model(tmp_path, monkeypatch):
     """Resolution is `Router.resolve`, which owns aliases and casing -- an exact-match check would fail here."""
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     recorded = {}
     _fake_router(monkeypatch, recorded)
@@ -3589,7 +3589,7 @@ def _write_gate_policy(tmp_path, rule):
 
 
 def test_cli_slice_gate_catches_regression_hidden_by_overall_gain(tmp_path, capsys):
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     baseline = tmp_path / "baseline.json"
     candidate = tmp_path / "candidate.json"
@@ -3609,7 +3609,7 @@ def test_cli_slice_gate_catches_regression_hidden_by_overall_gain(tmp_path, caps
 
 
 def test_slice_gate_requires_scored_evidence_on_both_sides(tmp_path):
-    from laya import _eval_policy
+    from laya_multimodal import _eval_policy
 
     policy = _eval_policy.load_policy(_write_gate_policy(
         tmp_path, {"slice": {"language": "zh"}, "metric": "choice_accuracy",
@@ -3632,7 +3632,7 @@ def test_slice_gate_requires_scored_evidence_on_both_sides(tmp_path):
 
 
 def test_slice_gate_absolute_and_increase_direction(tmp_path):
-    from laya import _eval_policy
+    from laya_multimodal import _eval_policy
 
     candidate = _slice_gate_report(171, 12)
     report = EvalReport(**candidate)
@@ -3657,7 +3657,7 @@ def test_slice_gate_absolute_and_increase_direction(tmp_path):
 
 
 def test_slice_gate_ece_requires_boolean_correct_evidence(tmp_path):
-    from laya import _eval_policy
+    from laya_multimodal import _eval_policy
 
     candidate = _slice_gate_report(171, 12)
     candidate["slices"]["language"]["zh"]["ece"] = 0.2
@@ -3676,7 +3676,7 @@ def test_slice_gate_ece_requires_boolean_correct_evidence(tmp_path):
 
 
 def test_slice_gate_counts_each_tagged_answer_once_and_accepts_boundary(tmp_path):
-    from laya import _eval_policy
+    from laya_multimodal import _eval_policy
 
     candidate = _slice_gate_report(171, 12)
     for case in candidate["cases"]:
@@ -3713,7 +3713,7 @@ def test_slice_gate_counts_each_tagged_answer_once_and_accepts_boundary(tmp_path
      "max_drop": -0.1},
 ])
 def test_cli_rejects_malformed_slice_policy_before_loading(monkeypatch, tmp_path, rule):
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     built = _patch_router(monkeypatch)
     dataset = _write_dataset(tmp_path, RUN_ROWS)
@@ -3723,7 +3723,7 @@ def test_cli_rejects_malformed_slice_policy_before_loading(monkeypatch, tmp_path
 
 
 def test_cli_relative_slice_rule_requires_baseline_before_loading(monkeypatch, tmp_path):
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     built = _patch_router(monkeypatch)
     dataset = _write_dataset(tmp_path, RUN_ROWS)
@@ -3735,7 +3735,7 @@ def test_cli_relative_slice_rule_requires_baseline_before_loading(monkeypatch, t
 
 
 def test_cli_rejects_invalid_policy_json_and_version(monkeypatch, tmp_path, capsys):
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     built = _patch_router(monkeypatch)
     dataset = _write_dataset(tmp_path, RUN_ROWS)
@@ -3751,7 +3751,7 @@ def test_cli_rejects_invalid_policy_json_and_version(monkeypatch, tmp_path, caps
         assert evals_cli.main(["run", dataset, "--gate-policy", str(path)]) == 2
         err = capsys.readouterr().err
         assert "Traceback" not in err, "exit 2 with a traceback is the shape this refuses"
-        assert err.startswith("laya-evals: "), "a usage error, named as one: %r" % err
+        assert err.startswith("laya-multimodal eval: "), "a usage error, named as one: %r" % err
         assert "gate policy" in err, "and named as *which* usage error: %r" % err
     # A path that is not there is `OSError`, and `load_policy` names it as a gate policy on purpose:
     # `main`'s own `FileNotFoundError` arm would still exit 2, with a message that no longer says
@@ -3760,14 +3760,14 @@ def test_cli_rejects_invalid_policy_json_and_version(monkeypatch, tmp_path, caps
     assert evals_cli.main(["run", dataset, "--gate-policy", str(missing)]) == 2
     err = capsys.readouterr().err
     assert "Traceback" not in err, "exit 2 with a traceback is the shape this refuses: %r" % err
-    assert err.startswith("laya-evals: ") and "gate policy" in err, (
+    assert err.startswith("laya-multimodal eval: ") and "gate policy" in err, (
         "the refusal still names the flag it came from: %r" % err)
     assert str(missing) in err, "and the path the caller typed: %r" % err
     assert not built
 
 
 def test_cli_run_slice_gate_and_saved_compare_share_policy(monkeypatch, tmp_path, capsys):
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     # Choice answers without confidence keep this gate-wiring test weight-free.
     def answer(label):
@@ -3794,7 +3794,7 @@ def test_cli_run_slice_gate_and_saved_compare_share_policy(monkeypatch, tmp_path
 
 
 def test_cli_compare_reports_a_different_recorded_gate_policy(tmp_path, capsys):
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     baseline = tmp_path / "baseline.json"
     candidate = tmp_path / "candidate.json"
@@ -3822,7 +3822,7 @@ def test_cli_compare_reports_a_different_recorded_gate_policy(tmp_path, capsys):
 
 
 def test_slice_gate_fails_closed_on_identity_or_skipped_cases(tmp_path):
-    from laya import _eval_policy
+    from laya_multimodal import _eval_policy
 
     candidate = _slice_gate_report(171, 12)
     base = _slice_gate_report(162, 18)
@@ -3853,7 +3853,7 @@ def test_slice_gate_fails_closed_on_identity_or_skipped_cases(tmp_path):
     (["en=" + SHA, "english=" + SHA], (None, {"en": SHA, "english": SHA})),  # one commit, two spellings
 ])
 def test_parse_revisions_accepts_both_forms(pairs, expected):
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     assert evals_cli._parse_revisions(pairs) == expected
 
@@ -3865,7 +3865,7 @@ def test_parse_revisions_accepts_both_forms(pairs, expected):
     ("abc", None),
 ])
 def test_parse_revisions_rejects_half_a_pair(pair, fragment):
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     if fragment is None:
         assert evals_cli._parse_revisions([pair]) == (pair, {})
@@ -3879,7 +3879,6 @@ def test_parse_revisions_rejects_half_a_pair(pair, fragment):
     (["multimodal=abc", "multimodal=def"], None),
     (["Multimodal=abc", "multimodal=def"], ("Multimodal", "multimodal")),
     (["default=abc", "multimodal=def"], ("default", "multimodal")),
-    (["laya=abc", "default=def"], ("laya", "default")),
 ])
 def test_parse_revisions_rejects_two_commits_for_one_checkpoint(pairs, spelled):
     """The `NAME=SHA` form refuses the clash the bare form already refuses.
@@ -3890,7 +3889,7 @@ def test_parse_revisions_rejects_two_commits_for_one_checkpoint(pairs, spelled):
     `Router.resolve` folds case and aliases onto the key it loads, so the same is true however the
     checkpoint is spelled; the refusal follows the checkpoint, not the spelling.
     """
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     with pytest.raises(EvalError) as exc:
         evals_cli._parse_revisions(pairs)
@@ -3905,7 +3904,7 @@ def test_parse_revisions_rejects_two_commits_for_one_checkpoint(pairs, spelled):
 
 
 def test_parse_revisions_rejects_two_different_bare_commits():
-    from laya import evals_cli
+    from laya_multimodal import evals_cli
 
     with pytest.raises(EvalError) as exc:
         evals_cli._parse_revisions(["abc", "def"])

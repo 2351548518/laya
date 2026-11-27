@@ -5,14 +5,14 @@ Demonstrates:
 2. Direct Agno Team routing (router.route_team).
 3. Calibrated confidence threshold fallback gating to a generalist or human lead.
 4. Pre-execution message guardrails (LayaAgnoGuardrail) screening malicious prompts.
-5. Edge/Serverless deployment against remote laya-serve HTTP instances.
+5. Edge/Serverless deployment against remote laya-multimodal-serve HTTP instances.
 """
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from laya.integrations.agno import (
+from laya_multimodal.integrations.agno import (
     AgnoAgent,
     AgnoTeam,
     LayaAgnoRouter,
@@ -69,7 +69,7 @@ class _DemoAgent:
 
 _agent = None
 try:
-    from laya import Router
+    from laya_multimodal import Router
     r = Router()
     r.predict("test", {"test": {"type": "choice", "instructions": "test", "criteria": {"a": "a"}}})
     _agent = r
@@ -161,7 +161,7 @@ for label, message in (("benign example", safe_query), ("adversarial example", m
 # =====================================================================
 # 4. Remote HTTP Server Deployment (Zero Heavy Dependencies)
 # =====================================================================
-# Connects to your self-hosted `laya-serve` instance without requiring PyTorch on edge clients.
+# Connects to your self-hosted `laya-multimodal-serve` instance without requiring PyTorch on edge clients.
 remote_router = LayaAgnoRouter(
     base_url="http://localhost:8080",
     confidence_threshold=0.85,

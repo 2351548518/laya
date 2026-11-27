@@ -15,5 +15,5 @@ x-nvidia: &nvidia
             capabilities: [gpu]
 
 services:
-  laya: *nvidia
-  laya-serve: *nvidia
+  laya-multimodal: *nvidia
+  laya-multimodal-serve: *nvidia

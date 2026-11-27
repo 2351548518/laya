@@ -7,7 +7,7 @@ from contextlib import redirect_stderr, redirect_stdout
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from laya import cli  # noqa: E402
+from laya_multimodal import cli  # noqa: E402
 
 PASS, FAIL = [], []
 
@@ -169,9 +169,9 @@ check("flags: --model forwarded", stub.route_calls[0][1]["model"] == "multimodal
 
 # ------------------------------------------------- --model is core's registry, not a copy of it
 # `choices=` compared strings exactly, so the flag knew three spellings while the router it feeds
-# has always resolved a dozen more. The names and aliases are imported from `laya.router` rather
+# has always resolved a dozen more. The names and aliases are imported from `laya_multimodal.router` rather
 # than written out, so this sweep follows the registry instead of drifting from it.
-from laya.router import DEFAULT_MODELS, _ALIASES  # noqa: E402
+from laya_multimodal.router import DEFAULT_MODELS, _ALIASES  # noqa: E402
 
 
 def parse_model(argv):
@@ -193,14 +193,14 @@ for name in sorted(DEFAULT_MODELS):
 for alias, canonical in sorted(_ALIASES.items()):
     got = parse_model(["t", "--model", alias])
     check("model: alias %s is %s" % (alias, canonical), got == canonical, repr(got))
-for spelling, want in ((" MULTIMODAL ", "multimodal"), ("DEFAULT", "multimodal"), (" LAYA ", "multimodal")):
+for spelling, want in ((" MULTIMODAL ", "multimodal"), (" DEFAULT ", "multimodal")):
     got = parse_model(["t", "--model", spelling])
     check("model: casing and spacing %r" % spelling, got == want, repr(got))
 for auto in ("auto", "AUTO", " Auto "):
     got = parse_model(["t", "--model", auto])
     check("model: %r pins nothing" % auto, got is None, repr(got))
 check("model: omitting it pins nothing either", parse_model(["t"]) is None)
-for bad in ("gpt4", "english-ish", "laya-typed", ""):
+for bad in ("gpt4", "english-ish", "laya", "laya-typed", ""):
     got = parse_model(["t", "--model", bad])
     check("model: %r rejected" % bad, got == "REJECTED", repr(got))
 
@@ -221,7 +221,7 @@ check("model: error names auto", "'auto'" in text, text)
 code, out, err, stub = run_cli(["charged twice", "--model", "default"])
 check("model: alias forwarded canonical to route",
       code == 0 and stub.route_calls[0][1]["model"] == "multimodal", str(stub.route_calls))
-code, out, err, stub = run_cli(["charged twice", "--predict", "--model", "LAYA"])
+code, out, err, stub = run_cli(["charged twice", "--predict", "--model", "DEFAULT"])
 check("model: alias forwarded canonical to predict",
       code == 0 and stub.predict_calls[0][1]["model"] == "multimodal", str(stub.predict_calls))
 code, out, err, stub = run_cli(["charged twice", "--model", "auto"])
@@ -473,12 +473,12 @@ check("batch: redirected stdout is written as utf-8", code == 0
 #
 # `Agent.predict_batch` and `Router.predict_batch` have grouped similarly sized states into one
 # forward pass since #294, README teaches it as the library call, and `research/` reports 2.15x on
-# 10,000 tickets from it. `laya --batch` could set `--batch-size` but not the grouping that makes a
+# 10,000 tickets from it. `laya-multimodal --batch` could set `--batch-size` but not the grouping that makes a
 # bounded pass cheap, so the one knob with a measurable effect on the other knob was reachable only
 # by writing Python. These run the real parser and the real `run_batch` over a recording router.
 import inspect as _inspect  # noqa: E402
 
-from laya.router import Router as _CoreRouter  # noqa: E402
+from laya_multimodal.router import Router as _CoreRouter  # noqa: E402
 
 many = os.path.join(tmp, "four.txt")
 with open(many, "w", encoding="utf-8") as handle:
@@ -582,14 +582,6 @@ code, out, err, stub = run_batch_cli(["--batch", six, "--predict", "--batch-size
                                       "--sort-by-length"], router=GroupingRouter([6]))
 check("sort: one group keeps the file-wide wording, sized by the group core saw",
       code == 0 and "1 < N < 6" in err, "err %r" % err)
-
-# A flag nobody can find is a flag nobody uses. README is where `laya --batch` and `/predict/batch`
-# are taught, so the same pages that teach `--batch-size` have to teach the grouping that makes a
-# bounded pass cheap -- including the condition it needs, since a run without it changes nothing.
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-with open(os.path.join(_ROOT, "docs", "laya-guide.md"), encoding="utf-8") as handle:
-    readme = handle.read()
-
 
 # --------------------------------------------------------------------- --questions FILE
 # The CLI could only ever answer the five built-in presets, while the library's whole input is a
@@ -732,7 +724,7 @@ check("questions: a directory is exit 2 naming the file, not a runtime error",
 check("questions: a directory never reaches predict", stub.questions is None, str(stub.questions))
 
 # A UTF-8 BOM is what Notepad and Excel write. The other file readers in this repo open with
-# `utf-8-sig` for exactly that reason (docker/entrypoint.py, laya/train.py), but this one read
+# `utf-8-sig` for exactly that reason (docker/entrypoint.py, laya_multimodal/train.py), but this one read
 # plain utf-8, so the BOM became U+FEFF and a valid questions file was refused as "not valid JSON".
 bom_questions = write_raw("bom-questions.json", b"\xef\xbb\xbf" + _json.dumps(INTENTS).encode("utf-8"))
 code, out, err, stub = run_cli(["hello", "--questions", bom_questions], router=QuestionRecorder())
@@ -808,15 +800,15 @@ for value in ("abc", ""):
 
 # --------------------------------------------------------------- --min-confidence (#361's gate)
 # The gate itself is core's: `Router.predict` and `Router.predict_batch` both run the argument
-# through `laya.confidence.check_min_confidence` and then `flag_low_confidence`, which marks an
+# through `laya_multimodal.confidence.check_min_confidence` and then `flag_low_confidence`, which marks an
 # answer and keeps it. What this section covers is the CLI's half -- the flag reaches the call, an
 # unset flag is not sent as `None`, a value outside core's range is refused in core's words,
 # routing refuses the flag instead of exiting 0 having ignored it, and the mark a gated run
 # produces is printed to a terminal rather than only reachable through --json.
 import inspect  # noqa: E402
 
-from laya import Router as _Router  # noqa: E402
-from laya.confidence import check_min_confidence as _core_check  # noqa: E402
+from laya_multimodal import Router as _Router  # noqa: E402
+from laya_multimodal.confidence import check_min_confidence as _core_check  # noqa: E402
 
 
 class GatedRouter(QuestionRecorder):
@@ -949,7 +941,7 @@ check("threshold: --json still carries the raw key",
 
 # --------------------------------------------------------------------- train subcommand
 code, out, err, stub = run_cli(["train", "--help"])
-check("train subcommand: dispatches to train_cli and shows help", code == 0 and "laya-train" in out and "--train-split" in out, out)
+check("train subcommand: dispatches to train_cli and shows help", code == 0 and "laya-multimodal train" in out and "--train-split" in out, out)
 
 # Drift pin, the other direction: every control `predict` takes that the parser can name must
 # arrive in the call, and the ones it cannot name must be the accepted three. A control added to

@@ -10,7 +10,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from laya.integrations.crewai import (
+from laya_multimodal.integrations.crewai import (
     CrewAgent,
     CrewRouteDecision,
     CrewTask,
@@ -259,7 +259,7 @@ check_true("guard/score_fallback_flagged",
            harm_result({"type": "score", "score": 1.5, "confidence": 0.5})["passed"] is False)
 check_true("guard/score_fallback_passes", harm_result({"type": "score", "score": 0.53, "confidence": 0.5})["passed"])
 
-from laya.integrations._guard import probability_map
+from laya_multimodal.integrations._guard import probability_map
 
 # A remote JSON integer may be wider than a Python float. Refuse it as a malformed numeric field
 # instead of leaking OverflowError from the shared answer guard.
@@ -297,7 +297,7 @@ except Exception as _exc:
 # 0.0/1.0 because `bool` subclasses `int` -- each of which crashed or mis-scored the guardrail screen.
 # A distribution that is not a mapping of real numbers now falls back to the same normalised expected
 # level the empty path uses; a numeric (and numeric-string) distribution sums exactly as before.
-from laya.integrations._guard import score_violation_probability
+from laya_multimodal.integrations._guard import score_violation_probability
 
 _VALID = {"0": 0.10, "1": 0.15, "2": 0.30, "3": 0.45}
 check_true("guardprob/valid_distribution",
@@ -418,13 +418,13 @@ with patch("urllib.request.build_opener") as mock_build_opener:
 
 # --------------------------------------------------------------- 4b. Non-Object Remote Response
 #
-# A remote laya-serve body is arbitrary JSON: a gateway, a mis-pointed `base_url`, or a proxy error
+# A remote laya-multimodal-serve body is arbitrary JSON: a gateway, a mis-pointed `base_url`, or a proxy error
 # page can answer with a top-level array, string, number or `true`/`null`. `json.loads` accepts each
 # of those and both consumers read the result with `res.get("answers", …)`, so before the guard a
 # non-object leaked `AttributeError: 'list' object has no attribute 'get'` past the fail-closed path
 # instead of the `RuntimeError` every other remote failure raises here. `_call_remote` and the public
 # `route()` are both driven so a regression at either layer is caught.
-from laya.integrations.crewai import _call_remote as _crewai_call_remote
+from laya_multimodal.integrations.crewai import _call_remote as _crewai_call_remote
 
 _CREWAI_NON_OBJECT_BODIES = [
     ([], "list"),
@@ -473,7 +473,7 @@ with patch("urllib.request.build_opener") as _m:
 # screen with `'list' object has no attribute 'items'`. A crash is not the fail-closed path either.
 # A body without `answers`, or with `answers` as an object (even an empty one), is a no-decision
 # response rather than a malformed one, and has to keep routing and screening exactly as it does today.
-from laya.integrations.crewai import _call_remote as _crewai_call_remote
+from laya_multimodal.integrations.crewai import _call_remote as _crewai_call_remote
 
 _CREWAI_BAD_ANSWERS = [
     (["boom"], "list"),
@@ -533,18 +533,18 @@ for _body, _label in (({"model": "laya-multilingual"}, "answers absent"),
 
 # --------------------------------------------------------------- 5. Per-call decision controls
 #
-# `laya.integrations.langchain` has forwarded `max_len` / `head_max_len` and the five hook
+# `laya_multimodal.integrations.langchain` has forwarded `max_len` / `head_max_len` and the five hook
 # arguments since #530 / #532; this surface forwarded only `model`, so a crew with more candidate
 # agents than the default head budget fits could not widen its own window. The rule now lives in
 # one module the three integrations import, and the lists below are read out of it rather than
 # written out again here -- a control added to `._controls` without reaching this file fails here.
 import inspect
-from laya.agent import Agent
-from laya.integrations import _controls
-from laya.integrations import crewai as crewai_module
-from laya.integrations import langchain as langchain_module
-from laya.integrations import llamaindex as llamaindex_module
-from laya.router import Router
+from laya_multimodal.agent import Agent
+from laya_multimodal.integrations import _controls
+from laya_multimodal.integrations import crewai as crewai_module
+from laya_multimodal.integrations import langchain as langchain_module
+from laya_multimodal.integrations import llamaindex as llamaindex_module
+from laya_multimodal.router import Router
 
 CONTROLS = (tuple(_controls.PREDICT_CONTROLS) + tuple(_controls.DECISION_CONTROLS)
             + tuple(_controls.HOOK_CONTROLS))
@@ -692,7 +692,7 @@ check("controls/remote body omits unset budgets",
       [k for k in remote_body({}) if k in _controls.PREDICT_CONTROLS], [])
 check("controls/remote body keeps a zero",
       remote_body({"head_max_len": 0}).get("head_max_len"), 0)
-# `lang` / `min_confidence` are laya-serve `BODY_CONTROLS` too, so the same override reaches the
+# `lang` / `min_confidence` are laya-multimodal-serve `BODY_CONTROLS` too, so the same override reaches the
 # remote node -- and an unset one stays out of the body rather than shadowing the deployment.
 check("controls/remote body carries the decision controls",
       {k: v for k, v in remote_body({"lang": "es", "min_confidence": 0.3}).items()
@@ -715,7 +715,7 @@ for _c, _sample in (("hooks", [object()]), ("on_predict_start", object()),
     except ValueError as exc:
         check_true("controls/remote refuses %s" % _c, True)
         check_true("controls/remote %s names itself" % _c, _c in str(exc))
-        check_true("controls/remote %s names the endpoint" % _c, "laya-serve" in str(exc))
+        check_true("controls/remote %s names the endpoint" % _c, "laya-multimodal-serve" in str(exc))
     except Exception as exc:
         check_true("controls/remote refuses %s" % _c, False, type(exc).__name__)
 
@@ -884,7 +884,7 @@ for _label, _run in SURFACES:
         pass
     check("routing/%s refusal happens before the call" % _label, _strict.seen, {})
 
-# Both hints ride in the laya-serve body -- they are `BODY_CONTROLS` there -- and a blank one
+# Both hints ride in the laya-multimodal-serve body -- they are `BODY_CONTROLS` there -- and a blank one
 # stays blank rather than dropping out of the request.
 check("routing/remote body carries both hints",
       {k: v for k, v in remote_body({"task": "typed_decisions", "lang_guess": "de"}).items()
@@ -896,7 +896,7 @@ check("routing/remote body keeps an empty lang_guess",
       remote_body({"lang_guess": ""}).get("lang_guess"), "")
 
 # A `lang_guess` may also be a callable taking the state, and only the code string has a wire form.
-# `laya-serve` answers 422 for the callable; naming it here says so before the request goes out.
+# `laya-multimodal-serve` answers 422 for the callable; naming it here says so before the request goes out.
 for _surface, _go in (("router", lambda **kw: LayaCrewRouter(base_url="http://localhost:8000",
                                                             **kw).route("x", agents)),
                       ("guard", lambda **kw: LayaTaskGuard(base_url="http://localhost:8000",
@@ -910,7 +910,7 @@ for _surface, _go in (("router", lambda **kw: LayaCrewRouter(base_url="http://lo
         check_true("routing/%s remote lang_guess names itself" % _surface,
                    "lang_guess" in str(exc))
         check_true("routing/%s remote lang_guess names the endpoint" % _surface,
-                   "laya-serve" in str(exc))
+                   "laya-multimodal-serve" in str(exc))
     except Exception as exc:
         check_true("routing/%s remote refuses a callable lang_guess" % _surface,
                    False, type(exc).__name__)

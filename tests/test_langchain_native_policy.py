@@ -6,7 +6,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from laya.integrations.langchain import LayaRouter  # noqa: E402
+from laya_multimodal.integrations.langchain import LayaRouter  # noqa: E402
 
 
 CRITERIA = {"billing": "invoices", "tech": "bugs"}
@@ -146,7 +146,7 @@ class NativePolicyTests(unittest.TestCase):
         self.assertIs(caught.exception, failure)
 
     def test_vega_policy_survives_the_adapter_without_model_weights(self):
-        from laya.vega import VegaAgent
+        from laya_multimodal.vega import VegaAgent
 
         class Engine:
             mode = "auto"

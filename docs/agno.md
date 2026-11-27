@@ -1,5 +1,7 @@
 # Agno Integration
 
+**English** · [简体中文](zh-CN/agno.md)
+
 Use locally hosted native decisions with Agno teams.
 
 * **`LayaAgnoRouter`**: agent router replacing slow leader LLMs in Agno `Team(mode="route")` or standalone multi-agent pipelines.
@@ -7,7 +9,7 @@ Use locally hosted native decisions with Agno teams.
 
 Both take core's per-call decision controls -- the input token budget (`max_len`), the language and abstention controls (`lang`, `min_confidence`), and the five prediction-hook arguments (`hooks`, `on_predict_start`, `on_predict_end`, `hooks_raise`, `hooks_timeout`) -- see [Per-call decision controls](#5-per-call-decision-controls).
 
-Supports both **local in-process inference** (`Agent` or `Router`) and **remote HTTP inference** against your own `laya-serve` instance with weights hosted by the service.
+Supports both **local in-process inference** (`Agent` or `Router`) and **remote HTTP inference** against your own `laya-multimodal-serve` instance with weights hosted by the service.
 
 ## Installation
 
@@ -15,18 +17,16 @@ Supports both **local in-process inference** (`Agent` or `Router`) and **remote 
 python -m pip install -e '.[multimodal,agno]'
 ```
 
-Requires **`agno>=1.1.14,<2`** (the release where Agno's dedicated `Team` class and `mode="route"` multi-agent routing were introduced).
-
 ---
 
 ## 1. Agent & Team Routing (`LayaAgnoRouter`)
 
-In Agno multi-agent teams configured with `Team(mode="route")`, a leader LLM evaluates the user request and decides which specialist agent should answer. Autoregressive LLMs spend 2,000–4,000 ms generating text just to pick an agent name. `LayaAgnoRouter` evaluates incoming queries against agent roles and descriptions with zero token generation cost:
+For `Team(mode="route")`, score the incoming request against specialist roles and descriptions.
 
 ```python
 from agno.agent import Agent
 from agno.team import Team
-from laya.integrations.agno import LayaAgnoRouter
+from laya_multimodal.integrations.agno import LayaAgnoRouter
 
 # Define specialized worker agents
 analyst = Agent(
@@ -75,7 +75,7 @@ Screen incoming messages before an agent executes tools or calls another model. 
 `action="raise"`, handle the exception for every message.
 
 ```python
-from laya.integrations.agno import LayaAgnoGuardrail, LayaAgnoGuardrailError
+from laya_multimodal.integrations.agno import LayaAgnoGuardrail, LayaAgnoGuardrailError
 
 guard = LayaAgnoGuardrail(
     action="raise",      # "raise" raises LayaAgnoGuardrailError; "filter" returns rejection text; "annotate" appends flags
@@ -99,7 +99,7 @@ for message in (safe_query, adversarial_query):
 
 ## 3. Calibrated Confidence Gating
 
-`LayaAgnoRouter` gates on calibrated `answer_confidence` (`max(p)`):
+`LayaAgnoRouter` uses `answer_confidence` (`max(p)`) for gating:
 
 - **Automatic Fallback:** Specify `fallback_agent_index` to route ambiguous tasks to a human supervisor or general lead agent.
 - **Strict Guarding:** Set `raise_on_low_confidence=True` to raise `LayaLowConfidenceError` when a task cannot be matched to an agent role with sufficient confidence.
@@ -111,10 +111,10 @@ for message in (safe_query, adversarial_query):
 For serverless deployments or environments without local GPUs:
 
 ```python
-from laya.integrations.agno import LayaAgnoRouter
+from laya_multimodal.integrations.agno import LayaAgnoRouter
 
 router = LayaAgnoRouter(
-    base_url="http://laya-serve.internal:8080",
+    base_url="http://laya-multimodal-serve.internal:8080",
     confidence_threshold=0.85,
     fallback_agent_index=0,
 )

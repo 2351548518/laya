@@ -18,7 +18,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from laya.integrations.agno import (
+from laya_multimodal.integrations.agno import (
     AgnoAgent,
     AgnoRouteDecision,
     AgnoTeam,
@@ -476,13 +476,13 @@ with patch("urllib.request.build_opener") as mock_build_opener:
 
 # ---------------------------------------------------------------- 5b. Non-object remote response
 #
-# A remote laya-serve body is arbitrary JSON: a gateway, a mis-pointed `base_url`, or a proxy error
+# A remote laya-multimodal-serve body is arbitrary JSON: a gateway, a mis-pointed `base_url`, or a proxy error
 # page can answer with a top-level array, string, number or `true`/`null`. `json.loads` accepts every
 # one of those, and both consumers read the result with `res.get("answers", …)` (route's delegation
 # lookup and the guardrail screen), so before the guard a non-object leaked `AttributeError` past the
 # fail-closed path instead of the `RuntimeError` every other remote failure raises here. These checks
 # hit `_call_remote` directly and the public `route()` path, so a regression at either layer is caught.
-from laya.integrations.agno import _call_remote
+from laya_multimodal.integrations.agno import _call_remote
 
 _NON_OBJECT_BODIES = [
     ([], "list"),
@@ -530,7 +530,7 @@ with patch("urllib.request.build_opener") as _m:
 # screen with `'list' object has no attribute 'items'`. A crash is not the fail-closed path either.
 # A body without `answers`, or with `answers` as an object (even an empty one), is a no-decision
 # response rather than a malformed one, and has to keep routing and screening exactly as it does today.
-from laya.integrations.agno import _call_remote as _agno_call_remote
+from laya_multimodal.integrations.agno import _call_remote as _agno_call_remote
 
 _AGNO_BAD_ANSWERS = [
     (["boom"], "list"),
@@ -593,13 +593,13 @@ for _body, _label in (({"model": "laya-multilingual"}, "answers absent"),
 # there without reaching this file fails these checks. This mirrors section 5
 # of test_crewai.py and keeps the three integration modules in sync.
 import inspect
-from laya.agent import Agent
-from laya.integrations import _controls
-from laya.integrations import agno as agno_module
-from laya.integrations import crewai as crewai_module
-from laya.integrations import langchain as langchain_module
-from laya.integrations import llamaindex as llamaindex_module
-from laya.router import Router
+from laya_multimodal.agent import Agent
+from laya_multimodal.integrations import _controls
+from laya_multimodal.integrations import agno as agno_module
+from laya_multimodal.integrations import crewai as crewai_module
+from laya_multimodal.integrations import langchain as langchain_module
+from laya_multimodal.integrations import llamaindex as llamaindex_module
+from laya_multimodal.router import Router
 
 CONTROLS = (
     tuple(_controls.PREDICT_CONTROLS)
@@ -781,7 +781,7 @@ for _c, _sample in (
     except ValueError as exc:
         check_true("controls/remote refuses %s" % _c, True)
         check_true("controls/remote %s names itself" % _c, _c in str(exc))
-        check_true("controls/remote %s names the endpoint" % _c, "laya-serve" in str(exc))
+        check_true("controls/remote %s names the endpoint" % _c, "laya-multimodal-serve" in str(exc))
     except Exception as exc:
         check_true("controls/remote refuses %s" % _c, False, type(exc).__name__)
 

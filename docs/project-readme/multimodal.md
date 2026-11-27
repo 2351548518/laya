@@ -1,48 +1,57 @@
-# 动手运行、训练与评测
+# Run inference, training and evaluation
 
-从仓库根目录执行 Shell 命令。已有本地 `.venv-mm` 时，可以先用 `source .venv-mm/bin/activate` 激活它。首次配置环境可在激活的 Python 虚拟环境中安装项目。视频需要系统里的 FFmpeg 和 ffprobe，HTTP 示例需要 `serve` 依赖。
+**English** · [简体中文](../zh-CN/project-readme/multimodal.md)
+
+Run these commands from the repository root. If you already have `.venv-mm`, activate it with
+`source .venv-mm/bin/activate`. Video inputs need FFmpeg and ffprobe. Install the `serve` extra
+for the HTTP examples.
 
 ```bash
 python -m pip install -e '.[multimodal]'
-python -c 'import torch, laya; print(torch.__version__); print(laya.__file__)'
+python -c 'import torch, laya; print(torch.__version__); print(laya_multimodal.__file__)'
 ```
 
-第二条命令应打印 PyTorch 版本和当前仓库的 `laya/__init__.py` 路径。首次阅读可以依次完成 CPU 演示、Python 推理和 HTTP 调用，理解数据格式后再展开四卡训练。 [教程首页](index.md) · [基座支持矩阵](../multimodal.md#backbones-and-input-types)
+The import check prints the PyTorch version and the current checkout's Python package path.
+Start with the CPU exercise, then try Python and HTTP with a real checkpoint.
+[Tutorial home](index.md) · [Supported inputs](../multimodal.md#backbones-and-input-types)
 
 <a name="cpu-walkthrough"></a>
 
-## 1. 在 CPU 上跑通两个头部
+## 1. Exercise both heads on CPU
 
-从这个练习开始可以快速确认安装，然后对照架构图和训练图。脚本用程序生成的隐藏状态，调用实际的候选评分头、单框定位头、损失函数和反向传播。运行这一节只需代码和 Python 依赖。
+The script constructs hidden states and runs the actual candidate scorer, box head, losses
+and backpropagation. It needs the Python dependencies and source checkout.
 
 ```bash
 CUDA_VISIBLE_DEVICES='' python docs/project-readme/assets/walkthrough.py
 ```
 
-读输出时先找以下字段。
-
-| 字段 | 预期结果 | 含义 |
+| Output field | Expected | Meaning |
 | --- | --- | --- |
-| `heads.logits_shape` | `[3, 3]` | 三条决策请求，每条在批中补齐到三个候选。 |
-| `heads.box_shape` | `[1, 1, 4]` | 一条定位请求、一个候选框、四个归一化坐标。 |
-| `worked_calculations.choice_warmup_loss` | 约 `0.4267` | 选中目标的 soft CE 与加权 Brier 之和。 |
-| `worked_calculations.score_parts.ordinal_rps` | 约 `0.005` | 评分档位的累积概率误差。 |
-| `worked_calculations.single_box_loss` | 约 `2.0132` | L1、GIoU 和定位质量项的加权和。 |
+| `heads.logits_shape` | `[3, 3]` | Three decisions with up to three candidates each |
+| `heads.box_shape` | `[1, 1, 4]` | One image, one box, four normalized coordinates |
+| `worked_calculations.choice_warmup_loss` | About `0.4267` | Soft cross-entropy and weighted Brier loss |
+| `worked_calculations.score_parts.ordinal_rps` | About `0.005` | Cumulative probability error across levels |
+| `worked_calculations.single_box_loss` | About `2.0132` | Weighted coordinate, GIoU and quality loss |
 
-有本地 v6 数据时，再加一次 `--data`，核对两份附录的样例索引。输出中的 `verified_v6_examples` 应为 `{"io": 30, "tasks": 192}`。脚本按字节位置逐条读取，检查记录 ID、题型、标签和媒体引用。
+With local v6 data, add `--data` to verify both sample indexes. Expect
+`verified_v6_examples = {"io": 30, "tasks": 192}`. The script seeks to each row and checks its ID,
+question type, target and media references.
 
 ```bash
 CUDA_VISIBLE_DEVICES='' python docs/project-readme/assets/walkthrough.py \
   --data multimodal-data/open-jev-omni-qwen-filtered-v6/native
 ```
 
-接下来挑一条图像样本，沿图确认每个维度来自哪里，再用三个数字例子复算损失。 [样本进入模型](multimodal-current.md#input-to-model) · [模型架构](multimodal-current.md#architecture) · [损失计算](multimodal-current.md#worked-losses)
+[Follow a row](multimodal-current.md#input-to-model) · [Tensor shapes](multimodal-current.md#architecture) · [Worked losses](multimodal-current.md#worked-losses)
 
 <a name="python-inference"></a>
 
-## 2. 运行 Python 决策与单框定位
+## 2. Predict text and a single box in Python
 
-以下使用训练得到的 v6 原生检查点。也可以把 `checkpoint` 改成已发布的 v1 原生 Safetensors 目录。v6 的 LoRA 检查点还会从其配置记录的路径加载原始基座。先确认检查点里有 `multimodal_config.json`。 [检查点路径和下载方式](multimodal-release.md#native-checkpoint)
+Set `checkpoint` to a trained local v6 directory or the merged v1 safetensors. Confirm
+`multimodal_config.json` is present. A LoRA directory reads the original backbone from the path
+recorded in that file. [Checkpoint paths](multimodal-release.md#native-checkpoint)
 
 ```bash
 checkpoint="multimodal-runs/qwen4b-v6-fresh/sft/best"
@@ -53,7 +62,7 @@ from pathlib import Path
 import sys
 
 from PIL import Image, ImageDraw
-from laya import MultimodalAgent
+from laya_multimodal import MultimodalAgent
 
 agent = MultimodalAgent(sys.argv[1], device="cpu")
 result = agent.predict(
@@ -94,26 +103,32 @@ image.save(work / "prediction.png")
 PY
 ```
 
-按题目 ID 对照结果。先看 `route.choice` 选中了哪个键，再读 `route.probabilities` 了解模型如何在两个选项间分配概率。`refund.noul` 是回答“是”的概率，`urgency.score` 是档位索引的期望，`urgency.legend` 给出档位含义。三档评分中，如果分布为 `[0.1, 0.5, 0.4]`，期望就是 `0×0.1 + 1×0.5 + 2×0.4 = 1.3`。`output_tokens=0` 表示模型直接从隐藏状态读出答案。
+Look at the answer for each question ID. `route.choice` is the selected key, `route.probabilities`
+gives its distribution, and `refund.noul` is P(true). `urgency.score` is an expected level
+index. For probabilities `[0.1, 0.5, 0.4]`, it is `0×0.1 + 1×0.5 + 2×0.4 = 1.3`.
+`usage.output_tokens` is zero. A recorded CPU run using v1 returned `billing`, `0.9967`
+and `0.8301` for the route, refund and urgency respectively.
 
-用已发布的 v1 原生权重在 CPU 运行这段例子时，`route.choice` 为 `billing`，`refund.noul` 为 `0.9967`，`urgency.score` 为 `0.8301`。换用 v6 检查点时，按相同字段读取它的结果。
-
-打开 `_local/project-readme-tutorial/prediction.png`，用蓝色预测框和红色方块比较位置。`box` 的四个坐标在 `[0, 1]` 内，横坐标乘图像宽，纵坐标乘图像高。`target.confidence` 估计定位 IoU。该图可用于验证输出格式，任务准确率用带标注的评测集测量。 [Python API](../reference/multimodal.md) · [单框契约](../grounding.md)
+Open `_local/project-readme-tutorial/prediction.png` to compare the blue box with the red square.
+The box is normalized to the image. Multiply x coordinates by width and y by height.
+`target.confidence` estimates IoU. Use a labelled suite for accuracy.
+[Python API](../reference/multimodal.md) · [Single-box contract](../grounding.md)
 
 <a name="systemone-http"></a>
 
-## 3. 发送 System One HTTP 请求
+## 3. Send a System One request
 
-在一个终端启动服务。这里使用 CPU 和环回地址，便于在同一台机器上调用。已有 `laya-serve` 时可从设置 `checkpoint` 开始。
+Start the service on the loopback address with the chosen checkpoint.
 
 ```bash
 python -m pip install -e '.[multimodal,serve]'
 checkpoint="multimodal-runs/qwen4b-v6-fresh/sft/best"
 CUDA_VISIBLE_DEVICES='' LAYA_HOST=127.0.0.1 LAYA_PORT=8000 LAYA_DEVICE=cpu LAYA_PRELOAD=0 \
-  LAYA_MULTIMODAL_MODEL="$PWD/$checkpoint" laya-serve
+  LAYA_MULTIMODAL_MODEL="$PWD/$checkpoint" laya-multimodal-serve
 ```
 
-另开一个终端，从仓库根目录执行健康检查和文本请求。请求里的 `"model": "multimodal"` 选中刚才配置的原生模型。首次请求会加载检查点。
+From a second terminal, check liveness and send a text decision. The first prediction loads
+the checkpoint when lazy loading is enabled.
 
 ```bash
 curl -fsS --noproxy 127.0.0.1 http://127.0.0.1:8000/health
@@ -133,9 +148,12 @@ curl -fsS --noproxy 127.0.0.1 http://127.0.0.1:8000/v1/systemone \
 JSON
 ```
 
-根对象中的 `model` 告诉你服务使用的模型，`answers.route` 对应请求中的同名题目，`usage` 记录输入和输出 token。单条请求默认使用 TypeSafe 输出。`choice` 和 `score` 的 `confidence` 按 TypeSafe 的定义计算，`noul` 直接返回真值概率。 [完整响应字段](../http-api.md#strict-jev-contract-laya_jev_strict)
+Read `model`, `answers.route` and `usage`. Single requests default to the TypeSafe response
+shape, with TypeSafe confidence for Choice and Score and P(true) for Noul.
+[Response format](../http-api.md#strict-jev-contract-laya_jev_strict)
 
-图片还是发到 `/v1/systemone`。用第二步生成的 PNG，把 `state` 中的 `scene` 引用绑定至 `assets.scene`，再把它的 `part` 与 multipart 字段 `photo` 对应起来。
+Use the generated PNG in a multipart request. The `scene` reference in the state resolves to
+`assets.scene.part` and then the file part named `photo`.
 
 ```bash
 curl -fsS --noproxy 127.0.0.1 http://127.0.0.1:8000/v1/systemone \
@@ -144,16 +162,19 @@ curl -fsS --noproxy 127.0.0.1 http://127.0.0.1:8000/v1/systemone \
   -F 'photo=@_local/project-readme-tutorial/scene.png;type=image/png'
 ```
 
-查看 `answers.target.box`、`answers.target.confidence` 和 `usage.output_tokens`。单框请求引用一张图片，PNG 或 JPEG 的边长需在 280 至 1,568 像素之间。启用鉴权的服务还需要按配置发送 Bearer 凭据。 [图片资产协议](../http-api.md#image-assets-and-single-box-questions) · [客户端示例](../multimodal-clients.md)
+Check `answers.target.box`, `answers.target.confidence` and `usage.output_tokens`. Each PNG or
+JPEG side must be between 280 and 1,568 pixels. Send a bearer token on a configured deployment.
+[Image assets](../http-api.md#image-assets-and-single-box-questions) · [SDK examples](../multimodal-clients.md)
 
 <a name="audio-and-video"></a>
 
-## 4. 换成视频或音频
+## 4. Use video or audio
 
-v6 Qwen3.5 读取视频的画面和时间戳。将本地短视频路径传给 `video`，设置 `video_audio=False`。在 Python 里可以调整 `video_frames`。把以下片段中的检查点和视频路径改成自己的本地文件。
+Qwen3.5 reads visual frames and timestamps. Set `video_audio=False` and adjust `video_frames`.
+Use your own short clip and checkpoint paths.
 
 ```python
-from laya import MultimodalAgent
+from laya_multimodal import MultimodalAgent
 
 agent = MultimodalAgent("multimodal-runs/qwen4b-v6-fresh/sft/best", device="cpu")
 result = agent.predict(
@@ -165,9 +186,8 @@ print(result["answers"]["event"]["noul"])
 print(result["media"]["video"]["frame_times"])
 ```
 
-第一行结果是真值概率，第二行记录实际采样时间。对视频输出有疑问时，先核对画面中的关键事件是否落在采样帧附近。
-
-HTTP 视频或音频使用 `POST /v1/multimodal`。JSON 中将本地文件字节编码后放进 `video.base64` 或 `audio.base64`，同一请求提供 `state` 与 `questions`。例如向已启动的 Qwen 服务提交一段视觉视频。
+The answer is a probability. Inspect the sampled frame times when a relevant event is brief.
+To send a clip via HTTP, put base64 file bytes in `video.base64` on `POST /v1/multimodal`.
 
 ```bash
 python - clips/workbench.mp4 <<'PY' | curl -fsS --noproxy 127.0.0.1 http://127.0.0.1:8000/v1/multimodal \
@@ -186,16 +206,19 @@ print(json.dumps({
 PY
 ```
 
-HTTP 的采样帧数和音轨策略取自服务加载的检查点。做音频决策时，用训练过的 Gemma 4 等音频检查点，Python 传 `audio="clips/speech.wav"` 或传波形和 `sampling_rate`。HTTP 把文件放在 `audio.base64`。先做一道“是否有人说话”的 `noul` 判断，再依照相同契约尝试单选或评分。 [音频真实样例](multimodal-current-io-examples.md#gemma-audio) · [原生媒体客户端](../multimodal-clients.md)
+The service uses its checkpoint's frame and audio settings. For waveform decisions, load a
+trained Gemma audio checkpoint. In Python pass `audio="clips/speech.wav"` or a waveform and
+`sampling_rate`. In HTTP pass `audio.base64`. Start with a Noul question about speech, then try
+a choice or rating. [Audio examples](multimodal-current-io-examples.md#gemma-audio) · [Media clients](../multimodal-clients.md)
 
 <a name="reproduce"></a>
 
-## 5. 复现 v6 两阶段训练
+## 5. Reproduce the two v6 stages
 
-联合训练实现位于 `laya/train.py`。下面用到的仓库脚本、`laya-train` 和 `laya train` 共用同一个命令入口。
-[训练接口参考](../reference/train.md)
+The packaged `laya-multimodal train` and the repository training script use
+`laya_multimodal/train.py`. [Training API](../reference/train.md)
 
-### 准备本地基座、数据和可用 GPU
+### Prepare the original backbone, data and four GPUs
 
 ```bash
 base="$PWD/models/pretrained/Qwen3.5-4B"
@@ -207,12 +230,16 @@ ls -lh "$base/config.json" "$data/"{warmup,train,dev,decision_dev,calibration}.j
 nvidia-smi
 ```
 
-`warmup.jsonl` 有 30,720 条，用于训练两个头。`train.jsonl` 有 1,500,000 条，用于联合微调。`dev.jsonl` 和 `decision_dev.jsonl` 用于选模。概率校准留到训练完成后使用 `calibration.jsonl`。父目录的 `manifest.json` 保存分片哈希和数量。v6 的准入记录绑定原始 Qwen 处理器路径和 16,384 token 的预算，训练时还会检查实际处理长度。
+`warmup.jsonl` contains 30,720 rows. `train.jsonl` has 1,500,000. Use `dev.jsonl` and
+`decision_dev.jsonl` for selection and a separate `calibration.jsonl` after training. The
+parent manifest records counts and checksums. The admitted Qwen rows use the original
+processor and the 16,384-token context budget.
 
-把下面的 `training_devices` 换成这次复现可用的四张物理卡。v6 正式运行使用的是 2、3、4、5。第一次复现使用尚未占用的 `$run` 目录，续训沿用原目录。
+Set `training_devices` to four free physical GPU indices. The recorded run used 2, 3, 4, 5.
+Use a fresh output directory for a new run and the original one for a continuation.
 
 ```bash
-training_devices=2,3,4,5  # 替换为本次可用的四张物理卡
+training_devices=2,3,4,5  # Select four free physical GPUs.
 export CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES="$training_devices"
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 TOKENIZERS_PARALLELISM=false
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
@@ -220,35 +247,43 @@ mkdir -p "$run"
 set -o pipefail
 ```
 
-### 阶段 A：从原始 Qwen 初始化并预热头部
+### Stage A · Warm up both heads
 
 ```bash
 python -m torch.distributed.run --standalone --nproc_per_node=4 \
-  --module laya.train_cli --visual-only --require-original-base \
+  --module laya_multimodal.train_cli --visual-only --require-original-base \
   --model "$base" --data "$data" --train-split warmup \
   --config "$recipes/head-config.json" --out "$run/head" 2>&1 | tee "$run/head.log"
 ```
 
-这一步从原始基座创建候选评分头和单框头，冻结骨干。全局 batch 为 64，共 480 个更新步。开始时查看 `head/initialization.json`，其中 `original_base` 为 `true`，`world_size` 为 4。完成后应看到 `head/best/multimodal_config.json`，这是下一阶段的起点。 [预热配置](assets/head-config.json) · [训练方式](multimodal-current.md#training)
+The original backbone stays frozen. A global batch of 64 makes 480 optimizer updates.
+Check `head/initialization.json` for `original_base: true` and `world_size: 4`.
+The recorded run uses the selected `head/best` checkpoint for the next stage.
+[Warmup recipe](assets/head-config.json) · [Training diagram](multimodal-current.md#training)
 
-### 阶段 B：联合 LoRA 微调
+### Stage B · Joint LoRA fine-tuning
 
-在阶段 A 成功完成后运行。全局样本数除以 batch 后向上取整，计划共 23,438 步。四个 rank 负责同一个全局窗口，分别累积本卡微批的梯度。
+Start this once the warmup selection exists. The planned training budget is 23,438 updates.
+Four ranks accumulate together over each global window.
 
 ```bash
 python -m torch.distributed.run --standalone --nproc_per_node=4 \
-  --module laya.train_cli --visual-only --qwen-training-delta \
+  --module laya_multimodal.train_cli --visual-only --qwen-training-delta \
   --model "$run/head/best" --data "$data" \
   --config "$recipes/sft-config.json" --out "$run/sft" 2>&1 | tee "$run/sft.log"
 ```
 
-此阶段使用新优化器更新语言 LoRA、视觉 merger 和两个头。开始时 `sft/initialization.json` 应指向 `head/best`。训练中查看 `sft/best` 的选模结果和 `checkpoint_latest.json` 的恢复点。结束后 `sft/training_report.json` 的 `status` 为 `complete`，`sft/last` 是最后一次保存的模型，`sft/best` 是按开发集规则选中的模型。 [SFT 配置](assets/sft-config.json) · [一次参数更新](multimodal-current.md#optimizer-step) · [当前训练入口](../reference/train.md)
+The optimizer updates language adapters, the visual merger and both heads.
+`sft/initialization.json` records the warmup source. `checkpoint_latest.json` points to
+recoverable training state. After completion, use `sft/training_report.json` to identify the
+selected checkpoint. `sft/last` holds the final update.
+[SFT recipe](assets/sft-config.json) · [One update](multimodal-current.md#optimizer-step)
 
 <a name="resume"></a>
 
-## 6. 读进度、选检查点和续训
+## 6. Read a run and resume training
 
-要查看正式 v6 的进度，给 `active_run` 使用以下目录。查看你复现的运行时，将它替换为自己的输出目录。
+Set `active_run` to the run you want to inspect.
 
 ```bash
 active_run="$PWD/multimodal-runs/qwen4b-v6-fresh"
@@ -256,12 +291,12 @@ rg '^grounding step=' "$active_run/sft.log" | tail -5
 cat "$active_run/sft/checkpoint_latest.json"
 ```
 
-- `step` 是已经完成的优化器更新。用 `step / 23438` 得到本轮 SFT 进度。如果只想估算剩余时间，用跨度较大的两行 `elapsed` 之差除以步数差，再乘以剩余步数。跨过开发集评测和保存的窗口会把这些耗时计入估算。
-- `loss` 是当前全局窗口的平均训练损失。样本的任务、长度和难度会影响单步数值，趋势可用一段窗口的平均值看。
-- `GROUNDING DEV` 是独立的开发集评测记录。SFT 每 500 步评测，检查 `decisions.overall.accuracy`、`decisions.by_modality` 和 `acc_iou50`。定位与决策同时用于选模。
-- 优化器快照每 250 步保存，在开发集评测和最终步也会保存。最新指针给出可恢复的步数，期间已写到日志的步数可能更多。
-
-查看最后一次开发集评测可只打印主要字段。
+- `step` counts completed optimizer updates. The planned denominator for this recipe is 23,438.
+  Estimate a rate across a longer interval so it includes checkpoint saves and development runs.
+- `loss` averages the training objective for the current global window.
+- `GROUNDING DEV` reports development metrics. The SFT recipe evaluates every 500 steps.
+- The optimizer snapshot interval is 250 steps, with additional saves after evaluations
+  and at the final step. The recoverable step can trail the most recent log entry.
 
 ```bash
 python - "$active_run/sft.log" <<'PY'
@@ -282,48 +317,60 @@ else:
 PY
 ```
 
-当原运行已经停止且需续训时，使用原运行的变量、配置、设备数量和输出目录，在同一条 SFT 启动命令中加上 `--resume "$run/sft"`。恢复使用快照里的权重、优化器、采样顺序和随机状态。原 SFT 的 `--model` 仍指向它启动时的 `head/best`，用于核验起始模型。下面沿用第五步复现时设置的变量。
+To continue a stopped run, keep its original model, data, configuration, rank count and
+output directory. `--model` still points to the SFT's original `head/best`. The snapshot
+restores the actual step, model, optimizer, order and RNG states.
 
 ```bash
 python -m torch.distributed.run --standalone --nproc_per_node=4 \
-  --module laya.train_cli --visual-only --qwen-training-delta \
+  --module laya_multimodal.train_cli --visual-only --qwen-training-delta \
   --model "$run/head/best" --data "$data" \
   --config "$recipes/sft-config.json" --out "$run/sft" \
   --resume "$run/sft" 2>&1 | tee -a "$run/sft.log"
 ```
 
-开始后日志应出现 `Resumed joint training at optimizer step ...`。推理和导出选择 `sft/best` 或已完成校准的模型目录，续训选择包含优化器快照的运行目录。 [检查点用途](multimodal-release.md) · [选模与同集结果](multimodal-current.md#matched-development)
+Look for `Resumed joint training at optimizer step ...`. Use a selected checkpoint for
+prediction or export, and a snapshot for continuation.
+[Checkpoint roles](multimodal-release.md) · [Matched dev results](multimodal-current.md#matched-development)
 
 <a name="swanlab"></a>
 
-### 启动训练时直接记录到 SwanLab
+### Record metrics from the training process
 
-在训练使用的 Python 环境安装 SwanLab 可选依赖。首次连接账号时，在启动训练的目录执行 `swanlab login --local`，根据终端提示完成授权。 [SwanLab 账号设置](https://swanlab.cn/settings) · [登录命令](https://docs.swanlab.cn/en/api/cli-swanlab-login.html)
+Install the optional extra in the training environment, then authenticate through the terminal.
+[SwanLab login reference](https://docs.swanlab.cn/en/api/cli-swanlab-login.html)
 
 ```bash
 python -m pip install -e '.[multimodal,swanlab]'
 swanlab login --local
 ```
 
-在第五步的头部预热和联合 SFT 命令中追加 `--swanlab online --swanlab-project laya-multimodal-v6`。下面是 SFT 阶段的完整例子，沿用第五步定义的 CUDA 设备和绝对路径。 `--swanlab-name` 可为实验指定名字。
+Add `--swanlab online --swanlab-project laya-multimodal-v6` to either stage. Here is the
+SFT command with the same absolute paths and devices as above. `--swanlab-name` sets a
+display name.
 
 ```bash
 python -m torch.distributed.run --standalone --nproc_per_node=4 \
-  --module laya.train_cli --visual-only --qwen-training-delta \
+  --module laya_multimodal.train_cli --visual-only --qwen-training-delta \
   --model "$run/head/best" --data "$data" \
   --config "$recipes/sft-config.json" --out "$run/sft" \
   --swanlab online --swanlab-project laya-multimodal-v6 2>&1 | tee "$run/sft.log"
 ```
 
-从项目根目录用 `torchrun --module laya.train_cli` 启动下一次训练。新建输出目录，并用绝对路径指定基座、数据和配置。若 SwanLab 已在其他目录登录，可从该目录调用当前项目的训练脚本。
+Use the experiment link printed to the terminal. Rank zero records `train/loss`,
+`train/gradient_norm`, window size, rate, optimizer group learning rates and estimated
+remaining time. `dev` tracks the evaluation slices, box metrics and selected score. `final`
+holds the endpoint evaluation. A continuation creates an experiment in the same group and
+continues the original step numbering.
 
-在终端打印的 SwanLab 实验链接中打开面板。主进程按优化器步直接记录 `train/loss`、`train/gradient_norm`、实际窗口大小、步速和预计剩余时间。`lr` 区域显示实际使用的学习率。`dev` 区域记录初始及各轮开发集评测，包含模态和题型切片、单框 IoU 和选模分。`final` 单独显示训练结束后的评测。预热和 SFT 按输出目录分组，`--resume` 时在同组创建新的续训实验，曲线沿用原优化器步数。
+`--swanlab local` writes to the run's `swanlog/` directory. Open the dashboard with
+`swanlab watch "$run/sft/swanlog"`. The offline records can also be synchronized after
+network recovery. [Local dashboard](https://docs.swanlab.cn/en/api/cli-swanlab-watch.html) · [Sync](https://docs.swanlab.cn/en/api/cli-swanlab-sync.html)
 
-本地实验数据写到输出目录下的 `swanlog/`。使用 `--swanlab local` 可在自己的机器上记录，再用 `swanlab watch "$run/sft/swanlog"` 打开。在线初始化遇到暂时的网络故障时使用离线记录，连接恢复后可通过 SwanLab 同步。 [本地面板](https://docs.swanlab.cn/en/api/cli-swanlab-watch.html) · [同步离线记录](https://docs.swanlab.cn/en/api/cli-swanlab-sync.html)
+### Import existing training logs
 
-### 补录已经启动的旧训练
-
-需要给旧版本的训练补齐曲线时，使用 `monitor_swanlab.py` 从现有日志导入。默认一次性导入，旧训练仍在写日志时可加 `--follow`。下一次启动用上面的训练参数直接记录。
+For a run that started before its reporter was enabled, import the log. Omit `--follow` for
+one-time import. Use the native reporter when starting a new run.
 
 ```bash
 python scripts/multimodal/monitor_swanlab.py "$run" \
@@ -332,9 +379,11 @@ python scripts/multimodal/monitor_swanlab.py "$run" \
 
 <a name="evaluate"></a>
 
-## 7. 评测并读结果
+## 7. Evaluate and read results
 
-以下命令同时评测决策验证集和完整单框验证集。使用第五步定义的 `data` 和 `run`。如需评测正式运行，`run` 可指向该运行。完整定位分片有 23,269 条，CPU 评测适合低资源验证，完整横评需为推理时间留出预算。
+Use the same `data` and `run` paths to evaluate the decision development split and the complete
+box development split. The latter contains 23,269 records. Use an appropriate device for the
+size of the evaluation.
 
 ```bash
 python scripts/multimodal/evaluate.py \
@@ -344,19 +393,26 @@ python scripts/multimodal/evaluate.py \
   --out "$run/dev-metrics.json"
 ```
 
-| 在 JSON 中查看 | 怎样理解 |
+| Report field | Meaning |
 | --- | --- |
-| `decisions.overall.accuracy` | 所有决策样本合并后计算的准确率。 |
-| `decisions.by_modality` 和 `decisions.by_type` | 展开文本、图像、视频及各决策类型，结合各组样本数寻找短板。 |
-| `grounding.single_n`、`grounding.miou`、`grounding.acc_iou50` | 正框数量、平均 IoU 与 IoU 至少达到 0.5 的比例。 |
-| `harmonic_accuracy` | 全体决策准确率与单框 `acc_iou50` 的调和平均。SFT 在线选模的决策项用按模态宏平均。 |
-| `datasets`、`max_len`、`video_audio` | 保存输入分片哈希和相关推理条件，便于同集横评。 |
+| `decisions.overall.accuracy` | Decision accuracy pooled across rows |
+| `decisions.by_modality` and `decisions.by_type` | Per-input and per-output slices, with counts |
+| `grounding.single_n`, `miou` and `acc_iou50` | Positive boxes, mean IoU and share above the 0.5 IoU threshold |
+| `harmonic_accuracy` | Harmonic mean of pooled decision accuracy and box Acc@IoU≥0.5 |
+| `datasets`, `max_len` and `video_audio` | Split hashes and inference conditions |
 
-决策准确率检查预测概率最大的选项是否属于目标分布的最高概率档。评分题额外查看 `score_mae`，它衡量预测等级期望与目标等级期望的差。比如预测分布 `[0.1, 0.5, 0.4]` 和目标 `[0, 0.6, 0.4]` 都以等级 1 为最高概率档，这一题在准确率中计为正确，期望分数分别为 `1.3` 和 `1.4`，这一题的绝对误差为 `0.1`。概率质量可结合 NLL、Brier 和 ECE 判断。 [评分损失例子](multimodal-current.md#worked-losses)
+For decision accuracy, the predicted argmax must be among the highest-probability target
+levels or options. Score MAE compares expected indexes. A prediction `[0.1, 0.5, 0.4]` and
+target `[0, 0.6, 0.4]` both peak at 1, and their expected indexes 1.3 and 1.4 differ by 0.1.
+Check NLL, Brier and ECE alongside accuracy.
 
-在线选模的定位分片固定抽取 512 条。完整分片和抽样分片分别报告。若比较两个模型，把上述命令中的 `--model` 和 `--out` 换成另一个检查点及另一个报告路径，保持数据、采样范围、推理预算和聚合方法一致。v6 的冻结测试分片与来源记录在数据根目录的 `evaluation/manifest.json`。 [同集结果](multimodal-current.md#matched-development) · [基准评测](../benchmarks.md)
+Online selection uses a fixed 512-row grounding subset and modality-macro decision accuracy.
+Report those measurements separately from full-split evaluation. For final testing, keep the
+rows, sampling, budget and aggregation fixed for all models. The frozen v6 suites are listed
+under the dataset root's `evaluation/manifest.json`.
+[Matched measurements](multimodal-current.md#matched-development) · [Benchmark protocol](../benchmarks.md)
 
-### 在独立分片上校准概率
+### Fit probability calibration on a separate split
 
 ```bash
 python scripts/multimodal/calibrate.py \
@@ -365,17 +421,17 @@ python scripts/multimodal/calibrate.py \
   --out "$run/final" --device cpu
 ```
 
-打开 `final/calibration_report.json`。先看 `accepted` 和 `failures`，再比较 `before` 与 `candidate` 的 NLL、ECE 和评分误差。报告里的 `candidate` 是候选校准方案，`accepted` 为 `false` 时输出模型保留原校准参数。有了可用的 `final` 检查点后，可导出或与相同分片上的未校准检查点比较。 [导出与部署](multimodal-release.md)
+Read `final/calibration_report.json`. Inspect `accepted` and `failures`, then compare
+`before` and `candidate` on NLL, ECE and Score error. When `accepted` is false,
+the saved model retains its previous calibration. [Export and deployment](multimodal-release.md)
 
-## 定位常见问题
+## Troubleshooting
 
-| 看到的现象 | 从哪里查 |
+| Symptom | Where to look |
 | --- | --- |
-| Python 找不到 `laya`，或服务命令不可用 | 检查当前虚拟环境，用开头的导入命令定位项目路径。HTTP 需要 `serve` 依赖。 |
-| LoRA 检查点无法加载基座 | 打开 `multimodal_config.json`，确认 `backbone` 所指本地基座仍可读。要移动模型，按发布教程导出完整权重。 |
-| 图片请求返回 422 | 查看响应的 `detail`，核对图片请求头、`state` 中的引用、`assets` 的 `part`、multipart 字段名和图片大小。 |
-| 视频打不开或时间点出乎预期 | 用 `ffprobe` 查看该文件。确认 Qwen 路径使用视觉视频，再根据响应里的 `frame_times` 查看采样位置。 |
-| 训练报处理器或 token 预算不匹配 | 对照 v6 准入记录、基座处理器和配置的 `max_len`。复现时使用配套的训练数据和基座。 |
-| 最后一条日志停留在评测附近 | 对照 `eval_every` 和 `checkpoint_every`，检查是否还在评测或保存，再结合训练进程与最新快照判断进度。 |
-
-[图片契约](../http-api.md#image-assets-and-single-box-questions) · [复现准备](#reproduce) · [续训读法](#resume)
+| Import or service command fails | Activate the correct Python environment. Install the `serve` extra for HTTP. |
+| LoRA checkpoint cannot find its backbone | Check `backbone` in `multimodal_config.json`. Export merged weights to move the model. |
+| Image request returns 422 | Inspect `detail`, header, state reference, asset `part`, file name and dimensions. |
+| A clip fails or misses an event | Use `ffprobe` and inspect `frame_times`. Use the visual-only path for Qwen. |
+| Processor or context mismatch while training | Compare the admission records with the actual processor path and `max_len`. |
+| Training log pauses near an evaluation | Compare `eval_every` and `checkpoint_every` with the latest optimizer log and snapshot. |

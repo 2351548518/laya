@@ -4,7 +4,7 @@ import json
 import pytest
 import torch
 
-from laya.multimodal_objectives import decision_loss, grow_lora, learning_rate_factor
+from laya_multimodal.multimodal_objectives import decision_loss, grow_lora, learning_rate_factor
 
 
 def test_policy_gradient_is_invariant_to_microbatch_partition_with_fixed_noise(monkeypatch):
@@ -104,7 +104,7 @@ def test_growing_lora_preserves_predictions_and_saved_shapes(tmp_path):
 
 def test_media_hash_cache_revalidates_same_size_file_changes(tmp_path):
     import os
-    from laya.multimodal_train import _media_hash
+    from laya_multimodal.multimodal_train import _media_hash
     path=tmp_path/'media';path.write_bytes(b'first')
     before=path.stat();one=_media_hash(str(path),before.st_mtime_ns,before.st_size)
     path.write_bytes(b'other');os.utime(path,ns=(before.st_atime_ns,before.st_mtime_ns+1000000))

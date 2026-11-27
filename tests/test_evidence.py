@@ -1,4 +1,4 @@
-"""Contract guard for laya.evidence: readiness evidence states over existing artifacts.
+"""Contract guard for laya_multimodal.evidence: readiness evidence states over existing artifacts.
 
 Run: python tests/test_evidence.py
 """
@@ -10,8 +10,8 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from laya import evidence  # noqa: E402
-from laya import evals_cli  # noqa: E402
+from laya_multimodal import evidence  # noqa: E402
+from laya_multimodal import evals_cli  # noqa: E402
 
 PASS, FAIL = [], []
 
@@ -54,7 +54,7 @@ check("clamped fit stays a visible limitation -> INSUFFICIENT", clamped["types"]
 
 # ---------------------------------------------- the reason text, which nothing pinned at all
 # `low`'s issue list says "not fitted", and the prefix used to say "fitted with recorded
-# limitations", so one `laya-evals evidence` line asserted the fit and denied it in the same
+# limitations", so one `laya-multimodal eval evidence` line asserted the fit and denied it in the same
 # breath. The reason's job is to carry the upstream text; it adds no claim of its own.
 check("below-MIN_TYPE_N reason is the prefix plus the upstream text, verbatim",
       low["types"]["choice"]["reason"],
@@ -180,14 +180,14 @@ _untouched = {"config": {}, "schema": "laya-evals-report/1"}
 evidence.inspect_report(_untouched)
 check("the report document is not mutated", _untouched, {"config": {}, "schema": "laya-evals-report/1"})
 
-# ------------------------------------------------------ identity vocabulary pinned to laya.evals
-# `laya/evidence.py` copies the report-identity vocabulary instead of importing `laya.evals` (numpy at
+# ------------------------------------------------------ identity vocabulary pinned to laya_multimodal.evals
+# `laya_multimodal/evidence.py` copies the report-identity vocabulary instead of importing `laya_multimodal.evals` (numpy at
 # module scope), and a copy is only safe while it is held against the original -- the same way
 # `tests/test_conformal_abstention.py` holds `confidence.BUCKET_QTYPES` against `common.temp_bucket`.
 # Unpinned, a key renamed upstream would make every report read as identity-incomplete here, and a key
 # added upstream would read as identity-complete; both silently, in the verdict this module exists to
 # give. These checks fail in both directions, on either side of the copy.
-from laya import evals  # noqa: E402
+from laya_multimodal import evals  # noqa: E402
 
 check("the copied identity vocabulary is evals' own, in order",
       list(evidence._IDENTITY_KEYS), list(evals._IDENTITY_KEYS))
@@ -292,7 +292,7 @@ check("missing checkpoint dir -> usage error 2", rc_bad, 2)
 
 # ... but only that one shape of an unreadable path. `--report` pointing at a directory raised
 # `IsADirectoryError`, an `OSError` that is not a `FileNotFoundError`, so it walked past this
-# handler and out of `main`: a traceback and exit 1, the code `laya-evals` reserves for a quality
+# handler and out of `main`: a traceback and exit 1, the code `laya-multimodal eval` reserves for a quality
 # failure, on the run before it printed anything. The other rows were already usage errors and stay
 # so -- they are here because widening the catch to `OSError` must not swallow them, and because a
 # decode failure named no path, which matters most when the command takes two of them.
@@ -322,7 +322,7 @@ with open(os.path.join(_bad_config_ckpt, "rl_agent_config.json"), "w", encoding=
     f.write("{nope")
 
 # The last tuple element is the string the refusal must contain. For five rows that is the whole
-# path, because `laya/evidence.py` builds those messages from the argument the caller passed. The
+# path, because `laya_multimodal/evidence.py` builds those messages from the argument the caller passed. The
 # directory row is the exception: its refusal is the operating system's own `OSError` text, and the
 # Windows CI runner reports that path in 8.3 form (`C:\Users\RUNNER~1\...` where the test holds
 # `C:\Users\runneradmin\...`), so an exact full-path match there tests the runner's temp layout
@@ -381,7 +381,7 @@ check_true("every identity field is printed for a report with no config block",
 
 # A UTF-8 BOM is what Notepad and Excel write. `_read_json_object` opened the artifact as plain
 # utf-8, so the BOM became U+FEFF and a valid config was refused as "not valid JSON". The other
-# caller-file readers in this repo open as utf-8-sig for this reason (laya/train.py,
+# caller-file readers in this repo open as utf-8-sig for this reason (laya_multimodal/train.py,
 # docker/entrypoint.py); utf-8-sig leaves a file without a BOM unchanged.
 _bom_path = os.path.join(tmp, "bom-artifact.json")
 with open(_bom_path, "wb") as f:
@@ -405,7 +405,7 @@ _BLOCK = (
     "tmp = tempfile.mkdtemp(); ckpt = os.path.join(tmp, 'c'); os.makedirs(ckpt)\n"
     "with open(os.path.join(ckpt, 'rl_agent_config.json'), 'w') as f:\n"
     "    json.dump({'training': {'laya_train_calibration': {'choice': {'items': 5, 'temperature': 1.0, 'issues': []}}}}, f)\n"
-    "from laya import evals_cli, evidence\n"
+    "from laya_multimodal import evals_cli, evidence\n"
     "rc = evals_cli.main(['evidence', '--checkpoint', ckpt])\n"
     "res = evidence.inspect_checkpoint(ckpt)\n"
     "print('RC', rc, 'TORCH', 'torch' in sys.modules)\n"

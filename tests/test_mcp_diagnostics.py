@@ -9,9 +9,9 @@ import pytest
 pytest.importorskip("mcp")
 
 from mcp.server.mcpserver.exceptions import ToolError as McpToolError  # noqa: E402
-from laya import BaseHook, Router  # noqa: E402
-from laya.mcp import server as server_mod  # noqa: E402
-from laya.mcp.tools import (  # noqa: E402
+from laya_multimodal import BaseHook, Router  # noqa: E402
+from laya_multimodal.mcp import server as server_mod  # noqa: E402
+from laya_multimodal.mcp.tools import (  # noqa: E402
     ToolError, laya_predict, laya_route, laya_route_batch, laya_tournament,
 )
 

@@ -1,11 +1,13 @@
 # Routing
 
+**English** · [简体中文](zh-CN/routing.md)
+
 The default router serves the configured native checkpoint for text and media.
 Set `LAYA_MULTIMODAL_MODEL` or pass `multimodal=` to choose it. Request a named
 checkpoint when a task needs another backbone, such as Gemma 4 for waveform audio.
 
 ```python
-from laya import Router
+from laya_multimodal import Router
 
 router = Router(
     multimodal="models/jev-multimodal-qwen3.5-4b",

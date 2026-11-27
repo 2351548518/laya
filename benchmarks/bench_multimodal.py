@@ -10,7 +10,7 @@ import time
 
 import torch
 
-from laya import MultimodalAgent
+from laya_multimodal import MultimodalAgent
 
 
 def synchronize(device):

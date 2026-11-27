@@ -1,4 +1,4 @@
-"""The shape `pip install "laya[langchain]"` actually produces.
+"""The shape `pip install "laya-multimodal[langchain]"` actually produces.
 
 This PR installs the `langchain` extra in the `tests` job so that `tests/test_langchain.py` runs
 against real Runnables. Nothing in the job proves that install happened, and the suite cannot tell
@@ -29,7 +29,7 @@ from typing import TypedDict
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from laya.integrations.langchain import (
+from laya_multimodal.integrations.langchain import (
     LayaEvaluator,
     LayaGuardrail,
     LayaRouter,
@@ -76,9 +76,9 @@ def outcome(fn):
 
 if not _RUNNABLE_AVAILABLE or RunnableSerializable is object:
     print("FAIL: 1")
-    print("FAILED: langchain-core is not installed, so laya.integrations.langchain fell back to "
+    print("FAILED: langchain-core is not installed, so laya_multimodal.integrations.langchain fell back to "
           "`RunnableSerializable = object`. Install the extra this suite is for: "
-          "pip install -e \".[langchain]\" (docs/langchain.md: pip install \"laya[langchain]\")")
+          "pip install -e \".[langchain]\" (docs/langchain.md: pip install \"laya-multimodal[langchain]\")")
     sys.exit(1)
 
 from langchain_core.runnables import Runnable  # noqa: E402

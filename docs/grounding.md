@@ -1,18 +1,19 @@
 # Local single-box grounding
 
+**English** · [简体中文](zh-CN/grounding.md)
+
 The single-box head reads the same backbone used for typed decisions. It takes the last valid
 hidden state and applies layer normalization, a linear projection, GELU and a final linear layer.
 The five outputs encode four coordinates and one localization quality logit.
 
-The starter recipes use the compact `single-v1` head for one referred object. The runtime can
-also load legacy set checkpoints with their own detector heads.
+The starter recipes use the compact `single-v1` head for one referred object.
 
 ## Prediction contract
 
 Load a checkpoint trained with single-box supervision.
 
 ```python
-from laya import MultimodalAgent
+from laya_multimodal import MultimodalAgent
 
 agent = MultimodalAgent("multimodal-runs/example/final", device="cuda")
 result = agent.predict(
@@ -28,8 +29,7 @@ A box question takes `type` and `instructions`. The answer has `left`, `top`, `r
 by the image width and vertical coordinates by the height for pixel positions. The answer's
 `confidence` estimates the intersection over union (IoU) between the predicted and target boxes.
 
-Each box question uses one backbone pass and returns zero generated tokens. Use `predict()`
-with a trained single-box head. The legacy `detect()` method requires a trained set head.
+Each box question uses one backbone pass and returns zero generated tokens.
 
 ## Training records
 
@@ -40,8 +40,7 @@ A positive grounding row pairs one box question with one normalized `xyxy` targe
 ```
 
 Keep images and source groups separate across training, development, calibration and test data.
-Use absolute image paths or make relative paths resolve from the working directory of the trainer
-or evaluator.
+Use absolute image paths or paths relative to the JSONL file.
 Each box needs finite, ordered coordinates within the image. For `task: "single"`, select a
 distinct referred object for each question. An empty `boxes` list gives the quality head a target
 of zero and skips the coordinate losses.
@@ -51,11 +50,10 @@ combines L1 coordinate error, generalized IoU (GIoU) and quality supervision fro
 IoU. During development, joint selection can combine box accuracy with macro decision accuracy
 across modalities.
 
-The head lives in `laya/grounding.py`, the trainer in `laya/train.py`, and the starter
-settings in `configs/multimodal/`. [Joint training and evaluation](multimodal.md#head-warmup-and-lora-training)
+[Joint fine-tuning](finetune.md) · [Architecture with tensor dimensions](project-readme/multimodal-current.md#architecture)
 
 ## Evaluation and scope
 
 For positive single-box examples, the local evaluator reports mean IoU and the fraction of
 predicted boxes with IoU ≥ 0.5. Report the source split, input budget, backbone and annotation
-conversion alongside these metrics when comparing with other implementations.
+conversion alongside these metrics when comparing with other implementations. [Native benchmarks](benchmarks.md)

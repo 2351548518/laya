@@ -1,5 +1,7 @@
 # LangChain & LangGraph Integration
 
+**English** · [简体中文](zh-CN/langchain.md)
+
 Use native typed decisions in LangChain and LangGraph to route, score and screen inputs.
 
 * **`LayaRouter`**: Conditional edge and branch router with confidence fallback gating or a native `auto`/`review` policy.
@@ -10,11 +12,9 @@ Use native typed decisions in LangChain and LangGraph to route, score and screen
 
 Every node also takes core's per-call decision controls -- the native token budget (`max_len`), the language and abstention controls (`lang`, `min_confidence`), and the five prediction-hook arguments (`hooks`, `on_predict_start`, `on_predict_end`, `hooks_raise`, `hooks_timeout`).
 
-For high-cardinality choice questions, see the [many-option guidance](benchmarks.md)
-and [runtime-parity check](benchmarks.md) before
-comparing checkpoint results across backends.
+For large choice sets, evaluate candidate retention and final accuracy on the same split. [Text evaluation](evals.md)
 
-Supports both **local in-process inference** (`Agent` or `Router`) and **remote HTTP inference** against your own `laya-serve` with weights hosted by the service.
+Supports both **local in-process inference** (`Agent` or `Router`) and **remote HTTP inference** against your own `laya-multimodal-serve` with weights hosted by the service.
 
 ---
 
@@ -33,7 +33,7 @@ Use `LayaRouter` as the conditional edge that selects the next node from the reg
 ```python
 from typing import TypedDict
 from langgraph.graph import StateGraph, END
-from laya.integrations.langchain import LayaRouter
+from laya_multimodal.integrations.langchain import LayaRouter
 
 class AgentState(TypedDict):
     input: str
@@ -93,8 +93,8 @@ final route instead, opt in with the keyword-only `decision_policy="native"`:
 ```python
 from typing import TypedDict
 from langgraph.graph import END, StateGraph
-from laya import Agent
-from laya.integrations.langchain import LayaRouter
+from laya_multimodal import Agent
+from laya_multimodal.integrations.langchain import LayaRouter
 
 class NativeState(TypedDict):
     input: str
@@ -166,8 +166,7 @@ route = router.invoke({
 ```
 
 The same callable `state_key` pattern works with `LayaGuardrail`, `LayaTriage`,
-and `LayaEvaluator`. Conversation lists are serialized in the order supplied;
-if they exceed the model context window, Laya preserves the newest turns.
+and `LayaEvaluator`. Conversation lists are serialized in the order supplied. Keep the prepared conversation within the native context budget.
 
 ---
 
@@ -176,7 +175,7 @@ if they exceed the model context window, Laya preserves the newest turns.
 Screen incoming prompts before invoking expensive frontier models. If a violation is detected, you can either raise an exception, return a canned rejection, or annotate the state:
 
 ```python
-from laya.integrations.langchain import LayaGuardrail, LayaGuardrailError
+from laya_multimodal.integrations.langchain import LayaGuardrail, LayaGuardrailError
 
 # Option A: Raise an exception on violation
 guard = LayaGuardrail(
@@ -210,10 +209,10 @@ print(annotated["guardrails"]["passed"])
 
 ## 3. Support Ticket Triage Node
 
-Extract multiple business signals in a single forward pass without schema parsing:
+Ask for several typed fields in one prediction request.
 
 ```python
-from laya.integrations.langchain import LayaTriage
+from laya_multimodal.integrations.langchain import LayaTriage
 
 triage = LayaTriage(state_key="message")
 state = {"message": "My integration broke after your latest release. Fix this or I cancel."}
@@ -234,7 +233,7 @@ print(enriched["triage"])
 
 ## 4. Remote Server Mode (Lightweight Clients)
 
-When deploying on lightweight containers or Lambda functions without GPUs, point to a running `laya-serve` or hosted instance via `base_url`:
+When deploying on lightweight containers or Lambda functions without GPUs, point to a running `laya-multimodal-serve` or hosted instance via `base_url`:
 
 ```python
 router = LayaRouter(
@@ -255,7 +254,7 @@ same endpoint from a schema, so remote clients get typed decisions too.
 ## 5. Schema-Driven Decisions
 
 `LayaRouter`, `LayaGuardrail`, `LayaTriage` and `LayaEvaluator` each answer one question set you
-write by hand. `LayaDecision` is the LCEL form of [`laya.decide`](structured.md): hand it a JSON
+write by hand. `LayaDecision` is the LCEL form of [`laya_multimodal.decide`](structured.md): hand it a JSON
 schema or a pydantic model, and it plans each property into a Laya question and returns the
 answer in the schema's own shape -- an enum choice, an integer level, a boolean -- with no token
 generation and no structured-output parser downstream.
@@ -263,7 +262,7 @@ generation and no structured-output parser downstream.
 ```python
 from typing import Literal
 from pydantic import BaseModel
-from laya.integrations.langchain import LayaDecision
+from laya_multimodal.integrations.langchain import LayaDecision
 
 class Ticket(BaseModel):
     department: Literal["billing", "technical", "sales", "other"]
@@ -360,7 +359,7 @@ instead of to the whole agent. See [Patterns and anti-patterns](hooks/patterns.m
 pair this is built around.
 
 ```python
-from laya.integrations.langchain import LayaRouter
+from laya_multimodal.integrations.langchain import LayaRouter
 
 class Memo:
     def __init__(self):
@@ -388,22 +387,8 @@ with. `hooks=[]` and `hooks_raise=False` are decisions rather than absences and 
 given: the first means "no hooks for this call" even on an agent that has some, the second means
 "keep deciding after a hook fails". Both belong to [the error contract in hooks/errors.md](hooks/errors.md).
 
-**What it buys.** On `laya` (Apple silicon) a 24-state pass over 4 distinct tickets, median of 3
-runs, scored on the returned route label:
-
-| Node | Forward passes | Wall clock |
-|---|---|---|
-| no hooks | 24 | 2109 ms |
-| `hooks=[Memo(), Counter()]`, cold cache | 4 | 330 ms |
-| `hooks=[Memo(), Counter()]`, warm cache | 0 | 0.3 ms |
-
-All 24 routes were identical to the hook-free node's. The cold run is 4 forwards rather than 24
-because the distinct tickets are the only ones that can miss; a warm cache answers the whole pass
-from memory, which is the point of the pattern and not a speedup of the model. The same pair wired
-through `on_predict_start=`/`on_predict_end=` instead of `hooks=` measured 359 ms cold.
-
 **Remote mode refuses them.** A hook is a Python callable that runs inside `predict`, and
-`laya-serve` has no way to receive or run one, so a node with a `base_url` and any of the five set
+`laya-multimodal-serve` has no way to receive or run one, so a node with a `base_url` and any of the five set
 raises `ValueError` naming the arguments rather than reporting success for a cache that never ran.
 Install hooks on the process that runs inference.
 

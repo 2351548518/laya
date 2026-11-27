@@ -1,6 +1,6 @@
-"""Remote mode of the MCP server (LAYA_BASE_URL): answers come from a laya-serve over HTTP.
+"""Remote mode of the MCP server (LAYA_BASE_URL): answers come from a laya-multimodal-serve over HTTP.
 
-A stdlib HTTP server stands in for laya-serve, so these tests need no checkpoint, no torch
+A stdlib HTTP server stands in for laya-multimodal-serve, so these tests need no checkpoint, no torch
 and no external network. Run: python -m pytest tests/test_mcp_remote.py
 """
 import json
@@ -12,13 +12,13 @@ import pytest
 
 pytest.importorskip("mcp")
 
-from laya import __version__  # noqa: E402
-from laya.mcp import server as mcp_server  # noqa: E402
-from laya.mcp.tools import (  # noqa: E402
+from laya_multimodal import __version__  # noqa: E402
+from laya_multimodal.mcp import server as mcp_server  # noqa: E402
+from laya_multimodal.mcp.tools import (  # noqa: E402
     ToolError, laya_decide, laya_predict, laya_predict_batch, laya_preset, laya_route, laya_route_batch,
     laya_shortlist, laya_status, laya_tournament,
 )
-from laya.mcp.remote import DEFAULT_TIMEOUT_S, RemoteError, RemoteRouter  # noqa: E402
+from laya_multimodal.mcp.remote import DEFAULT_TIMEOUT_S, RemoteError, RemoteRouter  # noqa: E402
 
 ANSWER = {
     "model": "laya-rl-agent",
@@ -32,7 +32,7 @@ HEALTH = {"status": "ok", "loaded": ["multimodal"], "revisions": {"multimodal": 
 
 
 class FakeServe(BaseHTTPRequestHandler):
-    """Records every request; answers /health and /v1/systemone like laya-serve."""
+    """Records every request; answers /health and /v1/systemone like laya-multimodal-serve."""
 
     requests: list = []
     user_agents: list = []
@@ -130,7 +130,7 @@ def test_bearer_token_is_sent_when_configured(serve):
 
 @pytest.mark.parametrize("source", ["default", "environment", "argument"])
 def test_user_agent_identifies_every_remote_request(monkeypatch, serve, source):
-    expected = "laya/" + __version__
+    expected = "laya-multimodal/" + __version__
     kwargs = {}
     if source != "default":
         monkeypatch.setenv("LAYA_USER_AGENT", "deployment/1.0")
@@ -163,7 +163,7 @@ def test_user_agent_trims_only_outer_spaces_and_tabs(monkeypatch, serve, raw, ex
     monkeypatch.setenv("LAYA_USER_AGENT", raw if source == "environment" else "environment/1.0")
     kwargs = {"user_agent": raw} if source == "argument" else {}
     RemoteRouter(serve, **kwargs).health()
-    assert FakeServe.user_agents == [[expected or "laya/" + __version__]]
+    assert FakeServe.user_agents == [[expected or "laya-multimodal/" + __version__]]
 
 
 @pytest.mark.parametrize("raw", ["x\r", "x\n", "x\r\n folded", "\nx", "x\x01", "x\x7f", "x\u0100"])
@@ -317,7 +317,7 @@ def test_tournament_is_refused_before_remote_requests(serve, n):
 
 @pytest.mark.parametrize("model", ["auto", "multimodal"])
 def test_predict_long_is_refused_before_remote_requests(monkeypatch, serve, model):
-    # laya-serve has no long-state endpoint, so the scan has nowhere to run. Without this refusal
+    # laya-multimodal-serve has no long-state endpoint, so the scan has nowhere to run. Without this refusal
     # the call reached Router.predict_long and came back as internal_error ("hooks are callables").
     monkeypatch.setattr(mcp_server, "_ROUTER", RemoteRouter(serve))
     with pytest.raises(Exception) as info:
@@ -449,7 +449,7 @@ def test_remote_mcp_startup_and_every_tool_avoid_torch(serve):
                 raise AssertionError("remote MCP imported torch")
             return original_import(name, *args, **kwargs)
         builtins.__import__ = no_torch
-        from laya.mcp import server
+        from laya_multimodal.mcp import server
         server.server.run = lambda: None
         server.main()
         state = {"text": "billed twice"}
@@ -488,7 +488,7 @@ def test_remote_mcp_startup_and_every_tool_avoid_torch(serve):
             else:
                 raise AssertionError("remote in-process tool did not refuse the call")
         assert "torch" not in sys.modules
-        assert "laya.shortlist" not in sys.modules
+        assert "laya_multimodal.shortlist" not in sys.modules
         assert not server._ROUTER._agents
     ''')
     env = dict(os.environ, LAYA_BASE_URL=serve, LAYA_THREADS="2", LAYA_PRELOAD="1")

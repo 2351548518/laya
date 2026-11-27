@@ -8,9 +8,7 @@ repo_url = "https://github.com/2351548518/laya"
 repo_name = "2351548518/laya"
 edit_uri = "edit/main/docs/"
 copyright = "Apache 2.0. Developed by Convai Innovations."
-# The navigation order lives in docs/.nav.yml, read by the awesome-nav plugin below. A page it
-# does not list still appears, so a new page needs no edit here. A folder with an index.md
-# becomes a section that opens on that page.
+# Navigation for English and Simplified Chinese lives in docs/.nav.yml and docs/zh-CN/.nav.yml.
 
 [project.theme]
 # Reuse the repository's logo.
@@ -36,7 +34,7 @@ toggle.name = "Switch to light mode"
 
 [project.plugins.awesome-nav]
 
-# API reference pages under docs/reference/ are generated from the docstrings in laya/.
+# API reference pages under docs/reference/ are generated from the docstrings in laya_multimodal/.
 [project.plugins.mkdocstrings.handlers.python]
 paths = ["."]
 

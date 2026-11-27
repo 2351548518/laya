@@ -6,7 +6,7 @@ Demonstrates:
 3. Multi-primitive support ticket triage node.
 """
 from typing import TypedDict
-from laya.integrations.langchain import LayaRouter, LayaGuardrail, LayaTriage, LayaGuardrailError
+from laya_multimodal.integrations.langchain import LayaRouter, LayaGuardrail, LayaTriage, LayaGuardrailError
 
 
 # =====================================================================
@@ -81,7 +81,7 @@ print(f"Churn Risk: {enriched_state['triage']['churn_risk']}")
 # =====================================================================
 # 4. Remote HTTP Server Mode (No Local PyTorch / GPU Required)
 # =====================================================================
-# You can connect to your own self-hosted `laya-serve` by providing `base_url`:
+# You can connect to your own self-hosted `laya-multimodal-serve` by providing `base_url`:
 #
 # remote_router = LayaRouter(
 #     base_url="http://localhost:8000",
@@ -96,7 +96,7 @@ print(f"Churn Risk: {enriched_state['triage']['churn_risk']}")
 try:
     from langgraph.graph import StateGraph, END
 except ImportError:
-    print("\nInstall 'laya[langchain]' to run the LangGraph workflow.")
+    print("\nInstall 'laya-multimodal[langchain]' to run the LangGraph workflow.")
 else:
     class AgentState(TypedDict):
         input: str

@@ -1,5 +1,7 @@
 # Error handling
 
+**English** · [简体中文](../zh-CN/hooks/errors.md)
+
 Hooks run inside the request they observe, so how their failures are handled matters. This page
 is the exact policy.
 
@@ -27,10 +29,10 @@ Per-call `None` uses the instance setting.
 
 ```python
 # strict: a broken audit hook fails the request
-laya.load( on_predict_end=audit, hooks_raise=True)
+laya_multimodal.load( on_predict_end=audit, hooks_raise=True)
 
 # lenient: telemetry must never take down a served request
-laya.load( on_predict_end=metrics, hooks_raise=False)
+laya_multimodal.load( on_predict_end=metrics, hooks_raise=False)
 ```
 
 `dispatch` catches `Exception`. Anything that is not an `Exception` (see
@@ -154,7 +156,7 @@ as a hook failure: `TimeoutError` when `hooks_raise=True`, a `RuntimeWarning` wh
 (the default) means no limit.
 
 ```python
-laya.load( on_predict_end=metrics, hooks_timeout=2.0)
+laya_multimodal.load( on_predict_end=metrics, hooks_timeout=2.0)
 ```
 
 It can be set per instance or overridden on `Agent.predict`, `Agent.system_one`,

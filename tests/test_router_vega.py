@@ -6,7 +6,7 @@ import sys
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from laya.router import VEGA_MODEL, Router, _estimate_tokens  # noqa: E402
+from laya_multimodal.router import VEGA_MODEL, Router, _estimate_tokens  # noqa: E402
 
 HAS_VEGAML = importlib.util.find_spec("vegaml") is not None
 Q = {"dept": {"type": "choice", "instructions": "Which team?",

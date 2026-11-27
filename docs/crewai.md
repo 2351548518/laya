@@ -1,5 +1,7 @@
 # CrewAI Integration
 
+**English** · [简体中文](zh-CN/crewai.md)
+
 Use locally hosted native decisions with CrewAI crews.
 
 * **`LayaCrewRouter`**: task delegation router replacing LLM managers in hierarchical crews.
@@ -7,7 +9,7 @@ Use locally hosted native decisions with CrewAI crews.
 
 Both take core's per-call decision controls -- the input token budget (`max_len`), the language and abstention controls (`lang`, `min_confidence`), the five prediction-hook arguments (`hooks`, `on_predict_start`, `on_predict_end`, `hooks_raise`, `hooks_timeout`) and the two routing hints (`task`, `lang_guess`) -- see [Per-call decision controls](#5-per-call-decision-controls).
 
-Supports both **local in-process inference** (`Agent` or `Router`) and **remote HTTP inference** against your own `laya-serve` instance with weights hosted by the service.
+Supports both **local in-process inference** (`Agent` or `Router`) and **remote HTTP inference** against your own `laya-multimodal-serve` instance with weights hosted by the service.
 
 ---
 
@@ -21,11 +23,11 @@ python -m pip install -e '.[multimodal,crewai]'
 
 ## 1. Task Delegation in Hierarchical Crews
 
-In hierarchical CrewAI workflows, a manager agent decides which worker agent should execute each incoming task. Autoregressive LLMs take 2,000–4,000 ms generating text just to make this delegation choice. `LayaCrewRouter` evaluates task requirements against agent roles and goals with zero token generation cost:
+In a hierarchical CrewAI workflow, route task requirements against registered agent roles and goals.
 
 ```python
 from crewai import Agent, Crew, Process, Task
-from laya.integrations.crewai import LayaCrewRouter
+from laya_multimodal.integrations.crewai import LayaCrewRouter
 
 # Define specialized worker agents
 analyst = Agent(
@@ -76,7 +78,7 @@ Screen a task before assigning it to a worker. With `action="raise"`, handle the
 exception for every task.
 
 ```python
-from laya.integrations.crewai import CrewTask, LayaTaskGuard, LayaTaskGuardError
+from laya_multimodal.integrations.crewai import CrewTask, LayaTaskGuard, LayaTaskGuardError
 
 guard = LayaTaskGuard(
     action="raise",      # "raise" raises LayaTaskGuardError; "filter" sanitizes text; "annotate" appends flags
@@ -118,10 +120,10 @@ decisions at the option counts you expect in production.
 For serverless deployments or environments without local GPUs:
 
 ```python
-from laya.integrations.crewai import LayaCrewRouter
+from laya_multimodal.integrations.crewai import LayaCrewRouter
 
 router = LayaCrewRouter(
-    base_url="http://laya-serve.internal:8080",
+    base_url="http://laya-multimodal-serve.internal:8080",
     confidence_threshold=0.85,
     fallback_agent_index=0,
 )
@@ -133,8 +135,7 @@ The remote client uses Python's standard library `urllib` with zero heavy depend
 
 ## 5. Per-call decision controls
 
-`LayaCrewRouter` and `LayaTaskGuard` take the same per-call arguments the core API does: the two
-token budgets (`max_len`, `head_max_len`), the language and abstention controls (`lang`,
+`LayaCrewRouter` and `LayaTaskGuard` take the same per-call arguments the core API does: the native token budget (`max_len`), the language and abstention controls (`lang`,
 `min_confidence`), the five prediction-hook arguments (`hooks`,
 `on_predict_start`, `on_predict_end`, `hooks_raise`, `hooks_timeout`), and the two routing hints
 (`task`, `lang_guess`). They are per instance, so a crew with a large roster can be given room while
@@ -153,7 +154,7 @@ returns is still the argmax. Which agent is delegated to is changed by `confiden
 `fallback_agent_index` or `raise_on_low_confidence`; a `min_confidence` on its own reports the
 abstention and delegates anyway.
 Both are read by `Agent.predict` and `Router.predict` alike and accepted by
-`laya-serve` in the request body, so a router or guard forwards them on the local and the remote
+`laya-multimodal-serve` in the request body, so a router or guard forwards them on the local and the remote
 path. An unset one is omitted, not sent as `None`, so it cannot shadow the deployment's own default;
 `min_confidence=0.0` and `lang=""` are real values and are forwarded as given.
 

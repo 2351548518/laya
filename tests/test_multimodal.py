@@ -16,11 +16,11 @@ pytest.importorskip("PIL", reason="native media tests need the multimodal extra"
 pytest.importorskip("scipy", reason="audio resampling tests need the multimodal extra")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from laya.multimodal import MultimodalAgent, install_decision_head, read_audio  # noqa: E402
-from laya.multimodal_train import (  # noqa: E402
+from laya_multimodal.multimodal import MultimodalAgent, install_decision_head, read_audio  # noqa: E402
+from laya_multimodal.multimodal_train import (  # noqa: E402
     MultimodalTrainConfig, check_splits, collate_multimodal_inputs, collect_records, finetune_multimodal, load_rows,
 )
-from laya.router import Router  # noqa: E402
+from laya_multimodal.router import Router  # noqa: E402
 
 Q = {"category": {"type": "choice", "instructions": "Choose the category", "criteria": ["dark", "bright"]},
      "present": {"type": "noul", "instructions": "Is the event present?"},
@@ -158,7 +158,7 @@ def test_audio_validation_resampling_and_capability():
 
 
 def test_video_preserves_order_and_audio_together(tmp_path, monkeypatch):
-    import laya.video as video
+    import laya_multimodal.video as video
     from PIL import Image
     path = tmp_path / "clip.avi"
     path.write_bytes(b"test")
@@ -181,7 +181,7 @@ def test_video_preserves_order_and_audio_together(tmp_path, monkeypatch):
 
 
 def test_serial_evaluation_reuses_video_decodes_and_preserves_predictions(tmp_path, monkeypatch):
-    import laya.video as video
+    import laya_multimodal.video as video
     from PIL import Image
 
     first, second = tmp_path / "first.mp4", tmp_path / "second.mp4"
@@ -259,7 +259,7 @@ def test_hooks_skip_and_error_lifecycle():
 def test_frame_decode_keeps_seek_precision_and_missing_frame_policy(tmp_path, monkeypatch):
     import io
     from PIL import Image
-    import laya.video as video
+    import laya_multimodal.video as video
 
     image = io.BytesIO()
     Image.new("RGB", (2, 2), (11, 39, 201)).save(image, format="PNG")
@@ -283,7 +283,7 @@ def test_frame_decode_keeps_seek_precision_and_missing_frame_policy(tmp_path, mo
 
 
 def test_video_overrides_and_persistent_cache_preserve_native_evidence(tmp_path, monkeypatch):
-    import laya.video as video
+    import laya_multimodal.video as video
     from PIL import Image
     path = tmp_path / "clip.avi"
     path.write_bytes(b"video")
@@ -310,10 +310,10 @@ def test_video_overrides_and_persistent_cache_preserve_native_evidence(tmp_path,
 
 @pytest.mark.parametrize('error_number', [errno.ENOSPC, errno.EDQUOT])
 def test_full_video_cache_preserves_decoded_evidence(tmp_path, monkeypatch, error_number):
-    import laya.video as video
+    import laya_multimodal.video as video
     from PIL import Image
     from types import SimpleNamespace
-    import laya.multimodal as multimodal
+    import laya_multimodal.multimodal as multimodal
     path = tmp_path / 'clip.avi'; path.write_bytes(b'video')
     frames = [Image.new('RGB', (8, 8), 'red')] * 4
     monkeypatch.setattr(video, 'probe', lambda p: dict(duration_s=4., has_audio=False))
@@ -330,8 +330,8 @@ def test_full_video_cache_preserves_decoded_evidence(tmp_path, monkeypatch, erro
 
 
 def test_low_video_cache_space_skips_persistence_before_writing(tmp_path, monkeypatch):
-    import laya.video as video
-    import laya.multimodal as multimodal
+    import laya_multimodal.video as video
+    import laya_multimodal.multimodal as multimodal
     from PIL import Image
     from types import SimpleNamespace
     path = tmp_path / 'clip.avi'; path.write_bytes(b'video')
@@ -344,7 +344,7 @@ def test_low_video_cache_space_skips_persistence_before_writing(tmp_path, monkey
 
 
 def test_ordinal_calibration_guard_rejects_worse_calibration_and_keeps_groups_together(monkeypatch):
-    import laya.multimodal_train as training
+    import laya_multimodal.multimodal_train as training
     seen = []
     def fit(values):
         seen.append(len(values))
@@ -418,7 +418,7 @@ def test_empty_context_is_distinguished_by_the_decision_question():
 
 
 def test_metrics_accept_all_equally_valid_options():
-    from laya.multimodal_train import metrics
+    from laya_multimodal.multimodal_train import metrics
     records = [{"qtype": 0, "k": 3, "modality": "text", "logits": np.array([0., 4., -1.]),
                 "target": np.array([0.5, 0.5, 0.])}]
     assert metrics(records)["overall"]["accuracy"] == 1.0
@@ -430,7 +430,7 @@ def test_inline_media_http_endpoint_rejects_paths_and_shares_auth(monkeypatch):
     from PIL import Image
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
-    from laya.serve import create_app
+    from laya_multimodal.serve import create_app
     monkeypatch.setenv("LAYA_API_KEY", "test-key")
     agent = tiny_agent()
     image = io.BytesIO()
@@ -451,7 +451,7 @@ def test_systemone_image_and_box_wire_contract(monkeypatch, multipart):
     import io
     from PIL import Image
     TestClient = pytest.importorskip("fastapi.testclient").TestClient
-    from laya.serve import create_app
+    from laya_multimodal.serve import create_app
 
     monkeypatch.delenv("LAYA_API_KEY", raising=False)
     monkeypatch.setenv("LAYA_JEV_STRICT", "0")
@@ -493,7 +493,7 @@ def test_systemone_reference_expansion_places_each_candidate_after_its_own_image
     import io
     import re
     from PIL import Image
-    from laya.systemone import prepare_image_request
+    from laya_multimodal.systemone import prepare_image_request
 
     class ExpandingProcessor(TinyProcessor):
         image_token = "<img>"
@@ -537,8 +537,8 @@ def test_systemone_reference_expansion_places_each_candidate_after_its_own_image
 
 @pytest.mark.parametrize("selection", [{}, {"model": "multimodal"}, {"task": "MuLTiMoDaL"}])
 def test_http_text_endpoints_require_inline_bytes_for_native_media(monkeypatch, selection):
-    from laya.router import Router
-    from laya.serve import create_app
+    from laya_multimodal.router import Router
+    from laya_multimodal.serve import create_app
 
     TestClient = pytest.importorskip("fastapi.testclient").TestClient
     monkeypatch.setenv("LAYA_PRELOAD", "0")
@@ -578,7 +578,7 @@ def test_training_performs_real_gradient_updates_and_holds_test_out(tmp_path, mo
 
 @pytest.mark.parametrize("use_kl", [False, True])
 def test_training_builds_optional_targets_only_for_enabled_losses(tmp_path, monkeypatch, use_kl):
-    import laya.multimodal_train as training
+    import laya_multimodal.multimodal_train as training
 
     question = Q["category"]
     row = {"state": "training sample", "questions": {"x": question}, "expected": {"x": "bright"},
@@ -651,7 +651,7 @@ def test_real_backbone_image_audio_and_reload(tmp_path):
 
 
 def test_development_selection_restores_best_weights_before_final_save(tmp_path, monkeypatch):
-    import laya.multimodal_train as training
+    import laya_multimodal.multimodal_train as training
     from safetensors.torch import save_file
     agent = tiny_agent()
     train, selection = tmp_path / "train.jsonl", tmp_path / "selection.jsonl"
@@ -690,7 +690,7 @@ def test_transformers_checkpoint_roundtrip_and_adapter_continuation(tmp_path, mo
         pytest.skip("Gemma 4 checkpoint tests need the multimodal extra's Transformers version")
     if mode in ("lora", "merged"):
         pytest.importorskip("peft")
-    from laya.multimodal_train import configure_training
+    from laya_multimodal.multimodal_train import configure_training
     text = transformers.Gemma4TextConfig(vocab_size=256, hidden_size=16, intermediate_size=32,
         num_hidden_layers=2, num_attention_heads=2, num_key_value_heads=1, head_dim=8,
         vocab_size_per_layer_input=256, hidden_size_per_layer_input=4,

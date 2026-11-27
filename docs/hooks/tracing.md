@@ -1,5 +1,7 @@
 # Tracing
 
+**English** · [简体中文](../zh-CN/hooks/tracing.md)
+
 Every predict-event hook of one call receives the same `PredictContext.run_id`, so a tracer can
 correlate the start, end and error events (and any spans it opens) without keeping its own
 bookkeeping.
@@ -72,7 +74,7 @@ class Tracer:
         # or close it here if you prefer.
         pass
 
-agent = laya.load( hooks=[Tracer()])
+agent = laya_multimodal.load( hooks=[Tracer()])
 ```
 
 Because `on_predict_end` always runs, it is the natural place to close a span, and it can see
@@ -112,7 +114,7 @@ span in both or you will double-count.
 
 ## OpenTelemetry
 
-The example [`examples/hooks/otel.py`](../../examples/hooks/otel.py) records counters and a
+The example [`examples/hooks/otel.py`](https://github.com/2351548518/laya/blob/main/examples/hooks/otel.py) records counters and a
 histogram. For real spans, drive the OTel API from the tracer. Hooks are synchronous, so use the
 synchronous exporter (or enqueue and export from a worker).
 
@@ -140,7 +142,7 @@ class OTelHooks:
             span.set_status(trace.Status(trace.StatusCode.ERROR))
         span.end()
 
-laya.load( hooks=[OTelHooks()], hooks_raise=False)
+laya_multimodal.load( hooks=[OTelHooks()], hooks_raise=False)
 ```
 
 Set `hooks_raise=False` so a tracer outage never fails a request.

@@ -78,12 +78,12 @@ def main():
         os.environ.update(HF_HUB_OFFLINE='1', USE_TF='0', USE_TORCH='1', TOKENIZERS_PARALLELISM='false')
         import torch
         import transformers
-        import laya
+        import laya_multimodal
         torch.set_num_threads(2)
         start = time.perf_counter()
-        agent = laya.load(str(args.checkpoint.resolve()), device=args.device)
+        agent = laya_multimodal.load(str(args.checkpoint.resolve()), device=args.device)
         load_seconds = time.perf_counter() - start
-        source = Path(laya.__file__).resolve().parent
+        source = Path(laya_multimodal.__file__).resolve().parent
         try:
             commit = subprocess.check_output(['git', '-C', str(source), 'rev-parse', 'HEAD'], text=True,
                                              stderr=subprocess.DEVNULL).strip()

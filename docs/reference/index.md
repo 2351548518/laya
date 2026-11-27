@@ -1,5 +1,7 @@
 # Python API
 
+**English** · [简体中文](../zh-CN/reference/index.md)
+
 These pages describe the public local inference and training APIs.
 
 - [Agent](agent.md) covers loading native checkpoints.
@@ -9,7 +11,7 @@ These pages describe the public local inference and training APIs.
 - [Helpers](helpers.md): language detection, email cleaning, question presets, shortlisting
   and calibration utilities.
 - [Fine-tuning](train.md) covers `finetune_grounding`, `GroundingTrainConfig`, and the shared
-  decision label conversion in `laya.train`.
+  decision label conversion in `laya_multimodal.train`.
 - [LangChain components](langchain.md): `LayaRouter`, `LayaGuardrail`, `LayaTriage` and
   `LayaEvaluator`.
 

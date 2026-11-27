@@ -9,9 +9,9 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from laya import Router  # noqa: E402
-from laya.multimodal import _checkpoint_directory  # noqa: E402
-from laya.revisions import DEFAULT_CHECKPOINT, PINNED_REVISIONS, resolve_revision  # noqa: E402
+from laya_multimodal import Router  # noqa: E402
+from laya_multimodal.multimodal import _checkpoint_directory  # noqa: E402
+from laya_multimodal.revisions import DEFAULT_CHECKPOINT, PINNED_REVISIONS, resolve_revision  # noqa: E402
 
 
 class CheckpointTests(unittest.TestCase):
@@ -23,7 +23,7 @@ class CheckpointTests(unittest.TestCase):
         digest = {"model.safetensors": "a" * 64}
         router = Router(models={"speech": "example/speech"}, revision="general",
                         revisions={"speech": "specific"}, sha256_digests={"speech": digest})
-        with patch("laya.agent.load") as load:
+        with patch("laya_multimodal.agent.load") as load:
             router.load("speech")
         self.assertEqual(load.call_args.args, ("example/speech",))
         self.assertEqual(load.call_args.kwargs["revision"], "specific")

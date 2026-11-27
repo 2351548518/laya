@@ -1,12 +1,14 @@
 # LlamaIndex Integration
 
+**English** · [简体中文](zh-CN/llamaindex.md)
+
 Use locally hosted native decisions with LlamaIndex query engines.
 
 * **`LayaSingleSelector`**: single-choice selector replacing `LLMSingleSelector` for `RouterQueryEngine`.
 * **`LayaMultiSelector`**: Multi-choice selector replacing `LLMMultiSelector` for composite queries spanning multiple data sources.
 * **`LayaQueryRouter`**: Standalone query dispatcher routing incoming requests directly to target query engines or callables.
 
-Supports both **local in-process inference** (`Agent` or `Router`) and **remote HTTP inference** against your own `laya-serve` instance with weights hosted by the service.
+Supports both **local in-process inference** (`Agent` or `Router`) and **remote HTTP inference** against your own `laya-multimodal-serve` instance with weights hosted by the service.
 
 ---
 
@@ -20,12 +22,12 @@ python -m pip install -e '.[multimodal,llamaindex]'
 
 ## 1. Single-Choice Routing with `RouterQueryEngine`
 
-In LlamaIndex, `RouterQueryEngine` uses a selector to decide which underlying query engine or tool should answer a question. Autoregressive LLM selectors (`LLMSingleSelector`) take 1,000–2,000 ms generating text. `LayaSingleSelector` evaluates candidate tools without token generation:
+`RouterQueryEngine` can use `LayaSingleSelector` to score candidate query engines without generating answer tokens.
 
 ```python
 from llama_index.core.query_engine import RouterQueryEngine
 from llama_index.core.tools import QueryEngineTool, ToolMetadata
-from laya.integrations.llamaindex import LayaSingleSelector
+from laya_multimodal.integrations.llamaindex import LayaSingleSelector
 
 # Define query engine tools
 docs_tool = QueryEngineTool(
@@ -65,7 +67,7 @@ print(response)
 For queries that require synthesis across multiple indexes (e.g. comparing documentation specs with transactional database records), `LayaMultiSelector` evaluates candidate relevance and returns multiple selected tools:
 
 ```python
-from laya.integrations.llamaindex import LayaMultiSelector
+from laya_multimodal.integrations.llamaindex import LayaMultiSelector
 
 multi_selector = LayaMultiSelector(
     probability_threshold=0.25,  # Select all tools with probability >= 0.25
@@ -89,7 +91,7 @@ for sel in result.selections:
 For direct routing without the overhead of `RouterQueryEngine`, `LayaQueryRouter` routes queries directly to dictionary-registered engines:
 
 ```python
-from laya.integrations.llamaindex import LayaQueryRouter
+from laya_multimodal.integrations.llamaindex import LayaQueryRouter
 
 router = LayaQueryRouter(
     query_engines={
@@ -133,10 +135,10 @@ decisions at the option counts you expect in production.
 For serverless RAG, edge environments, or environments without local GPUs:
 
 ```python
-from laya.integrations.llamaindex import LayaSingleSelector
+from laya_multimodal.integrations.llamaindex import LayaSingleSelector
 
 selector = LayaSingleSelector(
-    base_url="http://laya-serve.internal:8080",
+    base_url="http://laya-multimodal-serve.internal:8080",
     confidence_threshold=0.85,
     fallback_index=0,
 )
@@ -168,7 +170,7 @@ selector returns is still the argmax. What gets selected is changed by `confiden
 the knobs in [Confidence Threshold Gating](#4-confidence-threshold-gating); a `min_confidence` on
 its own reports the abstention and selects anyway.
 Both are read by `Agent.predict` and `Router.predict` alike and accepted by
-`laya-serve` in the request body, so a selector forwards them on the local and the remote path. An
+`laya-multimodal-serve` in the request body, so a selector forwards them on the local and the remote path. An
 unset one is omitted, not sent as `None`, so it cannot shadow the deployment's own default;
 `min_confidence=0.0` and `lang=""` are real values and are forwarded as given.
 

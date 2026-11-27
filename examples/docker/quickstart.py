@@ -5,8 +5,8 @@ from pathlib import Path
 
 import torch
 
-from laya import Router
-from laya.mcp.device import env_device
+from laya_multimodal import Router
+from laya_multimodal.mcp.device import env_device
 
 
 def main():

@@ -1,12 +1,14 @@
 # Tool & Function Selection
 
+**English** · [简体中文](zh-CN/tools.md)
+
 `LayaToolSelector` scores candidate tools with a native decision checkpoint. The returned
 `ToolRouteDecision` carries the selected tool, its option probabilities and fallback status.
 
 ## Installation
 
 ```bash
-pip install laya
+python -m pip install -e '.[multimodal]'
 ```
 
 ---
@@ -16,7 +18,7 @@ pip install laya
 Define the candidate tools and select one for the input.
 
 ```python
-from laya.integrations.tools import LayaToolSelector
+from laya_multimodal.integrations.tools import LayaToolSelector
 
 def search_web(query: str):
     """Search Google or Bing for real-time news and websites."""
@@ -84,7 +86,7 @@ else:
 `LayaToolSelector` uses Laya's calibrated confidence scores to gate routing decisions. When an ambiguous or out-of-domain query is presented, the selector avoids bad tool invocations by falling back to a general agent or raising `LayaLowConfidenceError`:
 
 ```python
-from laya.integrations._errors import LayaLowConfidenceError
+from laya_multimodal.integrations._errors import LayaLowConfidenceError
 
 def general_fallback_llm(prompt: str):
     """Fallback handler for ambiguous or novel requests."""
@@ -117,7 +119,7 @@ except LayaLowConfidenceError as e:
 `LayaToolSelector` exports an LCEL-compatible Runnable via `.as_runnable()`, allowing it to be composed seamlessly into LangGraph nodes or LangChain pipelines:
 
 ```python
-from laya.integrations.tools import LayaToolSelector
+from laya_multimodal.integrations.tools import LayaToolSelector
 
 selector = LayaToolSelector(tools=[search_web, query_database])
 
@@ -129,9 +131,9 @@ print(f"Dispatching to: {tool_to_call}")
 
 ---
 
-## 6. Remote HTTP Mode (`laya-serve`)
+## 6. Remote HTTP Mode (`laya-multimodal-serve`)
 
-In serverless or microservice architectures, `LayaToolSelector` connects directly to a self-hosted `laya-serve` cluster using standard library `urllib` (no external HTTP client required):
+In serverless or microservice architectures, `LayaToolSelector` connects directly to a self-hosted `laya-multimodal-serve` cluster using standard library `urllib` (no external HTTP client required):
 
 ```python
 selector = LayaToolSelector(

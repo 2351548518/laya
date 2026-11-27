@@ -106,7 +106,7 @@ check("ece/one sample", round(ece([1.0], [1.0]), 4), 0.0)
 # Bin boundary: the first bin is closed at the bottom, so conf == 0.0 IS counted. This
 # harness tested `conf > lo` for every bin until the divergence was found, which made it
 # the only one of the four implementations that binned differently --
-# `laya.common.ece_score`, `research/scripts/bench_local.py` and
+# `laya_multimodal.common.ece_score`, `research/scripts/bench_local.py` and
 # `research/scripts/build_benchmark_nb.py` all settled on this boundary in #39.
 check("ece/conf==0.0 is binned (matches the other three)",
       round(ece([0.0, 0.0], [1.0, 1.0]), 4), 1.0)
@@ -138,7 +138,7 @@ class _FakeAgent:
 
 
 _fa = _FakeAgent()
-from laya.common import QTYPES  # noqa: E402
+from laya_multimodal.common import QTYPES  # noqa: E402
 
 check("temp/checkpoint option bucket",
       temperature_for(_fa, QTYPES["choice"], 20), 0.5)

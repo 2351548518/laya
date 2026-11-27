@@ -1,8 +1,8 @@
 # Python HTTP client
 
-A synchronous, standard-library client for a self-hosted `laya-serve`.
-The application process does not install or import `laya`, PyTorch, Transformers,
-or NumPy. Use the core `laya` package when inference must run in your own process.
+A synchronous, standard-library client for a self-hosted `laya-multimodal-serve`.
+The HTTP client uses the Python standard library. Install `laya-multimodal` if your
+application will run inference in the same process.
 
 ## Install from this checkout
 
@@ -108,7 +108,7 @@ and named Box answers. The client adds the required image header.
 
 ## Native media predictions
 
-Configure `laya-serve` with `LAYA_MULTIMODAL_MODEL` pointing to a trained checkpoint.
+Configure `laya-multimodal-serve` with `LAYA_MULTIMODAL_MODEL` pointing to a trained checkpoint.
 
 ```python
 from pathlib import Path
@@ -189,7 +189,7 @@ regular files and directories within the extraction directory. The verifier
 refuses to extract on older Python builds without `tarfile.data_filter`; this
 requirement applies to the verification tool, not the installed client's runtime.
 
-For live integration, supply a Python with `laya[multimodal,serve]` dependencies installed:
+For live integration, supply a Python with `laya-multimodal[multimodal,serve]` dependencies installed:
 
 ```bash
 python sdk/python/tests/verify_package.py sdk/python/dist --server-python /path/to/server/python

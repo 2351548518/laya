@@ -1,11 +1,13 @@
 # Schema-driven decisions
 
+**English** · [简体中文](zh-CN/structured.md)
+
 Turn a JSON schema, or a pydantic model, into Laya questions, and get back typed values with
-calibrated confidence. This is the bridge that makes Laya a structured-output engine: you describe
-the shape you want, Laya answers it in one forward pass.
+per-field decision probabilities. The native model scores each generated question and projects
+the answers back to the schema's types.
 
 ```python
-import laya
+import laya_multimodal
 
 schema = {
     "type": "object",
@@ -17,12 +19,12 @@ schema = {
     },
 }
 
-agent = laya.load()
+agent = laya_multimodal.load()
 values = agent.decide("I was charged twice, refund me.", schema=schema)
 # {"department": "billing", "urgency": 2, "needs_human": True}
 ```
 
-With pydantic (install `laya[structured]`):
+With pydantic (install `laya-multimodal[structured]`):
 
 ```python
 from typing import Literal
@@ -40,10 +42,7 @@ ticket = agent.decide("I was charged twice, refund me.", schema=Ticket)
 
 The top level must be an object with `properties`. Each property becomes one question.
 
-Every row below is a real schema: `tests/test_structured_docs.py` compiles the first column and
-asserts the question the compiler actually produces, so this table cannot drift from the code. A cell
-is either a property schema on its own, a whole schema when the row needs its `$defs` (the field is
-named `field`), or a call to an entry point.
+The table shows individual property schemas, plus a complete schema for a local reference.
 
 | JSON schema | Laya question | Returned value |
 |---|---|---|
@@ -74,8 +73,8 @@ level between `minimum` and `maximum`; a boolean is `noul >= 0.5`.
 
 ## Rejections
 
-A schema that cannot be answered from a fixed option set raises `laya.structured.SchemaError`
-(a `ValueError`) naming the exact path. Each row is executed too, with the field named `name`:
+A schema that cannot be answered from a fixed option set raises `laya_multimodal.structured.SchemaError`
+(a `ValueError`) naming the exact path. These examples use a field named `name`.
 
 | property schema | message |
 |---|---|
@@ -113,9 +112,9 @@ Limits: `MAX_PROPERTIES = 32`, `MAX_OPTIONS = 32`, `MAX_SCORE_LEVELS = 10`.
 
 | function | purpose |
 |---|---|
-| `laya.decide(runner, state, schema=..., *, questions=..., return_details=..., min_confidence=..., **predict_kwargs)` | the free function, works for `Agent` and `Router` |
+| `laya_multimodal.decide(runner, state, schema=..., *, questions=..., return_details=..., min_confidence=..., **predict_kwargs)` | the free function, works for `Agent` and `Router` |
 | `agent.decide(state, schema=..., ...)` / `router.decide(state, schema=..., ...)` | convenience methods |
-| `laya.decide_batch(runner, states, schema=..., ...)` / `agent.decide_batch(...)` / `router.decide_batch(...)` | the same over many states, one batched call |
+| `laya_multimodal.decide_batch(runner, states, schema=..., ...)` / `agent.decide_batch(...)` / `router.decide_batch(...)` | the same over many states, one batched call |
 | `questions_from_json_schema(schema)` | schema to Laya questions |
 | `questions_from_pydantic(model)` | pydantic model to questions (requires pydantic) |
 | `answers_to_json(answers, schema)` | project raw answers onto schema values |
@@ -133,7 +132,7 @@ router.decide(state, schema=Ticket, model="multimodal", hooks=[Metrics()])
 ## Scoring many states
 
 `decide_batch` is the throughput form: the schema is planned once and its questions run over every
-state through `predict_batch`, so states share forward passes instead of one per call. Results come
+state through `predict_batch`. The backend determines which inputs share a forward pass. Results come
 back in input order, projected exactly as `decide` projects, and `return_details=True` gives one
 `DecisionResult` per state:
 
@@ -146,14 +145,14 @@ On a `Router` each state is still routed on its own, so one call can span checkp
 keywords reach `predict_batch` depends on who reads them. The call-level ones — `batch_size=`,
 `hooks=`, `sort_by_length=` — are passed as keywords to `predict_batch`. The routing pins and the
 token budget — `model=`, `task=`, `lang=`, `lang_guess=`, `max_len=`, `head_max_len=`, the tuple
-`laya/structured.py::_ROUTER_REQUEST_KEYS` names — are read off every *request* by a `Router`, whose
+`laya_multimodal/structured.py::_ROUTER_REQUEST_KEYS` names — are read off every *request* by a `Router`, whose
 `predict_batch` declares none of them, so `decide_batch` copies them onto each request instead; that
 is why `decide_batch(states, schema=..., model="multimodal")` pins a checkpoint the way `decide`
 does. On an `Agent`-like runner the split is visible: its `predict_batch` declares `batch_size=`,
 `hooks=` and `lang=` but no `model=` and swallows nothing, so `model=` there is a `TypeError`, not a
 silent extra keyword. `Agent` and `Router` all have it; a runner without `predict_batch` raises
 `TypeError` rather than silently falling back to a loop — call `decide` per state there. Batching can shift borderline argmaxes the
-same way `predict_batch` does; the README records the measured speedups for both devices.
+same way `predict_batch` does. Measure latency and accuracy with the same input budget.
 
 ## Confidence and probabilities
 
@@ -172,14 +171,9 @@ result.usage                           # {"input_tokens": ..., "output_tokens": 
 result.routing                         # the Router decision, when a Router answered
 ```
 
-`usage` is the block `predict()` built, forwarded whole: `input_tokens` sums the state over one
-row per question and `output_tokens` is always 0 because nothing is generated, while the other
-four keys are the truncation report (#174) -- `state_tokens` is what the whole serialized state
-needs, `state_tokens_dropped` the most of it any one question's head gave up, and `truncated` /
-`truncated_questions` say which. A seventh key, `options`, is present only when the head budget
-left some question's options sharing a token span (#538); `docs/http-api.md` documents both this
-block and that field as response keys, and `tests/test_structured_docs.py` holds this page's list
-to the code that builds it.
+`DecisionResult.usage` contains the original runner's usage block. Native predictions report
+`input_tokens`, `output_tokens` (zero), `forward_passes` and `truncated`. Read any additional
+fields according to the selected backend. [Native usage](reference/multimodal.md)
 
 `confidence` and `answer_confidence` are different quantities, and the names follow the definitions.
 `answer_confidence` is `max(p)`, the probability mass on the answer being reported. It is what
@@ -233,5 +227,5 @@ threshold in the workflow. [Native calibration](multimodal.md#calibration-and-ev
 ## See also
 
 - [Prediction hooks](hooks/index.md): observe, shape, cache or gate the decisions this produces.
-- [Decision primitives](index.md): `choice`, `score` and `noul` in depth.
+- [Decision primitives](questions-and-answers.md): `choice`, `score` and `noul` in depth.
 - [LangChain and LangGraph](langchain.md): `LayaDecision` is this call as a runnable in a chain.

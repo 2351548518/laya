@@ -7,8 +7,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import laya  # noqa: E402
-from laya.structured import (  # noqa: E402
+import laya_multimodal  # noqa: E402
+from laya_multimodal.structured import (  # noqa: E402
     SchemaError,
     answers_to_json,
     answer_to_pydantic,
@@ -311,7 +311,7 @@ check_true("decide/details high conf flag unset", det.answers["department"].get(
 # the details artifact, so the number that filter reads has to be the one the gate uses.
 #
 # `DecisionResult.confidence` is built from the answer's `confidence` field, which is normalized
-# entropy: `laya/common.py` calls it "not calibrated: it is not what temperature scaling fits and
+# entropy: `laya_multimodal/common.py` calls it "not calibrated: it is not what temperature scaling fits and
 # not what the reported ECE measures", `tests/test_confidence.py` pins that a two-option
 # distribution reads 0.90 on a `noul` and 0.53 on an equivalent `choice`, and #394 is an open issue
 # saying a confidence threshold does not transfer across option counts -- which is the entropy
@@ -481,13 +481,13 @@ except ImportError:
 
 
 # --------------------------------------------------------------- exports and methods
-check("export/decide", callable(laya.decide), True)
-check("export/decide_batch", callable(laya.decide_batch), True)
-check("export/DecisionResult", hasattr(laya, "DecisionResult"), True)
-check("method/Agent.decide", callable(getattr(laya.Agent, "decide", None)), True)
-check("method/Agent.decide_batch", callable(getattr(laya.Agent, "decide_batch", None)), True)
-check("method/Router.decide", callable(getattr(laya.Router, "decide", None)), True)
-check("method/Router.decide_batch", callable(getattr(laya.Router, "decide_batch", None)), True)
+check("export/decide", callable(laya_multimodal.decide), True)
+check("export/decide_batch", callable(laya_multimodal.decide_batch), True)
+check("export/DecisionResult", hasattr(laya_multimodal, "DecisionResult"), True)
+check("method/Agent.decide", callable(getattr(laya_multimodal.Agent, "decide", None)), True)
+check("method/Agent.decide_batch", callable(getattr(laya_multimodal.Agent, "decide_batch", None)), True)
+check("method/Router.decide", callable(getattr(laya_multimodal.Router, "decide", None)), True)
+check("method/Router.decide_batch", callable(getattr(laya_multimodal.Router, "decide_batch", None)), True)
 
 
 

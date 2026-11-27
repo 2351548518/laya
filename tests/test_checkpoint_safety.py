@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 def check():
-    package = Path(__file__).resolve().parents[1] / "laya"
+    package = Path(__file__).resolve().parents[1] / "laya_multimodal"
     invalid = []
     for path in package.rglob("*.py"):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):

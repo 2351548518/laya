@@ -1,9 +1,11 @@
 # Text decision evaluation
 
+**English** · [简体中文](zh-CN/evals.md)
+
 For native multimodal accuracy and single-box geometry, use the local checkpoint evaluator.
 [Native benchmarks](benchmarks.md)
 
-`laya.evals` turns a labelled dataset into a repeatable score, and a baseline into a
+`laya_multimodal.evals` turns a labelled dataset into a repeatable score, and a baseline into a
 pass/fail gate, so a quality change is a reviewable diff instead of a hand-check.
 
 The metric math and the dataset parser are pure Python plus numpy and never import torch, so
@@ -14,19 +16,16 @@ takes its normal load time.
 
 ```bash
 # check the format without a model
-laya-evals validate research/evals/fixture.jsonl
+laya-multimodal eval validate research/evals/fixture.jsonl
 
 # score a labelled set on one checkpoint, with thresholds and a baseline
-laya-evals run data.jsonl --model multimodal --device cpu \
+laya-multimodal eval run data.jsonl --model multimodal --device cpu \
     --min-accuracy 0.8 --max-ece 0.05 --score-within 0.25 --slice language \
     --json report.json --markdown report.md
 
 # compare a saved report to a baseline
-laya-evals compare report.json --baseline baseline.json --tolerance choice_accuracy=0.02
+laya-multimodal eval compare report.json --baseline baseline.json --tolerance choice_accuracy=0.02
 ```
-
-`laya eval ...` is the same thing through the main CLI, so `laya eval validate data.jsonl`
-works too.
 
 Exit codes: `0` on success, `1` when a threshold or a baseline tolerance fails, `2` on a
 usage error. `run` prints the overall metrics and any requested slices to stdout, and writes
@@ -40,7 +39,7 @@ an independent teacher repeat against one fixed reference teacher observation.
 It takes three saved runs and needs no model weights or teacher service:
 
 ```bash
-laya-evals agreement reference.json repeat.json student.json \
+laya-multimodal eval agreement reference.json repeat.json student.json \
     --bootstrap-samples 2000 --seed 0 --json agreement.json
 ```
 
@@ -96,15 +95,15 @@ To run a local student after validating the teacher records:
 
 ```python
 import json
-import laya
-from laya.evals import evaluate_agreement
+import laya_multimodal
+from laya_multimodal.evals import evaluate_agreement
 
 with open("reference.json", encoding="utf-8") as handle:
     reference = json.load(handle)
 with open("repeat.json", encoding="utf-8") as handle:
     repeat = json.load(handle)
 revision = "YOUR_CHECKPOINT_COMMIT"
-with laya.Router(device="cpu", revision=revision) as runner:
+with laya_multimodal.Router(device="cpu", revision=revision) as runner:
     report = evaluate_agreement(
         runner, reference, repeat, model="multimodal",
         student_provenance={
@@ -116,7 +115,7 @@ print(report["overall"])
 ```
 
 The runner uses the same `predict(state, questions, model=...)` protocol as the
-labelled harness (for example, `laya.Router`). Inputs are
+labelled harness (for example, `laya_multimodal.Router`). Inputs are
 copied before inference. Runner failures propagate; invalid or incomplete outputs
 raise `EvalError`. A choice flagged `abstention="abstained"` becomes a null
 observation, while its underlying choice must still be a valid label.
@@ -145,19 +144,19 @@ sample demonstrates the workflow, not deployment readiness.
 
 ## Attributing shortlist errors
 
-For a labelled high-cardinality choice set, `laya.evals_shortlist.evaluate_shortlist`
+For a labelled high-cardinality choice set, `laya_multimodal.evals_shortlist.evaluate_shortlist`
 uses the existing `predict_shortlist` path and the regular evaluation harness. It
 answers two separate questions: did retrieval keep the gold label, and did Laya
 choose it when it was present? This is an opt-in Python API for choice labels;
-ordinary `laya-evals run` reports are unchanged.
+ordinary `laya-multimodal eval run` reports are unchanged.
 
 ```python
-import laya
-from laya.evals import Dataset
-from laya.evals_shortlist import evaluate_shortlist
-from laya.shortlist import embed_fn_from_agent
+import laya_multimodal
+from laya_multimodal.evals import Dataset
+from laya_multimodal.evals_shortlist import evaluate_shortlist
+from laya_multimodal.shortlist import embed_fn_from_agent
 
-agent = laya.load()  # use the native checkpoint input embeddings
+agent = laya_multimodal.load()  # use the native checkpoint input embeddings
 dataset_path = "intents.jsonl"
 dataset = Dataset.from_jsonl(dataset_path)
 report = evaluate_shortlist(
@@ -189,16 +188,16 @@ same kind of diagnosis repeatable on a caller's own labelled set.
 
 ## Attributing tournament errors
 
-For a labelled many-option choice set, `laya.evals_tournament.evaluate_tournament`
+For a labelled many-option choice set, `laya_multimodal.evals_tournament.evaluate_tournament`
 runs the existing `predict_tournament` path and keeps its finalist metadata in the
 regular evaluation report:
 
 ```python
-import laya
-from laya.evals import Dataset
-from laya.evals_tournament import evaluate_tournament
+import laya_multimodal
+from laya_multimodal.evals import Dataset
+from laya_multimodal.evals_tournament import evaluate_tournament
 
-agent = laya.load()
+agent = laya_multimodal.load()
 dataset_path = "intents.jsonl"
 report = evaluate_tournament(
     agent, Dataset.from_jsonl(dataset_path), group_size=16,
@@ -230,7 +229,7 @@ elimination lost the gold label, but not which round lost it.
 
 ## Native checkpoint
 
-Use `laya-evals run bench.jsonl --checkpoint /path/to/checkpoint` for labelled text decisions.
+Use `laya-multimodal eval run bench.jsonl --checkpoint /path/to/checkpoint` for labelled text decisions.
 For native media and single-box labels, use `scripts/multimodal/evaluate.py`.
 [Native evaluation](multimodal.md#calibration-and-evaluation)
 
@@ -265,7 +264,7 @@ Each metric is computed per answer where it applies and aggregated over the data
 | `noul_accuracy` | `noul` | fraction whose boolean (probability >= 0.5) matches |
 | `score_mae` | `score` | mean absolute error |
 | `score_within_<tol>` | `score` | fraction within the absolute tolerance supplied by `--score-within` |
-| `ece` | any answer with a confidence and a known label | expected calibration error, 15 bins, computed on the column `laya.evals._answer_confidence` reads -- `answer["answer_confidence"]` where the answer carries it, and a fallback where it does not; see [which confidence a metric reads](#which-confidence-a-metric-reads) |
+| `ece` | any answer with a confidence and a known label | expected calibration error, 15 bins, computed on the column `laya_multimodal.evals._answer_confidence` reads -- `answer["answer_confidence"]` where the answer carries it, and a fallback where it does not; see [which confidence a metric reads](#which-confidence-a-metric-reads) |
 | `brier` | any answer with a confidence and a known label | Brier score of confidence as P(correct), `mean((confidence - correct)**2)`; lower is better |
 | `aurc` | any answer with a confidence and a known label | area under the risk--coverage curve: one risk value per distinct confidence level, each weighted by the answers that level spans; lower is better, and rewards a confidence that *ranks* right from wrong rather than just being calibrated |
 | `selective_accuracy@50`, `selective_accuracy@80` | any answer with a confidence and a known label | accuracy over the answers a confidence threshold at the 50% / 80% coverage point accepts -- what abstaining on the least-confident tail buys. A threshold cannot split a group of equal confidences, so this can cover more than the named fraction; see [coverage cuts](#coverage-cuts-and-ties) |
@@ -283,7 +282,7 @@ therefore publishes no `ece` however confident its answers are, and `--max-ece` 
 ## Which confidence a metric reads
 
 Every row above that takes a confidence (`ece`, `brier`, `aurc`, both `selective_accuracy@*`,
-`mean_confidence`) gets its column from `laya.evals._answer_confidence`, which prefers
+`mean_confidence`) gets its column from `laya_multimodal.evals._answer_confidence`, which prefers
 `answer["answer_confidence"]` -- the probability of the answer being reported, the quantity temperature
 scaling fits. Predictions are over-confident when their confidence exceeds observed accuracy.
 Use ECE and the coverage metrics to check confidence on a held-out split.
@@ -310,45 +309,16 @@ slice whose confidences are all equal is that slice's own accuracy, not the bett
 count the gate prints (`n=` in a rule's failure message) is the slice's size, not the accepted size,
 so a very wide group is not visible from the message alone.
 
-Ties are the normal case rather than a corner: a fitted temperature can leave a bucket reporting a
-point mass, which `laya.common.answer_confidence` records of the shipped `choice:11+`, and a real
-checkpoint produced a six-row group at exactly 1.0 out of twelve answers. Cutting at a row index
-instead made both metrics depend on the order the dataset arrived in -- the same rows, shuffled,
-moved `selective_accuracy@50` between 0.000 and 1.000.
-
-`aurc` integrates one risk value per distinct level, weighted by the answers that level spans, so it
-remains an area under the risk--coverage curve rather than an average of unevenly sized points.
-
-Two consequences worth planning for:
-
-* **A number can move in either direction, by more than a reordering could.** Where a group
-  straddles the cut, the threshold reading differs from every row-index reading of the same data:
-  measured over 400,001 tie-shaped datasets, up to 0.500 for `selective_accuracy@50` and 0.351
-  for `aurc`. On the twelve-answer shape above -- six correct, all at confidence 1.0 -- `aurc` moves
-  0.327 (0.173 to 0.500). A gate that was passing may fail, and one that was failing may pass; the
-  previous verdict depended on row order, including for an absolute `min` or `max` limit, which is
-  refused by nothing because it reads a single run.
-* **Regenerate committed baselines.** `config.coverage_metric_definition` records which definition
-  produced a report. Comparing a coverage metric across two definitions is refused on **both** the
-  gates that subtract a baseline -- `--baseline --tolerance` (`EvalReport.compare`) and a relative
-  rule (`max_drop` / `max_increase`) under `--gate-policy` -- and on **either** side being stale,
-  not just the baseline: a candidate produced by an older `laya` carries a row-order artifact that
-  can read *better* than the truth, so gating it against a correctly regenerated baseline would
-  pass a regression that the correctly scored report fails. Without that refusal a
-  stale baseline hides a real regression: a slice recorded at 0.033 under the old definition reads
-  0.517 under this one, so a candidate that genuinely dropped 0.217 would clear a `max_drop` of
-  0.05. `ece` and `brier` do not cut and stay comparable.
-
-With no ties in the data there is one level per answer, and both metrics are exactly what they have
-always been -- bit-identical, not merely close.
-
+`aurc` integrates one risk value per distinct confidence level, weighted by its group size.
+`config.coverage_metric_definition` identifies that definition. A relative coverage or AURC rule
+requires matching definitions on both reports. Regenerate old baselines before comparison.
 
 Add `ScoreWithin(0.25)` to the evaluator list for a tolerance metric; the default evaluator set is
 `choice_accuracy`, `noul_accuracy`, `score_mae` and `mean_confidence`. The confidence metrics are not
 evaluators and are not opted into: `ece`, `brier`, `aurc`, `selective_accuracy@50` and
 `selective_accuracy@80` are all computed on every run that has at least one answer carrying both a
 confidence and a known label, whatever evaluator list it was given. From the CLI the
-same thing is one flag: `laya-evals run data.jsonl --score-within 0.25` reports `score_within_0.25`
+same thing is one flag: `laya-multimodal eval run data.jsonl --score-within 0.25` reports `score_within_0.25`
 beside the defaults, and the flag repeats, so `--score-within 0.25 --score-within 0.5` reports both.
 
 A tolerance metric needs a `score` answer with a numeric label, so on a dataset without one it has
@@ -369,7 +339,7 @@ requests were served fast, not whether the run was cheap. With no `--batch-size`
 timing noise. What the harness actually did -- the batch size asked for, the runner shape it
 resolved to, how many rows shared a call, and the largest chunk -- is recorded in the report's
 `config.timing`, because the flag alone does not say whether anything was batched. Those counters
-record the calls issued, not the calls that returned: with `laya-evals run --on-error skip`, a
+record the calls issued, not the calls that returned: with `laya-multimodal eval run --on-error skip`, a
 chunk whose call raised still counts in `rows_grouped` and `max_chunk`, next to its entries in
 `config.errored`. The default is `--on-error fail`, which re-raises instead of publishing a report
 whose metrics cover only the calls that came back. The two `*_ms` metrics count only the calls that
@@ -378,9 +348,7 @@ returned, so a failed call never contributes a latency it did not measure.
 ### Grouping the rows inside a batch
 
 `--sort-by-length` groups similarly sized rows into the same forward pass, so each pass pads to a
-shorter maximum instead of to the longest row in it. It is the shape of the calls, not their
-answers: results come back in the same order and score identically, which is why `research/` can
-report 2.15x over 10,000 tickets with no decision changing.
+shorter maximum instead of to the longest row in it. The harness restores input order. Validate accuracy and latency on your own runner after changing the batch shape.
 
 There has to be more than one pass to reorder, so it takes effect only with a `--batch-size N`
 below the number of rows the run groups. `config.timing` keeps the two claims apart:
@@ -401,7 +369,7 @@ keys, so every accuracy, calibration and coverage number -- `ece`, `brier`, `aur
 `config.timing.min_confidence` and `config.timing.min_confidence_sent`, and any caller who acts
 on the flag downstream of the harness.
 
-The accepted range is core's `laya.confidence.check_min_confidence` -- `[0.0, 1.0]`, finite, not
+The accepted range is core's `laya_multimodal.confidence.check_min_confidence` -- `[0.0, 1.0]`, finite, not
 a bool -- rather than a copy here, so a value the gate itself would reject fails as a usage error
 (exit 2) before any checkpoint loads. `0.0` is a legal ask: it is the control arm for an
 abstention sweep and the threshold at which `flag_low_confidence` marks no answer, so a check that
@@ -439,9 +407,9 @@ one reviewed slice a CI requirement, save a JSON policy such as `gates.json`:
 ```
 
 ```bash
-laya-evals run data.jsonl --baseline baseline.json --tolerance choice_accuracy=0.02 \
+laya-multimodal eval run data.jsonl --baseline baseline.json --tolerance choice_accuracy=0.02 \
     --gate-policy gates.json --json report.json
-laya-evals compare report.json --baseline baseline.json \
+laya-multimodal eval compare report.json --baseline baseline.json \
     --tolerance choice_accuracy=0.02 --gate-policy gates.json
 ```
 
@@ -474,51 +442,18 @@ is reviewable on its own:
 | `dataset` | the path as typed -- a name, not a hash |
 | `dataset_sha256` | the sha256 of the dataset bytes that were parsed |
 | `questions_sha256` | a fingerprint of the question schema: every question's id, type, `instructions`, `labels` and `criteria`, plus `option_order` on any row that names it, over the whole dataset |
-| `laya_version` | the `laya` that computed the numbers |
+| `laya_version` | the version of the evaluator |
 | `coverage_metric_definition` | which definition of `aurc` / `selective_accuracy@*` produced this report (see [coverage cuts](#coverage-cuts-and-ties)). A relative gate rule on either refuses a baseline recorded under a different one, rather than subtracting numbers that do not mean the same thing |
 | `thresholds` | the gate this run applied: `min`, `max` and `baseline_tolerance` |
 | `gate_policy` | the optional slice gate policy applied by `run --gate-policy` |
 
-`dataset` is a path, and a path is not an identity: a dataset can be edited in place, moved, or
-refetched under the same name, and a CI cache can hand two runs the same filename and different
-bytes. `questions_sha256` covers what was *asked* rather than how many rows there were, so adding
-states to an unchanged question set leaves the fingerprint alone -- `dataset_sha256` still moves,
-and adding a row is a change to the data, not to the question.
-
-It covers `instructions` too, because the instruction text is the prompt. `build_sequence` renders
-`"<type> question: <instructions>"` into the tokenized head, `Agent` refuses a question without one
-("add the text the model should answer"), and Laya's own question identity already counts it:
-`Router._question_schema` and this harness's batch grouping both key on the whole questions dict,
-and `tests/test_router_batch.py` pins that rewording `instructions` alone moves a row into its own
-batch group. So does a reworded instruction still compare equal to a baseline? No -- and that is
-the point. "Judge whether a refund is justified" and "Be conservative and only approve explicit
-refund requests" ask different questions, and the metric gate can only notice when the difference
-happens to move a number further than the tolerance you named. Naming a `choice` option is the
-same argument: `criteria` is the decision space, and the metamorphic checks in
-`research/eval/metamorphic.py` exist because renaming a label flips answers.
-
-Nothing about the instruction text is normalized except the one step the engine itself applies: a
-non-string `instructions` is hashed as `json.dumps(ins, ensure_ascii=False)`, matching
-`Agent._to_internal`. So whitespace and wording both count, and a rewording that a human considers
-a copy edit is treated as a new experiment. That is the honest default -- the alternative is a
-similarity heuristic standing between a run and its baseline, and no evaluation system in common
-use has one.
-
-`option_order` is the one field hashed conditionally, and only when a row names it. It is a
-caller-supplied key: `laya/mcp/server.py` advertises it, `Agent._check_question` and
-`laya/mcp/tools.py::_check_option_order` validate it as a permutation of the option indices, and
-`native processor` and `unpermute_probs` read it to place each answer slot, so a row
-that permutes its options asks a different question and two such datasets must not share a
-fingerprint. `research/eval/metamorphic.py::permute_options` measures the same sensitivity from the
-other side -- it exists to shuffle the option list and check that the answers follow. Hashing an
-absent key as `null` would move the digest of every dataset that never uses the field, so an absent
-key stays out of the hash and such a dataset keeps the fingerprint its committed baseline already
-carries.
-
-Nothing time-bearing is recorded, so a report is still byte-reproducible for a fixed runner.
+Dataset bytes and question definitions identify the comparison. The question fingerprint
+includes the prompt wording, labels and criteria order. It includes `option_order` when specified.
+Changing a question or its options can change the prompt, so rerun the baseline after edits.
+Timing measurements can vary across identical runs.
 
 `REPORT_SCHEMA`, `questions_fingerprint(dataset)` and `file_fingerprint(path)` are public, so a
-caller driving `laya.evals.evaluate` directly gets the same identity a CLI run does.
+caller driving `laya_multimodal.evals.evaluate` directly gets the same identity a CLI run does.
 
 ## Baseline and CI gate
 
@@ -527,16 +462,12 @@ caller driving `laya.evals.evaluate` directly gets the same identity a CLI run d
   maximum absolute drift allowed for that metric. It has to be a limit that can fail: `Infinity`
   is one every finite drift fits inside, so it is refused rather than read as no gate for that
   metric.
-- `laya-evals run ... --baseline baseline.json --tolerance ...` exits non-zero on drift, so it
-  drops into CI unchanged. `laya.evals.EvalReport.compare` and `assert_regression` expose the
+- `laya-multimodal eval run ... --baseline baseline.json --tolerance ...` exits non-zero on drift, so it
+  drops into CI unchanged. `laya_multimodal.evals.EvalReport.compare` and `assert_regression` expose the
   same logic for tests.
 
-The metric gate answers "did the numbers move". It cannot answer "were these the same numbers",
-because `compare` reads `overall` and only `overall` -- so a baseline recorded against one dataset
-would pass a candidate scored on another, with identical arithmetic. `EvalReport.comparable_to`
-closes that: it compares `schema`, `dataset_sha256` and `questions_sha256`, and `run --baseline`
-and `compare` still print every delta, then fail with a non-zero exit naming the key and both
-values:
+`EvalReport.comparable_to` compares `schema`, `dataset_sha256` and `questions_sha256`.
+A conflict prints the differing identity and exits non-zero after reporting the metric deltas.
 
 ```text
 FAIL: baseline is not comparable: dataset_sha256 (dataset bytes): baseline is <sha>, this run is <sha>
@@ -568,7 +499,7 @@ what evidence exists, what is missing, and what is insufficient. It loads no mod
 does not require torch.
 
 ```bash
-laya-evals evidence --checkpoint ./my-checkpoint [--report report.json]
+laya-multimodal eval evidence --checkpoint ./my-checkpoint --report report.json
 ```
 
 For a native checkpoint, the command reads `multimodal_config.json`. Calibration evidence is derived from

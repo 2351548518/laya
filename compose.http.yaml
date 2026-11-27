@@ -1,12 +1,12 @@
-# Add to compose.yaml and start the laya-serve service.
+# Add to compose.yaml and start the laya-multimodal-serve service.
 services:
-  laya-serve:
+  laya-multimodal-serve:
     build:
       context: .
       args:
         TORCH_INDEX: "${LAYA_TORCH_INDEX:-cpu}"
         TORCH_VERSION: "${LAYA_TORCH_VERSION:-2.14.0}"
-    command: ["laya-serve"]
+    command: ["laya-multimodal-serve"]
     ports:
       - "${LAYA_BIND_ADDRESS:-127.0.0.1}:${LAYA_PORT:-8000}:${LAYA_PORT:-8000}"
     environment:

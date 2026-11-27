@@ -9,8 +9,8 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import uvicorn  # noqa: E402
-from laya import BaseHook, Router  # noqa: E402
-from laya.serve import create_app  # noqa: E402
+from laya_multimodal import BaseHook, Router  # noqa: E402
+from laya_multimodal.serve import create_app  # noqa: E402
 
 
 def main():

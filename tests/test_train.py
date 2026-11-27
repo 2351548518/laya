@@ -6,8 +6,8 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from laya.multimodal import MultimodalAgent  # noqa: E402
-from laya.train import decision_target, target_from_expected, target_from_gold  # noqa: E402
+from laya_multimodal.multimodal import MultimodalAgent  # noqa: E402
+from laya_multimodal.train import decision_target, target_from_expected, target_from_gold  # noqa: E402
 
 
 DEPARTMENT = {"type": "choice", "instructions": "which team ?",
@@ -62,7 +62,7 @@ class TargetTests(unittest.TestCase):
         self.assertEqual(target(LEVEL, 1), [0.0, 1.0])
         self.assertEqual(target(LEVEL, "1"), [0.0, 1.0])
 
-        # Fractional score answers (e.g. from laya-evals ScoreMAE / ScoreWithin)
+        # Fractional score answers (e.g. from laya-multimodal eval ScoreMAE / ScoreWithin)
         three_level = {"type": "score", "instructions": "which level ?", "criteria": ["low", "mid", "high"]}
         self.assertEqual(target(three_level, 1.5), [0.0, 0.5, 0.5])
         res_frac2 = target(three_level, 0.2)

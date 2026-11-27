@@ -18,8 +18,8 @@ from huggingface_hub import hf_hub_download
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-import laya  # noqa: E402
-from laya.evals import ece  # noqa: E402
+import laya_multimodal  # noqa: E402
+from laya_multimodal.evals import ece  # noqa: E402
 
 REVISIONS = {
     "mteb/banking77": "18072d2685ea682290f7b8924d94c62acc19c0b2",
@@ -74,13 +74,13 @@ def strategy(name, agent):
         budget = {"max_len": max(agent.max_len, 8192)} if name == "wide" else {}
         return lambda state, q: (agent.predict(state, {"q": q}, **budget)["answers"]["q"], 1)
     if name == "shortlist":
-        embed_fn = laya.cached_embed_fn(laya.embed_fn_from_agent(agent))
-        return lambda state, q: (laya.predict_shortlist(agent, state, {"q": q}, embed_fn)["answers"]["q"], 1)
+        embed_fn = laya_multimodal.cached_embed_fn(laya_multimodal.embed_fn_from_agent(agent))
+        return lambda state, q: (laya_multimodal.predict_shortlist(agent, state, {"q": q}, embed_fn)["answers"]["q"], 1)
     if name.startswith("tournament"):
         size = {"group_size": int(name.split("-")[1])} if "-" in name else {}
 
         def run(state, q):
-            out = laya.predict_tournament(agent, state, {"q": q}, **size)
+            out = laya_multimodal.predict_tournament(agent, state, {"q": q}, **size)
             return out["answers"]["q"], out["tournament"]["q"]["rounds"] + 1
         return run
     raise SystemExit("unknown strategy %r" % name)
@@ -105,17 +105,17 @@ def main():
         rows = random.Random(args.seed).sample(rows, args.limit)
     question = {"type": "choice", "instructions": instructions,
                 "criteria": {name.replace("_", " "): None for name in names}}
-    from laya.revisions import default_checkpoint
+    from laya_multimodal.revisions import default_checkpoint
 
     source = args.model or default_checkpoint()
-    agent = laya.load(source, device=args.device)
+    agent = laya_multimodal.load(source, device=args.device)
     few = dict(question, criteria=dict(list(question["criteria"].items())[:8]))
     for text, _gold in rows[:3]:  # warm up before anything is timed
         agent.predict({"message": text}, {"q": few})
 
     report = {"dataset": args.dataset, "split": args.split, "rows": len(rows), "options": len(names),
               "revisions": REVISIONS, "model": source, "model_revision": agent.checkpoint_revision, "device": str(agent.device),
-              "laya": laya.__version__, "machine": platform.machine(), "strategies": {}}
+              "laya": laya_multimodal.__version__, "machine": platform.machine(), "strategies": {}}
     first = None
     for name in args.strategies.split(","):
         answer_fn = strategy(name, agent)

@@ -4,14 +4,14 @@ Demonstrates:
 1. Sub-35ms task delegation across specialized CrewAI agents (replaces LLM managers).
 2. Calibrated confidence threshold fallback gating to a human supervisor or lead agent.
 3. Pre-execution task guardrails (LayaTaskGuard) screening malicious prompts.
-4. Edge/Serverless deployment against remote laya-serve HTTP instances.
+4. Edge/Serverless deployment against remote laya-multimodal-serve HTTP instances.
 """
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from laya.integrations.crewai import (
+from laya_multimodal.integrations.crewai import (
     CrewAgent,
     CrewTask,
     LayaCrewRouter,
@@ -61,7 +61,7 @@ class _DemoAgent:
 
 _agent = None
 try:
-    from laya import Router
+    from laya_multimodal import Router
     r = Router()
     r.predict("test", {"test": {"type": "choice", "instructions": "test", "criteria": {"a": "a"}}})
     _agent = r
@@ -143,7 +143,7 @@ for label, task in (("benign example", safe_task), ("adversarial example", malic
 # =====================================================================
 # 3. Remote HTTP Server Deployment (Zero Heavy Dependencies)
 # =====================================================================
-# Connects to your self-hosted `laya-serve` instance without requiring PyTorch on edge clients.
+# Connects to your self-hosted `laya-multimodal-serve` instance without requiring PyTorch on edge clients.
 remote_router = LayaCrewRouter(
     base_url="http://localhost:8080",
     confidence_threshold=0.85,

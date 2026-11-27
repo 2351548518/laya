@@ -1,28 +1,34 @@
-# Site navigation order. A page or folder that is not listed appears under Guides, so a new
-# guide shows up without an edit here; add it where it belongs once its place is clear.
 nav:
   - index.md
-  - Guides:
+  - Run a model:
       - multimodal.md
-      - project-readme
-      - multimodal-clients.md
+      - questions-and-answers.md
       - grounding.md
-      - multimodal-release.md
-      - benchmarks.md
-      - laya-guide.md
-      - use-cases.md
+      - routing.md
       - structured.md
+      - cli-mcp.md
+      - vegaml.md
+  - Train and evaluate:
+      - finetune.md
+      - project-readme
+      - benchmarks.md
+      - evals.md
+  - Deploy:
+      - http-api.md
+      - multimodal-clients.md
+      - typescript-sdk.md
+      - docker.md
+      - multimodal-release.md
+      - security.md
+  - Integrate:
+      - use-cases.md
+      - staged-adoption.md
+      - guardrail-limitations.md
       - hooks
+      - tools.md
       - langchain.md
       - llamaindex.md
       - crewai.md
       - agno.md
-      - tools.md
-      - glob: "*"
-        ignore_no_matches: true
-  - Deployment:
-      - docker.md
-      - security.md
-  - Fine-tuning:
-      - finetune.md
   - reference
+  - 简体中文: zh-CN

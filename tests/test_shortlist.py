@@ -14,10 +14,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np  # noqa: E402
 
-import laya  # noqa: E402
-from laya.agent import Agent  # noqa: E402
-from laya.common import render_options  # noqa: E402
-from laya.shortlist import (  # noqa: E402
+import laya_multimodal  # noqa: E402
+from laya_multimodal.agent import Agent  # noqa: E402
+from laya_multimodal.common import render_options  # noqa: E402
+from laya_multimodal.shortlist import (  # noqa: E402
     cached_embed_fn,
     embed_fn_from_agent,
     predict_shortlist,
@@ -125,12 +125,12 @@ def _embed_for(query_text, option_vectors):
 
 
 # ---------------------------------------------------------------- exports and default path
-check_true("export/shortlist_choice", laya.shortlist_choice is shortlist_choice)
-check_true("export/predict_shortlist", laya.predict_shortlist is predict_shortlist)
-check_true("export/embed_fn_from_agent", laya.embed_fn_from_agent is embed_fn_from_agent)
-check_true("export/cached_embed_fn", laya.cached_embed_fn is cached_embed_fn)
+check_true("export/shortlist_choice", laya_multimodal.shortlist_choice is shortlist_choice)
+check_true("export/predict_shortlist", laya_multimodal.predict_shortlist is predict_shortlist)
+check_true("export/embed_fn_from_agent", laya_multimodal.embed_fn_from_agent is embed_fn_from_agent)
+check_true("export/cached_embed_fn", laya_multimodal.cached_embed_fn is cached_embed_fn)
 for _name in ("shortlist_choice", "predict_shortlist", "embed_fn_from_agent", "cached_embed_fn"):
-    check_true("all/%s" % _name, _name in laya.__all__)
+    check_true("all/%s" % _name, _name in laya_multimodal.__all__)
 
 _predict_src = inspect.getsource(Agent.system_one)
 check_true("default/predict is system_one", Agent.predict is Agent.system_one)
@@ -788,8 +788,8 @@ class Ranker:
             for qid, qdef in questions.items() if qdef["type"] == "choice"}}
 
 
-check_true("export/predict_tournament", laya.predict_tournament is predict_tournament)
-check_true("all/predict_tournament", "predict_tournament" in laya.__all__)
+check_true("export/predict_tournament", laya_multimodal.predict_tournament is predict_tournament)
+check_true("all/predict_tournament", "predict_tournament" in laya_multimodal.__all__)
 
 # A ranker that is consistent across groups must see its best label win from any position.
 for n, calls in ((77, 2), (257, 3)):

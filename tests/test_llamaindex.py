@@ -10,7 +10,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from laya.integrations.llamaindex import (
+from laya_multimodal.integrations.llamaindex import (
     LayaLowConfidenceError,
     LayaMultiSelector,
     LayaQueryRouter,
@@ -395,14 +395,14 @@ with patch("urllib.request.build_opener") as mock_build_opener:
 
 # --------------------------------------------------------------- 5b. Non-Object Remote Response
 #
-# A remote laya-serve body is arbitrary JSON: a gateway, a mis-pointed `base_url`, or a proxy error
+# A remote laya-multimodal-serve body is arbitrary JSON: a gateway, a mis-pointed `base_url`, or a proxy error
 # page can answer with a top-level array, string, number or `true`/`null`. `json.loads` accepts each
 # of those and the consumers read the result with `res.get("answers", …)` (the selector and route
 # lookups), so before the guard a non-object leaked `AttributeError: 'list' object has no attribute
 # 'get'` past the fail-closed path instead of the `RuntimeError` every other remote failure raises
 # here. `_call_remote` and the public `select()` are both driven so a regression at either layer is
 # caught.
-from laya.integrations.llamaindex import _call_remote as _llama_call_remote
+from laya_multimodal.integrations.llamaindex import _call_remote as _llama_call_remote
 
 _LLAMA_NON_OBJECT_BODIES = [
     ([], "list"),
@@ -452,7 +452,7 @@ with patch("urllib.request.build_opener") as _m:
 # different answer keys are driven here, and the multi selector shares the single one's line. A body
 # without `answers`, or with `answers` as an object (even an empty one), is a no-decision response
 # rather than a malformed one, and has to keep selecting and routing exactly as it does today.
-from laya.integrations.llamaindex import _call_remote as _llama_call_remote
+from laya_multimodal.integrations.llamaindex import _call_remote as _llama_call_remote
 
 _LLAMA_BAD_ANSWERS = [
     (["boom"], "list"),
@@ -513,19 +513,19 @@ for _body, _label in (({"model": "laya-multilingual"}, "answers absent"),
 
 # --------------------------------------------------------------- 6. Per-call decision controls
 #
-# `laya.integrations.langchain` has forwarded `max_len` / `head_max_len` and the five hook
+# `laya_multimodal.integrations.langchain` has forwarded `max_len` / `head_max_len` and the five hook
 # arguments since #530 / #532; this surface forwarded only `model`, so a RAG pipeline choosing
 # between more tools than the default head budget fits could not widen its own window. The rule
 # now lives in one module the three integrations import, and the lists below are read out of it
 # rather than written out again here -- a control added to `._controls` without reaching this file
 # fails here. Three classes, three `_execute_decision` call sites, so every surface is driven.
 import inspect
-from laya.agent import Agent
-from laya.integrations import _controls
-from laya.integrations import crewai as crewai_module
-from laya.integrations import langchain as langchain_module
-from laya.integrations import llamaindex as llamaindex_module
-from laya.router import Router
+from laya_multimodal.agent import Agent
+from laya_multimodal.integrations import _controls
+from laya_multimodal.integrations import crewai as crewai_module
+from laya_multimodal.integrations import langchain as langchain_module
+from laya_multimodal.integrations import llamaindex as llamaindex_module
+from laya_multimodal.router import Router
 
 CONTROLS = (tuple(_controls.PREDICT_CONTROLS) + tuple(_controls.DECISION_CONTROLS)
             + tuple(_controls.HOOK_CONTROLS))
@@ -665,7 +665,7 @@ for _label, _cls, _extra, _run in SURFACES:
           [k for k in remote_body(_cls, _extra, _run) if k in _controls.PREDICT_CONTROLS], [])
     check("controls/%s remote body keeps a zero" % _label,
           remote_body(_cls, _extra, _run, head_max_len=0).get("head_max_len"), 0)
-    # `lang` / `min_confidence` are laya-serve `BODY_CONTROLS`, so the same override reaches the
+    # `lang` / `min_confidence` are laya-multimodal-serve `BODY_CONTROLS`, so the same override reaches the
     # remote node -- and an unset one stays out of the body rather than shadowing the deployment.
     check("controls/%s remote body carries the decision controls" % _label,
           {k: v for k, v in remote_body(_cls, _extra, _run, lang="es", min_confidence=0.3).items()
@@ -682,7 +682,7 @@ for _label, _cls, _extra, _run in SURFACES:
             check_true("controls/%s remote refuses %s" % (_label, _c), False, "no error raised")
         except ValueError as exc:
             check_true("controls/%s remote refuses %s" % (_label, _c),
-                       _c in str(exc) and "laya-serve" in str(exc))
+                       _c in str(exc) and "laya-multimodal-serve" in str(exc))
         except Exception as exc:
             check_true("controls/%s remote refuses %s" % (_label, _c), False, type(exc).__name__)
 
@@ -700,7 +700,7 @@ check_true("controls/forwards the caller's objects",
 
 # --------------------------------------------------------------- Confidence source
 # Every gate in this module reads the same number: the calibrated `answer_confidence`
-# core gates on, never the entropy `confidence` (see `laya.confidence`). The two are on
+# core gates on, never the entropy `confidence` (see `laya_multimodal.confidence`). The two are on
 # different scales, so they must not be interchangeable here.
 
 
@@ -834,7 +834,7 @@ for _label, _cls, _extra, _run in SURFACES:
             check_true("routing/%s refuses %s at a runner that cannot route" % (_label, _c),
                        False, type(exc).__name__)
 
-    # Both hints ride in the laya-serve body -- `BODY_CONTROLS` there -- and a blank one stays.
+    # Both hints ride in the laya-multimodal-serve body -- `BODY_CONTROLS` there -- and a blank one stays.
     check("routing/%s remote body carries both hints" % _label,
           {k: v for k, v in remote_body(_cls, _extra, _run, task="typed_decisions",
                                         lang_guess="de").items() if k in ROUTER_HINTS},
@@ -851,7 +851,7 @@ for _label, _cls, _extra, _run in SURFACES:
                    "no error raised")
     except ValueError as exc:
         check_true("routing/%s remote refuses a callable lang_guess" % _label,
-                   "lang_guess" in str(exc) and "laya-serve" in str(exc))
+                   "lang_guess" in str(exc) and "laya-multimodal-serve" in str(exc))
     except Exception as exc:
         check_true("routing/%s remote refuses a callable lang_guess" % _label, False,
                    type(exc).__name__)

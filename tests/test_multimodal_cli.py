@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-from laya.train import GroundingTrainConfig
+from laya_multimodal.train import GroundingTrainConfig
 from scripts.multimodal import evaluate
 from scripts.multimodal.calibrate import calibration_passes
 from scripts.multimodal.train import validate_visual_training
@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_core_training_and_cli_have_no_research_dependencies():
     paths = list((ROOT / 'scripts/multimodal').glob('*.py'))
-    paths += [ROOT / 'laya' / name for name in ['multimodal.py', 'multimodal_train.py',
+    paths += [ROOT / 'laya_multimodal' / name for name in ['multimodal.py', 'multimodal_train.py',
         'grounding.py', 'train.py', 'train_cli.py', 'multimodal_distributed.py', 'multimodal_objectives.py',
         'multimodal_readout.py', 'multimodal_calibration.py']]
     for path in paths:
@@ -37,9 +37,50 @@ def test_cli_help_needs_no_local_datasets_or_weights(script):
     assert '--model' in result.stdout and '--out' in result.stdout
 
 
+def test_checkout_script_uses_the_packaged_entrypoint():
+    from laya_multimodal import train_cli
+    from scripts.multimodal import train
+
+    assert train.main is train_cli.main
+    assert validate_visual_training is train_cli.validate_visual_training
+
+
+def test_train_command_dispatches_to_joint_trainer(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from laya_multimodal import cli, train_cli
+
+    base = tmp_path / "base"
+    base.mkdir()
+    (base / "config.json").write_text('{"model_type": "gemma4"}')
+    config = tmp_path / "config.json"
+    config.write_text('{"mode": "head", "train_readout_in_warmup": true}')
+    data, out = tmp_path / "data", tmp_path / "head"
+    agent = SimpleNamespace(
+        model=SimpleNamespace(grounding_head=SimpleNamespace(architecture="single-v1")),
+        readout="candidate", prompt_version="v2",
+    )
+    run = Mock()
+    monkeypatch.setattr(train_cli, "MultimodalAgent", Mock(return_value=agent))
+    monkeypatch.setattr(train_cli, "distributed_context",
+                        lambda: SimpleNamespace(device="cpu", main=True, world_size=1))
+    monkeypatch.setattr(train_cli, "finetune_grounding", run)
+
+    cli.main(["train", "--model", str(base), "--data", str(data), "--out", str(out),
+              "--config", str(config), "--train-split", "warmup", "--require-original-base"])
+
+    run.assert_called_once()
+    assert run.call_args.args == (data / "warmup.jsonl", data / "dev.jsonl", str(out))
+    assert run.call_args.kwargs["decision_dev_data"] == data / "decision_dev.jsonl"
+    assert run.call_args.kwargs["config"].train_readout_in_warmup
+    assert run.call_args.kwargs["agent"] is agent
+    assert (out / "initialization.json").is_file()
+
+
 def test_prediction_cli_loads_the_native_lane_for_text_and_media(tmp_path, monkeypatch, capsys):
     from PIL import Image
-    from laya import cli, multimodal
+    from laya_multimodal import cli, multimodal
     from test_multimodal import Q, tiny_agent
 
     checkpoint = tmp_path / "checkpoint"
@@ -73,7 +114,7 @@ def test_prediction_cli_loads_the_native_lane_for_text_and_media(tmp_path, monke
 
 
 def test_prediction_cli_reports_an_unavailable_native_checkpoint(tmp_path, capsys):
-    from laya import cli
+    from laya_multimodal import cli
 
     assert cli.main(["--multimodal", str(tmp_path / "missing"), "Text"]) == 2
     assert "multimodal_config.json" in capsys.readouterr().err
@@ -221,8 +262,8 @@ def test_calibration_rejects_an_aggregate_gain_hiding_a_modality_regression():
 
 
 def test_request_shaped_dataset_preserves_media_labels_and_option_order(tmp_path):
-    from laya.train import load_grounding_rows
-    from laya.multimodal_data import can_shuffle_choice, record_input
+    from laya_multimodal.train import load_grounding_rows
+    from laya_multimodal.multimodal_data import can_shuffle_choice, record_input
     from scripts.multimodal.prepare_dataset import main
     from test_multimodal import tiny_agent
 
@@ -266,7 +307,7 @@ def test_request_shaped_dataset_preserves_media_labels_and_option_order(tmp_path
      "matching asset"),
 ])
 def test_request_shaped_dataset_checks_file_parts(tmp_path, assets, files, error):
-    from laya.multimodal_data import normalize_record
+    from laya_multimodal.multimodal_data import normalize_record
 
     row = {"request": {"state": "scene", "assets": assets,
                        "questions": {"x": {"type": "noul", "instructions": "Is the scene clear?"}}},
@@ -333,7 +374,7 @@ def test_swanlab_follow_waits_for_a_complete_training_line(tmp_path, monkeypatch
 
 def test_native_swanlab_reporter_logs_metrics_and_isolates_sdk_failure(tmp_path, monkeypatch, caplog):
     from types import SimpleNamespace
-    from laya._swanlab import SwanLabReporter
+    from laya_multimodal._swanlab import SwanLabReporter
 
     runs = []
 

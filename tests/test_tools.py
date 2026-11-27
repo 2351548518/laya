@@ -12,13 +12,13 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import laya
-from laya.integrations._controls import (
+import laya_multimodal
+from laya_multimodal.integrations._controls import (
     DECISION_CONTROLS,
     HOOK_CONTROLS,
     PREDICT_CONTROLS,
 )
-from laya.integrations.tools import (
+from laya_multimodal.integrations.tools import (
     LayaLowConfidenceError,
     LayaToolSelector,
     _extract_tool_metadata,
@@ -414,8 +414,8 @@ class MockHTTPHandler:
             raise ValueError("Malformed request body")
         return MockHTTPResponse()
 
-original_build_opener = laya.integrations.tools.urllib.request.build_opener
-laya.integrations.tools.urllib.request.build_opener = lambda *args: MockHTTPHandler()
+original_build_opener = laya_multimodal.integrations.tools.urllib.request.build_opener
+laya_multimodal.integrations.tools.urllib.request.build_opener = lambda *args: MockHTTPHandler()
 
 try:
     remote_selector = LayaToolSelector(
@@ -442,7 +442,7 @@ try:
         PASS.append("remote/hooks_rejected")
         check_true("remote/hooks_msg", "run in the local runner and cannot be sent" in str(e))
 finally:
-    laya.integrations.tools.urllib.request.build_opener = original_build_opener
+    laya_multimodal.integrations.tools.urllib.request.build_opener = original_build_opener
 
 
 # --------------------------------------------------------------- 8b. Non-Object Remote Response
@@ -475,11 +475,11 @@ class _BodyHandler:
         return _BodyResponse(self._raw)
 
 
-_original_build_opener_8b = laya.integrations.tools.urllib.request.build_opener
+_original_build_opener_8b = laya_multimodal.integrations.tools.urllib.request.build_opener
 nonobj_fallback = lambda *a, **k: "general_llm_fallback"
 try:
     for _raw in NON_OBJECT_BODIES:
-        laya.integrations.tools.urllib.request.build_opener = (
+        laya_multimodal.integrations.tools.urllib.request.build_opener = (
             lambda *a, _r=_raw: _BodyHandler(_r))
         # no fallback: must raise RuntimeError, never AttributeError
         _sel = LayaToolSelector(tools=tools_list, base_url="http://localhost:8000")
@@ -500,16 +500,16 @@ try:
         except AttributeError as _e:
             FAIL.append(f"nonobj/fallback_{_raw}: leaked AttributeError ({_e})")
 finally:
-    laya.integrations.tools.urllib.request.build_opener = _original_build_opener_8b
+    laya_multimodal.integrations.tools.urllib.request.build_opener = _original_build_opener_8b
 
 # A well-formed object response must still route normally through the same harness.
-laya.integrations.tools.urllib.request.build_opener = lambda *a: _BodyHandler(
+laya_multimodal.integrations.tools.urllib.request.build_opener = lambda *a: _BodyHandler(
     json.dumps(make_mock_response("tool_0", confidence=0.93)))
 try:
     _ok = LayaToolSelector(tools=tools_list, base_url="http://localhost:8000").select("Query")
     check("nonobj/object_still_routes", _ok.tool_name, "web_search")
 finally:
-    laya.integrations.tools.urllib.request.build_opener = _original_build_opener_8b
+    laya_multimodal.integrations.tools.urllib.request.build_opener = _original_build_opener_8b
 
 
 # --------------------------------------------------------------- 8c. Non-Numeric / Boolean Probability
@@ -576,13 +576,13 @@ for ctrl in HOOK_CONTROLS:
 
 
 # --------------------------------------------------------------- 10. Public Module Exports
-integrations_mod = __import__("laya.integrations", fromlist=["__all__"])
+integrations_mod = __import__("laya_multimodal.integrations", fromlist=["__all__"])
 check_true("export/integrations_selector", "LayaToolSelector" in integrations_mod.__all__)
 check_true("export/integrations_decision", "ToolRouteDecision" in integrations_mod.__all__)
-tools_mod = __import__("laya.integrations.tools", fromlist=["__all__"])
+tools_mod = __import__("laya_multimodal.integrations.tools", fromlist=["__all__"])
 check_true("export/tools_selector", "LayaToolSelector" in tools_mod.__all__)
 check_true("export/tools_decision", "ToolRouteDecision" in tools_mod.__all__)
-check_true("export/top_level_clean", "LayaToolSelector" not in laya.__all__ and "ToolRouteDecision" not in laya.__all__)
+check_true("export/top_level_clean", "LayaToolSelector" not in laya_multimodal.__all__ and "ToolRouteDecision" not in laya_multimodal.__all__)
 
 
 # --------------------------------------------------------------- Report

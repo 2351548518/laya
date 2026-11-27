@@ -11,7 +11,7 @@ import sys
 import numpy as np
 import pytest
 
-from laya import _agreement, confidence, evals
+from laya_multimodal import _agreement, confidence, evals
 
 
 def run_document(run_id, rows, *, teacher=True):
@@ -426,7 +426,7 @@ def test_evaluate_treats_abstained_argmax_as_uncovered():
 
 
 def test_the_gate_writes_the_marker_and_the_report_reads_it():
-    """Abstention is `laya.confidence`'s vocabulary, so this result comes from that gate.
+    """Abstention is `laya_multimodal.confidence`'s vocabulary, so this result comes from that gate.
 
     The fixture above types the state by hand, which pins nothing about the field a gated runner
     actually returns: renaming the state, renaming the key, or reading the key as "any marker
@@ -484,7 +484,7 @@ def test_evaluate_validates_every_input_before_first_runner_call(invalid):
 
 
 def cli(*args):
-    return subprocess.run([sys.executable, "-m", "laya.evals_cli", "agreement", *map(str, args)],
+    return subprocess.run([sys.executable, "-m", "laya_multimodal.evals_cli", "agreement", *map(str, args)],
                           cwd=Path(__file__).resolve().parents[1], capture_output=True,
                           text=True, encoding="utf-8", timeout=30)
 
@@ -519,7 +519,7 @@ def test_cli_reads_bom_prefixed_saved_runs(tmp_path):
     The three agreement reads opened `utf-8`, so a UTF-8 BOM stayed as U+FEFF and `json.load` refused
     a document that is valid JSON, answering `cannot read agreement run ... Unexpected UTF-8 BOM
     (decode using utf-8-sig)` -- a refusal naming the decoding this CLI could have asked for itself.
-    `laya/cli.py`, `laya/train.py` and `laya/evidence.py` open a caller's file with `utf-8-sig` for
+    `laya_multimodal/cli.py`, `laya_multimodal/train.py` and `laya_multimodal/evidence.py` open a caller's file with `utf-8-sig` for
     exactly this reason, and the byte-for-byte equality below is the point: the BOM changes nothing
     about the numbers, so it must change nothing about the verdict.
     """
@@ -555,6 +555,6 @@ def test_cli_refuses_bad_inputs_without_a_report(tmp_path, invalid):
     output = tmp_path / "report.json"
     result = cli(*paths, "--json", output)
     assert result.returncode == 2
-    assert "laya-evals:" in result.stderr
+    assert "laya-multimodal eval:" in result.stderr
     assert "Traceback" not in result.stderr
     assert not output.exists()

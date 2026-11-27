@@ -11,7 +11,7 @@ import sys
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from laya._swanlab import development_metrics, init_dashboard, progress_metrics
+from laya_multimodal._swanlab import development_metrics, init_dashboard, progress_metrics
 
 
 _TRAIN = re.compile(r"grounding step=(\d+) loss=(\S+) elapsed=(\S+)s ranks=(\d+)")

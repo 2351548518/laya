@@ -1,12 +1,12 @@
 """MCP layer tests: schema, shape and registration. No model weights, no network.
 
-Requires the mcp extra:  pip install "laya[mcp]"
+Requires the mcp extra:  pip install "laya-multimodal[mcp]"
 
 Run: python tests/test_mcp.py
 Skips cleanly (exit 0) when the mcp package is not installed, so the core
 install keeps working.
 
-Device and preload-list tests follow the laya.serve environment contract
+Device and preload-list tests follow the laya_multimodal.serve environment contract
 (LAYA_DEVICE / LAYA_PRELOAD / LAYA_MODELS / LAYA_THREADS / LAYA_AUTO_TASK /
 LAYA_DEFAULT_MODEL).
 """
@@ -25,12 +25,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 try:
     import mcp  # noqa: F401
 except ImportError:
-    print("SKIP: mcp extra not installed (pip install 'laya[mcp]')")
+    print("SKIP: mcp extra not installed (pip install 'laya-multimodal[mcp]')")
     sys.exit(0)
 
-from laya.mcp.device import agent_device, device_report, env_device, resolve_device, router_agent  # noqa: E402
-from laya.mcp.server import _models_from_env, server as mcp_server  # noqa: E402
-from laya.mcp.tools import (  # noqa: E402
+from laya_multimodal.mcp.device import agent_device, device_report, env_device, resolve_device, router_agent  # noqa: E402
+from laya_multimodal.mcp.server import _models_from_env, server as mcp_server  # noqa: E402
+from laya_multimodal.mcp.tools import (  # noqa: E402
     BATCH_ITEM_OVERRIDES,
     PRESETS,
     PRESET_ALIASES,
@@ -98,7 +98,7 @@ def test_device():
         else:
             os.environ["LAYA_DEVICE"] = old
     ok("device/fallback", resolve_device(None) in ("cuda", "mps", "xpu", "cpu"))
-    # laya.serve contract: LAYA_DEVICE is normalised to what torch's device parser accepts --
+    # laya_multimodal.serve contract: LAYA_DEVICE is normalised to what torch's device parser accepts --
     # the device type is lower-cased, the optional index is left alone -- and the same string is
     # both handed to torch and reported by `resolve_device`.
     old_dev = os.environ.get("LAYA_DEVICE")
@@ -126,7 +126,7 @@ def test_device():
     ok("device/report_cuda_bool", isinstance(rep["torch_cuda"], bool))
 
     # The auto-detect branch is a second implementation of the availability chain inside
-    # `laya/multimodal.py::MultimodalAgent.__init__`, so it has to be exercised on devices the runner does not have.
+    # `laya_multimodal/multimodal.py::MultimodalAgent.__init__`, so it has to be exercised on devices the runner does not have.
     # `resolve_device` imports torch inside its body, which makes the module the seam: a fake
     # here forces every branch without CUDA, MPS or XPU hardware. Before this block the only
     # auto-detect assertion was the domain check above, and it passed on a narrower chain.
@@ -261,24 +261,24 @@ def test_schema():
 def test_model_names():
     """`model` is core's registry, not a second list kept here.
 
-    The names and aliases live in `laya.router`, and `router.predict(model=...)` runs whatever
+    The names and aliases live in `laya_multimodal.router`, and `router.predict(model=...)` runs whatever
     arrives through `normalise_name` a few lines after `validate_model` sees it. So any name core
     resolves has to survive this layer, and it has to come back canonical: the `routing.model` a
     caller reads should not depend on how the checkpoint was spelled in the request.
     """
-    from laya.router import DEFAULT_MODELS, _ALIASES, normalise_name
+    from laya_multimodal.router import DEFAULT_MODELS, _ALIASES, normalise_name
 
     for name in sorted(DEFAULT_MODELS):
         ok("model/canonical_%s" % name, validate_model(name) == name)
     for alias, canonical in sorted(_ALIASES.items()):
         got = validate_model(alias)
         ok("model/alias_%s" % alias, got == canonical, "got %r want %r" % (got, canonical))
-    for spelling in ("DEFAULT", " Multimodal ", "Laya", "AUTO"):
+    for spelling in ("DEFAULT", " Multimodal ", "AUTO"):
         want = "auto" if spelling.strip().lower() == "auto" else normalise_name(spelling)
         ok("model/casing_and_spacing_%r" % spelling, validate_model(spelling) == want)
     for auto in (None, "auto", "Auto", " auto "):
         ok("model/auto_%r" % (auto,), validate_model(auto) == "auto")
-    for bad in ("gpt4", "", "   ", "english-ish", "laya-typed", 5, [], {}):
+    for bad in ("gpt4", "", "   ", "english-ish", "laya", "laya-typed", 5, [], {}):
         expect_tool_error("model/rejected_%r" % (bad,), lambda b=bad: validate_model(b),
                           "invalid_model")
 
@@ -304,11 +304,11 @@ def test_presets():
     caller's lone string under it. Nothing else about the state is touched: more than one key is the
     caller's shape, and guessing there would be a worse failure than the honest one.
     """
-    import laya
-    from laya.presets import state_field
+    import laya_multimodal
+    from laya_multimodal.presets import state_field
 
     def build(attr):
-        return getattr(laya, attr)()
+        return getattr(laya_multimodal, attr)()
 
     class StateRouter(FakeRouter):
         def predict(self, state, questions, **kwargs):
@@ -399,7 +399,7 @@ def test_model_forwarding():
             return {"answers": {"department": {"choice": "billing", "confidence": 0.94}}}
 
     router = EchoRouter()
-    by_alias = laya_predict(STATE, QUESTIONS, model="laya", router=router)
+    by_alias = laya_predict(STATE, QUESTIONS, model="default", router=router)
     by_name = laya_predict(STATE, QUESTIONS, model="multimodal", router=router)
     ok("forward/model_seen_by_core", [c.get("model") for c in router.calls] == ["multimodal", "multimodal"],
        repr(router.calls))
@@ -503,7 +503,9 @@ def test_shape():
     out = laya_status(router=FakeRouter(), loaded=["multimodal"], preload=True)
     ok("shape/status_ready", out["router_ready"] is True)
     ok("shape/status_loaded", out["loaded"] == ["multimodal"])
-    ok("shape/status_versions", "laya" in out["package_versions"])
+    from laya_multimodal import __version__
+
+    ok("shape/status_versions", out["package_versions"].get("laya-multimodal") == __version__)
     ok("shape/status_device", out["device"] == "cpu", repr(out.get("device")))
     ok("shape/status_device_is_fact", out["device_is_preference"] is False)
     ok("shape/status_checkpoint_devices", out["checkpoint_devices"] == {"multimodal": "cpu"},
@@ -652,7 +654,7 @@ def test_option_order_forwarding():
     # returns, so the drop has to come back under its real key name after json round-trip.
     import json
 
-    from laya.mcp import server as server_mod
+    from laya_multimodal.mcp import server as server_mod
 
     router = ShortlistRouter({"multimodal": ShortlistAgent()})
     payload = json.loads(server_mod._wrap(
@@ -710,20 +712,20 @@ def test_real_device():
 # --- contract on the private Router._agents name (no weights, no network) ----
 
 def test_private_contract():
-    # Why this test exists: laya.mcp.device.router_agent reads the private
+    # Why this test exists: laya_multimodal.mcp.device.router_agent reads the private
     # Router._agents mapping, because it is the only side-effect-free way to
     # read a loaded agent's real device. If the core ever renames _agents,
     # the device would silently disappear from the laya_status/laya_predict
     # answers: every other test in this file uses fakes that carry their own
     # _agents attribute, so only a test built on a real Router would notice.
     # A rename must break CI loudly instead of degrading the answers silently.
-    import laya
+    import laya_multimodal
 
     # A real Router with preload=False (the default) loads nothing on
     # construction: no checkpoint build, no download (downloads only happen
     # inside load()/preload()). If that ever changed, this line would fail
     # here rather than on the network.
-    r = laya.Router()
+    r = laya_multimodal.Router()
     ok("contract/no_download_on_construct", list(r.loaded) == [], repr(list(r.loaded)))
 
     class MpsDevice:  # torch.device-like: a .type attribute
@@ -866,10 +868,10 @@ def test_shortlist():
        repr(out["routing"]))
     ok("shortlist/passthrough_latency", isinstance(out["latency_ms"], float))
 
-    # Default k comes from laya.shortlist: a choice smaller than it passes through.
+    # Default k comes from laya_multimodal.shortlist: a choice smaller than it passes through.
     # Read from the library rather than copied, so raising DEFAULT_SHORTLIST_K cannot
     # make this assert a stale value against a tool layer that moved correctly.
-    from laya.shortlist import DEFAULT_SHORTLIST_K
+    from laya_multimodal.shortlist import DEFAULT_SHORTLIST_K
 
     router = ShortlistRouter({"multimodal": ShortlistAgent()})
     three = {"dept": {"type": "choice", "instructions": "pick",
@@ -1148,8 +1150,8 @@ def test_tournament_routing_and_validation():
                                    "detection": detection})
         unused = TournamentAgent()
         out = laya_tournament(STATE, questions, router=router, agent=unused,
-                              task="laya", lang_guess="de", max_len=1024)
-        ok("tournament/auto_original_request", router.routes == [(STATE, questions, {"task": "laya", "lang_guess": "de"})])
+                              task="default", lang_guess="de", max_len=1024)
+        ok("tournament/auto_original_request", router.routes == [(STATE, questions, {"task": "default", "lang_guess": "de"})])
         ok("tournament/auto_pinned_every_round",
            all(kwargs == {"model": "multimodal", "lang": "de", "max_len": 1024}
                for _s, _qs, kwargs in router.agent.calls))
@@ -1361,7 +1363,7 @@ def test_batch_predict():
     # Call-level controls are validated up front like every sibling tool: a bad value is a clean
     # ToolError, not an internal_error that escaped the TypeError-only handler. A bool is refused
     # here before core sees it, so the caller hears `invalid_hooks_timeout` rather than the core
-    # refusal `laya/hooks.py::validate_timeout` raises for the same mistake.
+    # refusal `laya_multimodal/hooks.py::validate_timeout` raises for the same mistake.
     expect_tool_error("batch/min_confidence_out_of_range",
                       lambda: laya_predict_batch(BATCH_REQUESTS, min_confidence=1.5, router=BatchRouter()),
                       "invalid_min_confidence")
@@ -1397,7 +1399,7 @@ def test_batch_tool_control_forwarding():
     turned an invalid deadline into "no deadline" and an invalid gate into "no gate": the client
     got a clean response and no way to tell the control it asked for had been dropped (#707).
     """
-    import laya.mcp.server as server_mod
+    import laya_multimodal.mcp.server as server_mod
 
     seen = {}
 
@@ -1565,7 +1567,7 @@ def test_route_batch_tool_hooks_timeout_forwarding():
     (`invalid_hooks_timeout`) -- exactly the collapse the sibling door on `laya_predict_batch`
     already excludes booleans from, for the reason `test_batch_tool_control_forwarding` states.
     """
-    import laya.mcp.server as server_mod
+    import laya_multimodal.mcp.server as server_mod
 
     seen = {}
 
@@ -1626,7 +1628,7 @@ def test_batch_unknown_task_is_invalid_task():
     """
     import json
 
-    from laya.mcp import server as server_mod
+    from laya_multimodal.mcp import server as server_mod
     from mcp.server.mcpserver.exceptions import ToolError as McpToolError
 
     requests = [{"state": STATE, "questions": QUESTIONS},
@@ -1657,8 +1659,8 @@ def test_batch_unknown_task_is_invalid_task():
                           [{"state": STATE, "questions": QUESTIONS, "model": "auto",
                             "task": "not-a-checkpoint"}]),
                       "invalid_task")
-    out = validate_batch_requests([{"state": STATE, "questions": QUESTIONS, "task": "laya"}])
-    ok("batch_task/known_task_kept_as_spelled", out[0].get("task") == "laya", repr(out[0]))
+    out = validate_batch_requests([{"state": STATE, "questions": QUESTIONS, "task": "default"}])
+    ok("batch_task/known_task_kept_as_spelled", out[0].get("task") == "default", repr(out[0]))
 
 
 # --- decide tool (mocked router, no weights) ----------------------------------
@@ -1677,7 +1679,7 @@ DECIDE_SCHEMA = {
 class TypeEchoRouter(FakeRouter):
     """FakeRouter that also answers with the real payload shape: the `type`
     key and a probabilities dict keyed by option/level, like system_one does,
-    so laya.structured's per-field probabilities are exercised."""
+    so laya_multimodal.structured's per-field probabilities are exercised."""
 
     def predict(self, state, questions, **kwargs):
         out = super().predict(state, questions, **kwargs)
@@ -1690,7 +1692,7 @@ class TypeEchoRouter(FakeRouter):
 
 
 def test_decide():
-    import laya
+    import laya_multimodal
 
     router = TypeEchoRouter()
     out = laya_decide(STATE, DECIDE_SCHEMA, router=router)
@@ -1712,7 +1714,7 @@ def test_decide():
 
     # Same values the core decide() returns for the same runner: the tool is a
     # thin MCP surface over the documented schema projection, not a second one.
-    core = laya.decide(router, STATE, schema=DECIDE_SCHEMA)
+    core = laya_multimodal.decide(router, STATE, schema=DECIDE_SCHEMA)
     ok("decide/parity_with_core", out["values"] == core, "tool=%r core=%r" % (out["values"], core))
 
     # Score projection follows the argmax of the distribution, offset by minimum.
@@ -2038,7 +2040,7 @@ def test_predict_long():
     # as a raw TypeError (an opaque internal_error over the tool boundary) instead of an answer.
     # This is the branch the pinned-model guard at the top of the tool never reaches.
     agent = LongAgent()
-    out = laya_predict_long(STATE, LONG_QUESTIONS, task="laya", agent=agent)
+    out = laya_predict_long(STATE, LONG_QUESTIONS, task="default", agent=agent)
     ok("long/bare_agent_task_dropped", "task" not in agent.seen, repr(agent.seen))
     ok("long/bare_agent_task_answers", out["answers"]["refund"]["noul"] == 0.8, repr(out))
 
@@ -2091,7 +2093,7 @@ class ControlAgent:
 
 def test_controls_validation():
     """Each control is checked the way core checks it, and refused in this layer's words."""
-    from laya.router import DEFAULT_MODELS, _ALIASES
+    from laya_multimodal.router import DEFAULT_MODELS, _ALIASES
 
     ok("task/none_is_unset", validate_task(None) is None)
     for name in sorted(DEFAULT_MODELS):
@@ -2103,7 +2105,7 @@ def test_controls_validation():
         ok("task/alias_%s" % alias, validate_task(alias) == alias, repr(validate_task(alias)))
     # What the sweep really protects: every name core's registry holds is accepted here, so this
     # layer can never be narrower than `router.predict(task=...)` the way a copied list was.
-    from laya.router import normalise_name
+    from laya_multimodal.router import normalise_name
 
     for alias in sorted(_ALIASES):
         ok("task/resolves_%s" % alias, normalise_name(validate_task(alias)) == _ALIASES[alias],
@@ -2111,7 +2113,7 @@ def test_controls_validation():
     # The underscore form is what the CLI and the question ids use, and `Router._route` remaps it
     # before it looks anything up. The tool remaps the same way but forwards the caller's own
     # spelling, so `routing.reason` still reads as the request that was made.
-    for spelling in ("laya", "LAYA", " laya ", "default"):
+    for spelling in ("default", "DEFAULT", " default ", "multimodal"):
         got = validate_task(spelling)
         ok("task/workflow_%r" % spelling, got == spelling, repr(got))
     for bad in ("nope", "", "   ", "english-ish", 5, [], {}, True):
@@ -2167,10 +2169,10 @@ def test_controls_predict():
        repr(router.predict_calls[-1]))
 
     router = ControlRouter()
-    out = laya_predict(STATE, QUESTIONS, task="laya", lang="de",
+    out = laya_predict(STATE, QUESTIONS, task="default", lang="de",
                        max_len=1024, head_max_len=512, router=router)
     ok("predict/all_controls_forwarded",
-       router.predict_calls == [{"task": "laya", "lang": "de",
+       router.predict_calls == [{"task": "default", "lang": "de",
                                  "max_len": 1024, "head_max_len": 512}],
        repr(router.predict_calls))
     ok("predict/answers_untouched", out["answers"]["department"]["choice"] == "billing")
@@ -2185,11 +2187,11 @@ def test_controls_predict():
 
     # A pinned checkpoint plus a task is two answers to one question: `Router._route` checks model
     # first and never reads the task, and `Agent.system_one` does not accept it at all.
-    for model in ("multimodal", "laya", "DEFAULT"):
+    for model in ("multimodal", "DEFAULT"):
         router = ControlRouter()
         expect_tool_error("predict/model_plus_task_%s" % model,
                           lambda m=model: laya_predict(STATE, QUESTIONS, model=m,
-                                                       task="laya", router=router),
+                                                       task="default", router=router),
                           "invalid_task")
         ok("predict/model_plus_task_no_call_%s" % model, router.predict_calls == [],
            repr(router.predict_calls))
@@ -2219,7 +2221,7 @@ def test_controls_predict():
     agent = ControlAgent()
     expect_tool_error("predict/agent_task_refused",
                       lambda a=agent: laya_predict(STATE, QUESTIONS, model="multimodal",
-                                                   task="laya", agent=a),
+                                                   task="default", agent=a),
                       "invalid_task")
     ok("predict/agent_task_no_call", agent.calls == [], repr(agent.calls))
 
@@ -2241,9 +2243,9 @@ def test_controls_route():
     ok("route/no_overrides_call", router.route_calls == [{}], repr(router.route_calls))
 
     router = ControlRouter(routed="multimodal")
-    out = laya_route(STATE, QUESTIONS, task="laya", lang="de", router=router)
+    out = laya_route(STATE, QUESTIONS, task="default", lang="de", router=router)
     ok("route/overrides_forwarded",
-       router.route_calls == [{"task": "laya", "lang": "de"}], repr(router.route_calls))
+       router.route_calls == [{"task": "default", "lang": "de"}], repr(router.route_calls))
     ok("route/decision_shape", set(out) == {"model", "repo", "reason"}, repr(out))
 
     # `auto` is this layer's sentinel and core has no such name: it means "do not pin", so it is
@@ -2259,7 +2261,7 @@ def test_controls_route():
     router = ControlRouter()
     expect_tool_error("route/model_plus_task",
                       lambda: laya_route(STATE, QUESTIONS, model="multimodal",
-                                         task="laya", router=router),
+                                         task="default", router=router),
                       "invalid_task")
     ok("route/refused_before_core", router.route_calls == [], repr(router.route_calls))
     for bad in ("nope", 5, []):
@@ -2293,10 +2295,10 @@ def test_controls_shortlist():
        repr(router.predict_calls))
 
     router = ControlRouter(routed="multimodal")
-    out = laya_shortlist(STATE, small, k=2, task="laya", lang="de",
+    out = laya_shortlist(STATE, small, k=2, task="default", lang="de",
                          max_len=1024, head_max_len=384, router=router, embed_fn=_tie_embed)
     ok("shortlist/route_sees_task",
-       router.route_calls == [{"task": "laya", "lang": "de"}], repr(router.route_calls))
+       router.route_calls == [{"task": "default", "lang": "de"}], repr(router.route_calls))
     ok("shortlist/predict_sees_budget",
        router.predict_calls == [{"model": "multimodal", "lang": "de",
                                  "max_len": 1024, "head_max_len": 384}],
@@ -2315,7 +2317,7 @@ def test_controls_shortlist():
     router = ControlRouter()
     expect_tool_error("shortlist/pinned_plus_task",
                       lambda: laya_shortlist(STATE, small, k=2, model="multimodal",
-                                             task="laya", router=router,
+                                             task="default", router=router,
                                              embed_fn=_tie_embed),
                       "invalid_task")
     ok("shortlist/pinned_plus_task_no_call", router.predict_calls == [], repr(router.predict_calls))
@@ -2357,10 +2359,10 @@ def test_controls_preset():
     ok("preset/no_controls_call", router.predict_calls == [{}], repr(router.predict_calls))
 
     router = ControlRouter()
-    out = laya_preset("guard", STATE, task="laya", lang="de", max_len=1024,
+    out = laya_preset("guard", STATE, task="default", lang="de", max_len=1024,
                       head_max_len=384, router=router, preset_builder=builder)
     ok("preset/controls_forwarded",
-       router.predict_calls == [{"task": "laya", "lang": "de",
+       router.predict_calls == [{"task": "default", "lang": "de",
                                  "max_len": 1024, "head_max_len": 384}],
        repr(router.predict_calls))
     # The questions the preset builder produced are what core was asked, alongside the controls --
@@ -2428,7 +2430,7 @@ def test_controls_signature_and_schema():
            required == (["preset", "state"] if name == "laya_preset" else ["state", "questions"]),
            repr(required))
 
-    from laya.mcp import server as server_mod
+    from laya_multimodal.mcp import server as server_mod
 
     model_schemas = []
     for name in ("laya_predict", "laya_shortlist", "laya_tournament", "laya_decide", "laya_route"):
@@ -2453,7 +2455,7 @@ def test_lang_guess_control():
     """`lang_guess` -- core's soft routing hint (#489 family) -- reaches the single-request tools.
 
     The batch surface already forwards it (``BATCH_ITEM_OVERRIDES`` advertises the key, and
-    ``laya_predict_batch``/``laya_route_batch`` hand it to ``Router.*_batch``), and ``laya-serve`` and
+    ``laya_predict_batch``/``laya_route_batch`` hand it to ``Router.*_batch``), and ``laya-multimodal-serve`` and
     the CLI forward it, so a client scoring one state over MCP could ask for a probable language to
     nudge the checkpoint only by sending a batch of one. `lang_guess` is routing-only, so it is
     treated like ``task``: forwarded to a router call, refused on a pinned model (a pinned call has
@@ -2484,9 +2486,9 @@ def test_lang_guess_control():
     ok("predict/langguess_forwarded", router.predict_calls == [{"lang_guess": "de"}],
        repr(router.predict_calls))
     router = ControlRouter()
-    laya_predict(STATE, QUESTIONS, lang_guess="de", task="laya", router=router)
+    laya_predict(STATE, QUESTIONS, lang_guess="de", task="default", router=router)
     ok("predict/langguess_alongside_task",
-       router.predict_calls == [{"task": "laya", "lang_guess": "de"}],
+       router.predict_calls == [{"task": "default", "lang_guess": "de"}],
        repr(router.predict_calls))
     # An explicit lang and a soft hint are distinct keywords: both reach core, and core orders them.
     router = ControlRouter()
@@ -2495,7 +2497,7 @@ def test_lang_guess_control():
        router.predict_calls == [{"lang": "fr", "lang_guess": "de"}], repr(router.predict_calls))
 
     # Pinned: refused before core, exactly like task -- there is nothing to route.
-    for model in ("multimodal", "laya", "DEFAULT"):
+    for model in ("multimodal", "DEFAULT"):
         router = ControlRouter()
         expect_tool_error("predict/model_plus_langguess_%s" % model,
                           lambda m=model: laya_predict(STATE, QUESTIONS, model=m,
@@ -2562,14 +2564,14 @@ def test_lang_guess_control():
     # Cross-surface drift guard: lang_guess is a real core routing control (serve forwards it as a
     # body control; the batch item overrides already name it) and Router.route/predict accept it, so
     # this layer can never advertise a keyword core would reject.
-    from laya import serve as serve_mod
+    from laya_multimodal import serve as serve_mod
 
     ok("drift/langguess_in_body_controls", "lang_guess" in serve_mod.BODY_CONTROLS,
        repr(serve_mod.BODY_CONTROLS))
     ok("drift/langguess_in_batch_overrides", "lang_guess" in BATCH_ITEM_OVERRIDES,
        repr(BATCH_ITEM_OVERRIDES))
     for method in ("route", "predict"):
-        params = inspect.signature(getattr(__import__("laya.router", fromlist=["Router"]).Router,
+        params = inspect.signature(getattr(__import__("laya_multimodal.router", fromlist=["Router"]).Router,
                                            method)).parameters
         ok("drift/router_%s_accepts_langguess" % method, "lang_guess" in params,
            repr(sorted(params)))
@@ -2581,7 +2583,7 @@ def test_min_confidence_control():
     #567 forwarded every other per-call control (task/lang/max_len/head_max_len) to these tools,
     but not this one: a client could pin a checkpoint and size its budget over the wire, yet could
     not ask Laya to abstain on an unsure answer -- even though `min_confidence` is a validated
-    keyword of `Agent.predict`, `Router.predict`/`predict_batch` and `laya.decide` on `main`.
+    keyword of `Agent.predict`, `Router.predict`/`predict_batch` and `laya_multimodal.decide` on `main`.
     """
     import inspect
 
@@ -2674,9 +2676,9 @@ def test_min_confidence_control():
     ok("decide/zero_is_no_abstention", zero["values"] == plain["values"], repr(zero["values"]))
 
     # The tool is a thin surface over the documented core abstention, not a second projection.
-    import laya
+    import laya_multimodal
 
-    core = laya.decide(router, STATE, schema=DECIDE_SCHEMA, min_confidence=0.9)
+    core = laya_multimodal.decide(router, STATE, schema=DECIDE_SCHEMA, min_confidence=0.9)
     ok("decide/abstention_parity_with_core", abstained["values"] == core,
        "tool=%r core=%r" % (abstained["values"], core))
 
@@ -2728,7 +2730,7 @@ def test_question_validation_matches_the_agent():
     router: no weights, and the core guard is the oracle rather than a second hand-written
     copy of the rules.
     """
-    from laya.agent import Agent
+    from laya_multimodal.agent import Agent
 
     def core_rejects(qid, qdef):
         try:
@@ -2850,13 +2852,13 @@ def test_a_bad_question_is_a_caller_error_not_a_server_fault():
     """
     import json as _json
 
-    from laya.mcp import server as server_mod
+    from laya_multimodal.mcp import server as server_mod
 
     class ValidatingAgent:
         """The real guard, no checkpoint: what `Agent.system_one` runs before encoding."""
 
         def predict(self, state, questions, **kwargs):
-            from laya.agent import Agent
+            from laya_multimodal.agent import Agent
             for qid, qdef in questions.items():
                 Agent._check_question(qid, qdef)
             return {"answers": {qid: {"type": "noul", "noul": 0.5, "noul_label": None}
@@ -2906,7 +2908,7 @@ def test_timeout_removed():
     # functions no longer accept a timeout argument.
     import inspect
 
-    import laya.mcp.tools as tools_mod
+    import laya_multimodal.mcp.tools as tools_mod
 
     for fn in (laya_predict, laya_route, laya_preset, laya_shortlist,
                laya_predict_batch, laya_route_batch, laya_decide, laya_predict_long):
@@ -2919,12 +2921,8 @@ def test_timeout_removed():
 def test_batch_item_shape_as_documented():
     """Every place the batch item shape is written out says what the validator keeps.
 
-    Three strings enumerate the keys a batch item may carry: `validate_batch_requests`' error
-    message (checked against the validator in test_batch_validation), each batch tool's registered
-    description, and the README's MCP section. A client reads them as the schema, so all three are
-    compared to `BATCH_ITEM_OVERRIDES` -- the tuple `_validate_batch_item` branches on.
-    `laya_route_batch` leaves the two token budgets out, because routing runs no forward pass and
-    a budget there would be ignored.
+    Compare the registered descriptions to the validator's keys. Routing omits both token
+    budgets because it selects a checkpoint without a forward pass.
     """
     by_name = {t.name: t for t in asyncio.run(mcp_server.list_tools())}
     for tool, omit in (("laya_predict_batch", ()),
@@ -2933,67 +2931,23 @@ def test_batch_item_shape_as_documented():
         ok("schema/%s_item_shape" % tool, want in (by_name[tool].description or ""),
            "documents %r" % want)
 
-    # `encoding="utf-8"` explicitly: the README is UTF-8 and contains non-ASCII (the language
-    # examples), while `Path.read_text()` defaults to the locale encoding -- cp1252 on the Windows
-    # runner, where the decode raised `UnicodeDecodeError` and this suite failed. It went unseen
-    # because the Windows lane ran this file without the `mcp` extra, so it skipped at the top.
-    readme = (Path(__file__).resolve().parents[1] / "docs" / "laya-guide.md").read_text(encoding="utf-8")
-    marker = "one tool call takes an array of `{"
-    ok("docs/readme_names_the_batch_shape", marker in readme, "sentence not found")
-    if marker in readme:
-        start = readme.index(marker) + len(marker)
-        inner = readme[start:readme.index("}", start)]
-        named = {part.strip().rstrip("?") for part in inner.split(",")}
-        ok("docs/readme_batch_item_keys",
-           named == {"state", "questions"} | set(BATCH_ITEM_OVERRIDES), repr(sorted(named)))
-
-
 def test_cli_mcp_page_batch_rows():
-    """Each batch row on the MCP docs page names its own key set, not the sibling's.
-
-    `docs/cli-mcp.md` is the page a client reads before opening the tools/list response, so the
-    `requests` cell is a fourth copy of the shape. Until now the three-copy gate above covered
-    the tool descriptions and the README but not this table, and the `laya_route_batch` row read
-    "same shape as `laya_predict_batch`" -- which is wrong, because `server.py:310` registers the
-    route tool with `batch_item_key_doc(omit=("max_len", "head_max_len"))`. Routing runs no
-    forward pass, so the token budgets are dropped; the row has to say the six keys the tool
-    actually accepts.
-
-    Both rows are read from the rendered markdown (the third `|`-delimited cell of the table),
-    the brace-list is parsed out, and the resulting key set is compared to `batch_item_key_doc`
-    with the same `omit` the server registers. The pre-fix wording is banned by direct substring
-    so the check fails if the row reverts to pointing at the sibling instead of naming itself.
-    """
+    """Both languages document each batch tool's accepted request item keys."""
     import re
 
-    page = (Path(__file__).resolve().parents[1] / "docs" / "cli-mcp.md").read_text(encoding="utf-8")
-
-    def row_cell(tool):
-        for line in page.splitlines():
-            if line.startswith("| `%s` |" % tool):
-                cells = [c.strip() for c in line.strip().strip("|").split("|")]
-                if len(cells) >= 3:
-                    return cells[2]
-        return None
-
-    for tool, omit in (("laya_predict_batch", ()),
-                       ("laya_route_batch", ("max_len", "head_max_len"))):
-        cell = row_cell(tool)
-        ok("docs-mcp/%s_row_present" % tool, cell is not None, "row not found")
-        if cell is None:
-            continue
-        match = re.search(r"`\{([^`]*)\}`", cell)
-        ok("docs-mcp/%s_row_has_brace_list" % tool, match is not None,
-           "cell=%r" % cell)
-        if match is None:
-            continue
-        named = {part.strip().rstrip("?") for part in match.group(1).split(",")}
-        want = {"state", "questions"} | (set(BATCH_ITEM_OVERRIDES) - set(omit))
-        ok("docs-mcp/%s_row_keys" % tool, named == want,
-           "row=%r want=%r" % (sorted(named), sorted(want)))
-
-    ok("docs-mcp/route_batch_row_drops_sibling_reference",
-       "same shape as `laya_predict_batch`" not in page)
+    docs = Path(__file__).resolve().parents[1] / "docs"
+    for page in (docs / "cli-mcp.md", docs / "zh-CN" / "cli-mcp.md"):
+        lines = page.read_text(encoding="utf-8").splitlines()
+        for tool, omit in (("laya_predict_batch", ()),
+                           ("laya_route_batch", ("max_len", "head_max_len"))):
+            label = "docs-mcp/%s/%s" % (page.relative_to(docs), tool)
+            row = next((line for line in lines if line.startswith("| `%s` |" % tool)), "")
+            match = re.search(r"`\{([^`]*)\}`", row)
+            ok(label + "_item_shape", match is not None, repr(row))
+            if match:
+                named = {part.strip().rstrip("?") for part in match.group(1).split(",")}
+                want = {"state", "questions"} | (set(BATCH_ITEM_OVERRIDES) - set(omit))
+                ok(label + "_item_keys", named == want, "row=%r want=%r" % (sorted(named), sorted(want)))
 
 
 def test_models_from_env():
@@ -3012,8 +2966,8 @@ def test_retired_auto_task_keeps_native_routing():
     """An old LAYA_AUTO_TASK setting still resolves to the current native checkpoint."""
     from unittest.mock import patch
 
-    import laya.mcp.server as mcp_mod
-    from laya.serve import build_router
+    import laya_multimodal.mcp.server as mcp_mod
+    from laya_multimodal.serve import build_router
 
     with patch.dict(os.environ, LAYA_PRELOAD="0", LAYA_AUTO_TASK="1"), patch.object(mcp_mod, "_ROUTER", None):
         mcp_router, serve_router = mcp_mod._ensure_router(), build_router()
@@ -3023,8 +2977,8 @@ def test_retired_auto_task_keeps_native_routing():
 
 def test_default_model_env():
     """Local MCP and HTTP share the configured native checkpoint and registry."""
-    import laya.mcp.server as mcp_mod  # the module, not the MCPServer instance
-    from laya.serve import build_router
+    import laya_multimodal.mcp.server as mcp_mod  # the module, not the MCPServer instance
+    from laya_multimodal.serve import build_router
 
     saved = {k: os.environ.get(k)
              for k in ("LAYA_DEFAULT_MODEL", "LAYA_PRELOAD", "LAYA_EXTRA_MODELS")}
@@ -3043,14 +2997,14 @@ def test_default_model_env():
 
         # Unset / empty / blank mean "whatever the Router's own default is", read off the
         # signature rather than restated, so this cannot drift the next time it moves.
-        from laya.router import Router as _Router
+        from laya_multimodal.router import Router as _Router
         _stock = inspect.signature(_Router.__init__).parameters["default"].default
         for label, value, want in (
                 ("unset", None, _stock),
                 ("empty", "", _stock),
                 ("blank", "   ", _stock),
                 ("canonical", "multimodal", "multimodal"),
-                ("alias", "laya", "multimodal"),
+                ("alias", "default", "multimodal"),
                 ("padded_upper", " DEFAULT ", "multimodal"),
                 ("registered", "support", "support")):
             try:
@@ -3143,15 +3097,15 @@ def test_server_registration():
 def test_server_tournament():
     import json
 
-    from laya.mcp import server as server_mod
+    from laya_multimodal.mcp import server as server_mod
     from mcp.server.mcpserver.exceptions import ToolError as McpToolError
-    import laya
+    import laya_multimodal
 
     by_name = {t.name: t for t in asyncio.run(mcp_server.list_tools())}
     tool = by_name["laya_tournament"]
     schema = tool.input_schema if hasattr(tool, "input_schema") else tool.inputSchema
     props = schema["properties"]
-    default = inspect.signature(laya.predict_tournament).parameters["group_size"].default
+    default = inspect.signature(laya_multimodal.predict_tournament).parameters["group_size"].default
     ok("schema/tournament_group_default", props["group_size"]["default"] == default)
     ok("schema/tournament_group_integer", props["group_size"]["type"] == "integer")
     ok("schema/tournament_required", schema["required"] == ["state", "questions"])
@@ -3164,7 +3118,7 @@ def test_server_tournament():
         server_mod._ROUTER = router
         result = asyncio.run(mcp_server.call_tool("laya_tournament", {
             "state": STATE, "questions": tournament_questions(40), "group_size": 4,
-            "task": "laya", "lang_guess": "de", "lang": "fr",
+            "task": "default", "lang_guess": "de", "lang": "fr",
             "max_len": 1024, "head_max_len": 384, "min_confidence": 0.95,
         }))
         payload = json.loads(result.content[0].text)
@@ -3176,7 +3130,7 @@ def test_server_tournament():
                      "head_max_len": 384, "min_confidence": 0.95}
                for _s, _qs, k in router.agent.calls))
         ok("server/tournament_route_controls", router.routes[0][2] == {
-            "task": "laya", "lang_guess": "de", "lang": "fr"})
+            "task": "default", "lang_guess": "de", "lang": "fr"})
         ok("server/tournament_final_low_confidence", payload["answers"]["intent"]["low_confidence"])
         try:
             server_mod.laya_tournament_tool(STATE, tournament_questions(40), group_size=1)
@@ -3198,7 +3152,7 @@ def test_server_router_construction_error_is_the_same_on_every_tool():
     """
     import json
 
-    from laya.mcp import server as server_mod
+    from laya_multimodal.mcp import server as server_mod
     from mcp.server.mcpserver.exceptions import ToolError as McpToolError
 
     saved_router, saved_url = server_mod._ROUTER, os.environ.get("LAYA_BASE_URL")
@@ -3230,10 +3184,10 @@ def test_server_router_construction_error_is_the_same_on_every_tool():
 
 
 def test_server_shortlist_k_default():
-    """The shortlist tool's advertised `k` default must be `laya.shortlist`'s.
+    """The shortlist tool's advertised `k` default must be `laya_multimodal.shortlist`'s.
 
-    `laya/mcp/server.py` registers the tool with `k: int = 20` written out as a literal,
-    because the module stays importable without numpy -- `laya.shortlist` imports numpy at
+    `laya_multimodal/mcp/server.py` registers the tool with `k: int = 20` written out as a literal,
+    because the module stays importable without numpy -- `laya_multimodal.shortlist` imports numpy at
     module level, so deriving the default from it would put numpy on the MCP server's import
     path. The literal is therefore necessary, and necessary hand-copies get a drift gate.
 
@@ -3244,8 +3198,8 @@ def test_server_shortlist_k_default():
     """
     import inspect
 
-    from laya.mcp import server as server_mod
-    from laya.shortlist import DEFAULT_SHORTLIST_K
+    from laya_multimodal.mcp import server as server_mod
+    from laya_multimodal.shortlist import DEFAULT_SHORTLIST_K
 
     params = inspect.signature(server_mod.laya_shortlist_tool).parameters
     ok("server/shortlist_k_default", params["k"].default == DEFAULT_SHORTLIST_K,
@@ -3263,7 +3217,7 @@ def test_server_shortlist_k_default():
 def test_shortlist_metadata_keys_are_documented():
     """Every key `predict_shortlist` publishes must be named by all three surfaces that list it.
 
-    `laya/shortlist.py` writes a five-key block per question: ``labels``, ``scores``, ``k``,
+    `laya_multimodal/shortlist.py` writes a five-key block per question: ``labels``, ``scores``, ``k``,
     ``n`` and ``passthrough``. The tool description, the README and `docs/cli-mcp.md` each
     paraphrase that block, and all three stopped at four -- they dropped ``passthrough``, the
     one key that tells a caller whether the shortlist actually narrowed anything. A question
@@ -3271,7 +3225,7 @@ def test_shortlist_metadata_keys_are_documented():
     so a client that assumes a real ranking was produced reads ``None`` as "no scores" rather
     than "nothing to rank".
 
-    The key set is read out of `laya/shortlist.py`'s AST rather than typed here, so a sixth key
+    The key set is read out of `laya_multimodal/shortlist.py`'s AST rather than typed here, so a sixth key
     added to the metadata fails this gate on all three pages at once.
     """
     import ast
@@ -3280,8 +3234,8 @@ def test_shortlist_metadata_keys_are_documented():
     root = Path(__file__).resolve().parents[1]
     # `encoding="utf-8"` on every read below, for the reason recorded at the README read in the
     # batch-shape gate: `Path.read_text()` and `open()` default to the locale encoding, which is
-    # cp1252 on the Windows runner, and these pages and `laya/shortlist.py` carry UTF-8.
-    with open(root / "laya" / "shortlist.py", encoding="utf-8") as f:
+    # cp1252 on the Windows runner, and these pages and `laya_multimodal/shortlist.py` carry UTF-8.
+    with open(root / "laya_multimodal" / "shortlist.py", encoding="utf-8") as f:
         shortlist_src = f.read()
     # Scoped to predict_shortlist's own body: predict_tournament also builds a `meta[qid]` dict,
     # and a module-wide walk would depend on which one ast.walk happens to reach first.
@@ -3297,7 +3251,7 @@ def test_shortlist_metadata_keys_are_documented():
             break
     ok("shortlist/meta_keys read from the AST",
        meta_keys == ["labels", "scores", "k", "n", "passthrough"],
-       "AST read %r from laya/shortlist.py" % (meta_keys,))
+       "AST read %r from laya_multimodal/shortlist.py" % (meta_keys,))
 
     # Each key needs a concept word on the page; the paraphrase never uses the raw key names.
     REQUIRED = {
@@ -3311,7 +3265,6 @@ def test_shortlist_metadata_keys_are_documented():
     by_name = {t.name: t for t in asyncio.run(mcp_server.list_tools())}
     surfaces = {
         "tool description": by_name["laya_shortlist"].description,
-        "Laya guide": (root / "docs" / "laya-guide.md").read_text(encoding="utf-8"),
         "docs/cli-mcp.md": (root / "docs" / "cli-mcp.md").read_text(encoding="utf-8"),
     }
     for where, text in surfaces.items():
@@ -3357,7 +3310,7 @@ def test_cli_mcp_page_tool_argument_rows():
     """
     import inspect
 
-    from laya.mcp import server as server_mod
+    from laya_multimodal.mcp import server as server_mod
 
     page = (Path(__file__).resolve().parents[1] / "docs" / "cli-mcp.md").read_text(encoding="utf-8")
 

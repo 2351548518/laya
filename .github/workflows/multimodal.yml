@@ -30,8 +30,8 @@ jobs:
           python -m pip install -e '.[multimodal,serve]' pytest httpx ruff
       - name: Core lint and compilation
         run: |
-          ruff check laya/ --select=E9,F63,F7,F82,F401,F811 --line-length=120
-          python -m compileall -q laya/ tests/
+          ruff check laya_multimodal/ --select=E9,F63,F7,F82,F401,F811 --line-length=120
+          python -m compileall -q laya_multimodal/ tests/
       - name: Native contracts and small CPU backbone checks
         run: >-
           python -m pytest -q

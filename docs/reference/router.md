@@ -1,10 +1,12 @@
 # Router
 
-`laya.Router` detects the language of each state and sends the request to the matching
-checkpoint, loading checkpoints on first use.
+**English** · [简体中文](../zh-CN/reference/router.md)
 
-::: laya.router.Router
+`laya_multimodal.Router` selects a registered checkpoint and loads it on first use. The default
+route selects the native multimodal model. [Routing guide](../routing.md)
 
-::: laya.router.RouteDecision
+::: laya_multimodal.router.Router
 
-::: laya.router.DEFAULT_MODELS
+::: laya_multimodal.router.RouteDecision
+
+::: laya_multimodal.router.DEFAULT_MODELS

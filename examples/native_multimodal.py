@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from laya import MultimodalAgent
+from laya_multimodal import MultimodalAgent
 
 
 def main(argv=None):

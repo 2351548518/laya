@@ -13,5 +13,5 @@ x-checkpoint: &checkpoint
         create_host_path: false
 
 services:
-  laya: *checkpoint
-  laya-serve: *checkpoint
+  laya-multimodal: *checkpoint
+  laya-multimodal-serve: *checkpoint

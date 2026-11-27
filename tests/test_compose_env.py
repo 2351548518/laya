@@ -43,8 +43,8 @@ class ComposeTests(unittest.TestCase):
             self.assertEqual(Path(mount["source"]), ROOT)
             self.assertTrue(mount["read_only"])
             self.assertFalse(mount.get("bind", {}).get("create_host_path", False))
-        self.assertEqual(services["laya"]["environment"]["LAYA_REQUEST_FILE"], "/inputs/request.json")
-        self.assertEqual(services["laya-serve"]["command"], ["laya-serve"])
+        self.assertEqual(services["laya-multimodal"]["environment"]["LAYA_REQUEST_FILE"], "/inputs/request.json")
+        self.assertEqual(services["laya-multimodal-serve"]["command"], ["laya-multimodal-serve"])
 
     def test_gpu_overlays_select_matching_wheels_and_devices(self):
         for overlay, index in (("compose.cuda.yaml", "cu126"), ("compose.spark.yaml", "cu130")):

@@ -13,8 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import torch  # noqa: E402
 import uvicorn  # noqa: E402
-from laya import Router  # noqa: E402
-from laya.serve import _predict_with_tournament, create_app  # noqa: E402
+from laya_multimodal import Router  # noqa: E402
+from laya_multimodal.serve import _predict_with_tournament, create_app  # noqa: E402
 from test_multimodal import TinyProcessor, tiny_agent  # noqa: E402
 
 

@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from laya import Router  # noqa: E402
+from laya_multimodal import Router  # noqa: E402
 from test_multimodal import Q, tiny_agent  # noqa: E402
 
 
@@ -46,9 +46,16 @@ class RouterTests(unittest.TestCase):
         router.register("multimodal", "/checkpoints/replacement")
         self.assertEqual(router.route("text")["repo"], "/checkpoints/replacement")
         agent = tiny_agent()
-        with patch("laya.agent.load", return_value=agent) as load:
+        with patch("laya_multimodal.agent.load", return_value=agent) as load:
             self.assertIs(router.load("multimodal"), agent)
         self.assertEqual(load.call_args.args, ("/checkpoints/replacement",))
+
+    def test_context_manager_unloads_attached_checkpoints(self):
+        with Router(max_loaded=2) as router:
+            router.attach("multimodal", tiny_agent())
+            router.attach("other", tiny_agent())
+            self.assertCountEqual(router.loaded, ["multimodal", "other"])
+        self.assertEqual(router.loaded, [])
 
 
 if __name__ == "__main__":

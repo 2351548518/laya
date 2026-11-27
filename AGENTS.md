@@ -11,8 +11,8 @@ Context for AI coding assistants (Claude Code, Codex, Cursor, Copilot, Gemini CL
 - Skip the CI gates before declaring a change done:
 
   ```bash
-  ruff check laya/ --select=E9,F63,F7,F82,F401,F811 --line-length=120
-  python -m compileall -q laya/ tests/
+  ruff check laya_multimodal/ --select=E9,F63,F7,F82,F401,F811 --line-length=120
+  python -m compileall -q laya_multimodal/ tests/
   ```
 
 - Reformat files wholesale, reorder imports, or "modernize" surrounding code. Match the style of the file being edited; a diff full of formatting noise gets a change rejected.
@@ -24,10 +24,10 @@ Context for AI coding assistants (Claude Code, Codex, Cursor, Copilot, Gemini CL
 
 | Editing | Read | Check |
 |---|---|---|
-| `laya/` core | — | plain script suites: `python tests/test_router.py`, `tests/test_criteria.py`, `tests/test_hooks.py`, `tests/test_hooks_api.py` |
+| `laya_multimodal/` core | — | plain script suites: `python tests/test_router.py`, `tests/test_criteria.py`, `tests/test_hooks.py`, `tests/test_hooks_api.py` |
 | native model or training | [Native multimodal guide](docs/multimodal.md) | `python -m pytest -q tests/test_multimodal.py tests/test_grounding.py tests/test_multimodal_cli.py tests/test_multimodal_export.py` |
 | server path | `tests/test_serve.py` | `python -m pytest tests/test_serve.py` (skips when the `serve` extra is missing) |
-| docs, docstrings in `laya/` | `docs/`, `docs/.nav.yml` for page order | `pip install -r requirements-docs.txt`, then `zensical build --strict --clean` with no `griffe:` lines in the output |
+| docs, docstrings in `laya_multimodal/` | `docs/`, `docs/.nav.yml` for page order | `pip install -r requirements-docs.txt`, then `zensical build --strict --clean` with no `griffe:` lines in the output |
 
 Optional extras are declared in `pyproject.toml` (`multimodal`, `serve`, `swanlab`, `vega`, `langchain`, `langgraph`); install only what the change needs.
 

@@ -320,7 +320,7 @@ def parse_langs(values: Optional[Sequence[str]]) -> List[str]:
 
 def routes(states: Sequence[str]) -> Dict[str, int]:
     """Which checkpoint `Router` would pick for each state, counted. Routing only, no weights."""
-    from laya.router import Router
+    from laya_multimodal.router import Router
 
     router = Router()
     counts: Dict[str, int] = {}
@@ -406,12 +406,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(str(exc), file=sys.stderr)
         return 2
 
-    import laya
-    from laya.revisions import default_checkpoint
+    import laya_multimodal
+    from laya_multimodal.revisions import default_checkpoint
 
     source = args.model or default_checkpoint()
     started = time.time()
-    agent = laya.load(source, device=args.device)
+    agent = laya_multimodal.load(source, device=args.device)
     agent.model.eval()
     if args.lang is None:
         worst = parity(agent)
@@ -426,7 +426,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "identical_texts": list(IDENTICAL_TEXTS),
                 "identical_ks": list(IDENTICAL_KS),
                 "levels": list(LEVELS),
-                "laya_version": getattr(laya, "__version__", "unknown"),
+                "laya_version": getattr(laya_multimodal, "__version__", "unknown"),
             },
             "parity_max_abs_diff": worst,
             **report,
@@ -462,7 +462,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         report = {"passed": all(r["passed"] for r in by_lang.values())}
         payload = {
             "config": {"model": source, "revision": agent.checkpoint_revision, "device": str(agent.device),
-                       "langs": langs, "laya_version": getattr(laya, "__version__", "unknown")},
+                       "langs": langs, "laya_version": getattr(laya_multimodal, "__version__", "unknown")},
             "languages": by_lang,
             "parity_max_abs_diff": worst,
             **report,

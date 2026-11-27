@@ -21,12 +21,12 @@ RUN pip install "torch==${TORCH_VERSION}" torchvision --index-url "https://downl
 
 WORKDIR /src
 COPY pyproject.toml setup.py README.md LICENSE ./
-COPY laya/ ./laya/
-# The `serve` extra puts `laya-serve` (POST /v1/systemone, GET /health) in the image, so
+COPY laya_multimodal/ ./laya_multimodal/
+# The `serve` extra puts `laya-multimodal-serve` (POST /v1/systemone, GET /health) in the image, so
 # the same image can run a one-shot request or serve the Jev-compatible API.
 RUN pip install ".[serve,multimodal]" "torch==${TORCH_VERSION}" \
     && python /opt/check_torch.py "${TORCH_INDEX}" \
-    && python -c 'import laya.multimodal, torchvision' \
+    && python -c 'import laya_multimodal.multimodal, torchvision' \
     && pip check
 
 FROM ${PYTHON_IMAGE} AS runtime

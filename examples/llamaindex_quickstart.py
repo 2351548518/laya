@@ -4,14 +4,14 @@ Demonstrates:
 1. Sub-35ms single-choice tool routing in LlamaIndex with confidence fallback gating.
 2. Multi-choice routing across multiple RAG query engines for composite questions.
 3. Direct high-performance query dispatch with LayaQueryRouter.
-4. Edge/Serverless deployment against remote laya-serve HTTP instances.
+4. Edge/Serverless deployment against remote laya-multimodal-serve HTTP instances.
 """
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from laya.integrations.llamaindex import (
+from laya_multimodal.integrations.llamaindex import (
     LayaMultiSelector,
     LayaQueryRouter,
     LayaSingleSelector,
@@ -49,7 +49,7 @@ class _DemoAgent:
 
 _agent = None
 try:
-    from laya import Router
+    from laya_multimodal import Router
     r = Router()
     # Test if models/dependencies are present
     r.predict("test", {"test": {"type": "choice", "instructions": "test", "criteria": {"a": "a"}}})
@@ -162,7 +162,7 @@ print(f"Engine Response: {response}")
 # =====================================================================
 # 4. Remote HTTP Server Execution (Zero Heavy Dependencies)
 # =====================================================================
-# Connects to your self-hosted `laya-serve` instance without requiring PyTorch on edge clients.
+# Connects to your self-hosted `laya-multimodal-serve` instance without requiring PyTorch on edge clients.
 remote_selector = LayaSingleSelector(
     base_url="http://localhost:8080",
     confidence_threshold=0.85,

@@ -1,64 +1,92 @@
-# 从一条数据读懂 v6 架构与训练
+# v6 architecture, data and training
 
-v6 使用 **Qwen3.5-4B、共享候选评分头和单框定位头**。这一轮从原始预训练基座初始化，先在 30,720 条记录上预热头部，再用 1,500,000 条记录联合微调。本文依据 2026 年 11 月 27 日的 v6 数据清单、运行配置和源码提交 `4f7e0457`。
+**English** · [简体中文](../zh-CN/project-readme/multimodal-current.md)
 
-先沿着图像单选样例读到模型，再从损失反向读到一次参数更新。阅读时可以把同一条记录的题目 ID、媒体引用、token 位置和标签写在一起。这样看图时就能认出每一层拿到的输入。 [教程首页](index.md) · [图像单选](#input-to-model) · [模型图](#architecture) · [训练图](#training) · [CPU 演示](multimodal.md#cpu-walkthrough)
+v6 uses Qwen3.5-4B with a shared candidate scorer and a single-box head. It starts from the
+original pretrained backbone, warms up both heads on 30,720 rows and jointly fine-tunes on
+1,500,000 rows. The figures, recipes and comparisons below describe the November 27, 2026
+snapshot and the locked source revision `4f7e0457`.
 
-## v6 训练数据
+Follow the image example into the model and back through one optimizer update. Keep its question
+ID, image reference, candidate positions and label together as you read the diagrams.
+[Tutorial home](index.md) · [Image example](#input-to-model) · [CPU walkthrough](multimodal.md#cpu-walkthrough)
 
-| 输入模态 | Choice 单选 | Noul 是非 | Score 评分 | Box 单框 | 训练记录 | 全量占比 |
+## v6 training data
+
+| Input | Choice | Noul | Score | Box | Training rows | Share |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 文本 | 352,000 | 140,777 | 169,884 | 0 | 662,661 | 44.18% |
-| 图像 | 138,643 | 113,357 | 93,213 | 141,562 | 486,775 | 32.45% |
-| 视频 | 111,212 | 97,087 | 142,265 | 0 | 350,564 | 23.37% |
-| 音频 | 0 | 0 | 0 | 0 | 0 | 0.00% |
-| 合计 | 601,855 | 351,221 | 405,362 | 141,562 | 1,500,000 | 100% |
+| Text | 352,000 | 140,777 | 169,884 | 0 | 662,661 | 44.18% |
+| Image | 138,643 | 113,357 | 93,213 | 141,562 | 486,775 | 32.45% |
+| Video | 111,212 | 97,087 | 142,265 | 0 | 350,564 | 23.37% |
+| Audio | 0 | 0 | 0 | 0 | 0 | 0.00% |
+| Total | 601,855 | 351,221 | 405,362 | 141,562 | 1,500,000 | 100% |
 
-细任务以「模态 × 任务」计数，包括 31 个文本任务、21 个图像任务和 12 个视频任务。最小的细任务有 1,039 条。来源字段共有 826 种取值。预热集从全量训练集重新抽取，共 30,720 条。
+The 64 modality/task pairs cover 31 text, 21 image and 12 video tasks. The smallest has
+1,039 rows. The source column has 826 distinct values. The 30,720 warmup rows are sampled
+from the training set. An input modality identifies what the model reads, an output type
+identifies how it answers, and a task describes what it decides. For image rows the overall
+share is `486,775 / 1,500,000 ≈ 32.45%`, while the task appendix uses the image count as
+its denominator. [Complete request examples](multimodal-current-io-examples.md) · [Task excerpts](multimodal-current-examples.md)
 
-读表时先分清三个层级。输入模态描述模型读到的材料，`choice` 等输出类型描述回答方式，`task` 描述本样本要学的场景。图像计数和图像空间关系都可以是 `choice`，也可以来自不同来源。表中的图像比例以全量为分母，`486,775 ÷ 1,500,000 ≈ 32.45%`。细任务附录用各自模态为分母。 [按题型看请求](multimodal-current-io-examples.md) · [按任务看覆盖](multimodal-current-examples.md)
+### Data quality changes
 
-### 本版数据质量变更
+- **Probability and tense labels.** Reworded 3,285 questions across 11 sources as judgments
+  about a random annotator, preserving the original distributions. Corrected three SentEval
+  tense labels and replaced one ambiguous row.
+- **Agent actions.** Rebalanced the When2Call subset to 2,798 calls and 2,798 non-calls,
+  excluding 666 negatives with empty tool lists. Other non-call trajectories retain context,
+  tools and reference actions from training data from Nemotron, ToolACE and UltraData.
+- **Video ratings.** Added 5,606 LIVE-LSVQ and 3,385 DIVIDE-MaxWell videos with human MOS
+  ratings. Unique video rating media increased from 57,420 to 66,411.
+- **Single boxes.** Replaced highly redundant boxes with Flickr30K Entities and DocLayNet
+  phrase or layout annotations. Unique localization media increased from 74,953 to 94,953.
 
-- **概率和时态标签**。将 11 个来源的 3,285 道比例题改写为对随机抽取的一位标注者做二元判断，并保留来源标签。按 SentEval 原始任务定义纠正 3 条时态标注，另替换 1 条歧义样本。
-- **Agent 动作**。重整 When2Call 的官方训练样本，将本组调用和不调用分别设为 2,798 条，移除 666 条空工具列表负例。其余补充的非调用轨迹保留上下文、可用工具与参考动作，来自 Nemotron、ToolACE 和 UltraData 的训练来源。
-- **视频评分**。加入 5,606 条 LIVE-LSVQ 和 3,385 条 DIVIDE-MaxWell 的原始训练视频与人工 MOS。视频评分的唯一媒体数从 57,420 增至 66,411。
-- **单框定位**。以 Flickr30K Entities 和 DocLayNet 的原始短语或布局标注替换高冗余框。定位的唯一媒体数从 74,953 增至 94,953。
+The audit checked row counts, duplicate IDs, exact requests and media references across the
+training file. Its stratified review covered 826 sources and 16,303 rows. A memory preflight
+scanned admitted lengths and media headers and reran 6,767 long or media inputs. The short SFT
+load test recorded up to 21,738 MiB on an idle RTX 4090.
 
-全量训练文件核验了记录数、重复 ID、相同请求以及媒体引用。发布清单的分层审核涵盖 826 个来源和 16,303 条记录。运行前的显存复查另扫描了全部准入长度和媒体头，并实际复跑 6,767 条长输入和多媒体样本。在空闲 RTX 4090 上按本轮 SFT 配置做短压测，最高采样显存为 21,738 MiB。
+The local dataset directory is `multimodal-data/open-jev-omni-qwen-filtered-v6/`.
+`manifest.json` pins split digests. `SOURCE_TOTALS.csv`, `MODALITY_TYPE_DISTRIBUTION.csv`
+and `TASK_DISTRIBUTION.csv` store counts. `provenance/` stores sources and audit records.
+The trainer reads `native/`.
 
-本地数据根目录为 `multimodal-data/open-jev-omni-qwen-filtered-v6/`。其中 `manifest.json` 固定分片哈希，`SOURCE_TOTALS.csv`、`MODALITY_TYPE_DISTRIBUTION.csv` 和 `TASK_DISTRIBUTION.csv` 保存计数，`provenance/` 保存原始来源、变更和审核记录。训练读取该目录的 `native/`。
+### Compare the v1 and v6 mixtures
 
-### 与 v1 的配比差异
-
-| 统计 | v1 | v6 |
+| Statistic | v1 | v6 |
 | --- | ---: | ---: |
-| 训练记录 | 1,337,263 | 1,500,000 |
-| 图像和视频占比 | 33.56% | 55.82% |
-| 评分占比 | 6.27% | 27.02% |
-| 来源数 | 772 | 826 |
-| 模态细任务数 | 42 | 64 |
+| Training rows | 1,337,263 | 1,500,000 |
+| Image and video share | 33.56% | 55.82% |
+| Score share | 6.27% | 27.02% |
+| Source count | 772 | 826 |
+| Modality/task pairs | 42 | 64 |
 
-两版前 500 步均处理 32,000 条记录。v6 的文本单选从 15,241 条减到 7,553 条，评分从 1,978 条增到 8,697 条。训练步数相同的比较还需对齐任务曝光、初始头部和学习率进程。
+Both runs processed 32,000 rows in their first 500 updates. Text choice exposure went from
+15,241 to 7,553, while Score rose from 1,978 to 8,697. To isolate mixture effects, align
+task exposure, starting heads and the learning-rate schedule.
 
-## 输入和监督输出
+## Inputs and targets
 
-v6 的训练行使用 TypeSafe System One 风格的 `request`，并把监督目标置于同一 JSONL 行的 `expected` 或 `gold`。每个训练行有一道问题。图像通过 `request.assets` 引用本地文件，视频通过 `request.video` 和 `media_files` 对接原生视频扩展。 [加载器源码](https://github.com/2351548518/laya/blob/4f7e045725adf8c7c7067dfc404de1e54f68b05b/laya/multimodal_data.py#L42)
+Each v6 JSONL row contains a System One-style `request` with one question. `expected`
+or `gold` provides supervision. Image references resolve through `request.assets` and video
+through `request.video` and `media_files`. [Pinned loader source](https://github.com/2351548518/laya/blob/4f7e045725adf8c7c7067dfc404de1e54f68b05b/laya/multimodal_data.py#L42)
 
-| 类型 | 问题字段 | 训练监督 | 模型输出 |
+| Type | Question | Training target | Output |
 | --- | --- | --- | --- |
-| `choice` | `instructions` 和命名的 `criteria` | 候选键或来源提供的分布 | `choice` 和 `probabilities` |
-| `noul` | 是非判断指令，允许描述两个条件 | 布尔值或 `false/true` 分布 | `noul` 为真值概率 |
-| `score` | 由低到高的 `criteria` | 零起始的等级、实数等级或原始分布 | 等级期望 `score`、`probabilities` 与 `legend` |
-| `box` | 一张图及指代目标 | 归一化 `left/top/right/bottom`，监督置信度为 `null` | 单框与 IoU 质量估计 |
+| `choice` | `instructions` and named `criteria` | Candidate key or distribution | `choice` and `probabilities` |
+| `noul` | Test a condition | Boolean or `false`/`true` distribution | `noul` as P(true) |
+| `score` | Ordered `criteria` | Level index, fractional level or source distribution | Expected level `score`, `probabilities` and `legend` |
+| `box` | One image and a referring phrase | Normalized `left/top/right/bottom` with `confidence: null` | One box and estimated IoU |
 
-如果两者都存在，`gold[qid]` 的软分布优先。四类共同用题目 ID 把输入、目标和输出关联起来。分数 `2.4` 位于档位索引 2 和 3 之间，训练目标分别给这两个档位 0.6 和 0.4 的概率。规范标签顺序来自 `criteria`，`option_orders` 记录显示位置与规范索引的映射。 [监督目标转换](https://github.com/2351548518/laya/blob/4f7e045725adf8c7c7067dfc404de1e54f68b05b/laya/train.py#L196)
+`gold[qid]` takes precedence. For a fractional level of 2.4 the target puts 0.6 on level 2
+and 0.4 on level 3. `criteria` defines the canonical order and `option_orders` maps display
+positions to canonical indices.
 
 <a name="input-to-model"></a>
 
-### 一条记录怎样进入模型
+### Follow one record
 
-以下是便于逐行理解的图像单选示例。实际训练文件中的 30 条完整请求与监督目标在[样例附录](multimodal-current-io-examples.md)。
+This compact image-choice example shows the media binding and target.
 
 ```json
 {
@@ -79,162 +107,218 @@ v6 的训练行使用 TypeSafe System One 风格的 `request`，并把监督目�
 }
 ```
 
-1. `normalize_record` 相对 JSONL 所在目录解析 `photo`，记录图像占位符与本地路径的绑定，保留 `expected` 或 `gold`。
-2. `record_input` 将占位符绑定到状态、指令或选项中的实际位置。前置图像列表在这里转成图像序列和文本上下文。
-3. `MultimodalAgent._prepare` 渲染候选、解码媒体，再由 Qwen 处理器生成 `input_ids`、掩码和视觉张量。候选标记的位置按媒体 token 展开后的偏移计算。超过 16,384 token 的输入在传入 GPU 之前报错。
-4. 决策头对候选打分，训练把分数映射回原标签顺序后计算损失。`predict()` 用概率选最大候选，并在 `answers.action` 中返回选项与分布。 [输入绑定与预处理](https://github.com/2351548518/laya/blob/4f7e045725adf8c7c7067dfc404de1e54f68b05b/laya/multimodal.py#L465)
+1. `normalize_record` resolves `media_files.photo` relative to the JSONL directory.
+2. `record_input` binds `scene` in the state to `assets.scene.part` and the file named
+   `photo`. It places referenced images at their positions in the request.
+3. `MultimodalAgent._prepare` renders the options, decodes media and runs the processor.
+   Candidate positions are located after media token expansion. Requests over 16,384 tokens
+   fail the context check before entering the training forward pass.
+4. The candidate scorer produces logits. Training restores canonical option order and
+   uses the `inspect` target `[0, 1]`. Prediction returns the selected option and distribution
+   under `answers.action`.
 
-从这一行可以练习两个查找。媒体链路是 `state` 里的 `scene` → `assets.scene.part` 的 `photo` → `media_files.photo` 的文件路径。监督链路是 `questions.action` → `expected.action` 的 `inspect` → `criteria.inspect` 的选项含义。如果规范选项顺序为 `[continue, inspect]`，训练目标就是 `[0, 1]`。部署时发送 `request` 描述的问题和图片，取响应的 `answers.action` 对照模型预测。 [图片上传实例](multimodal.md#systemone-http) · [用索引读原始记录](multimodal-current-io-examples.md#read-original-row)
+[Read an original row](multimodal-current-io-examples.md#read-original-row) · [Upload an image](multimodal.md#systemone-http)
 
-视频记录把 `video_audio` 设为 `false`，使用 4、8 或 16 帧。Qwen3.5 的原生视频处理限制逐帧像素预算。可用音频的 Gemma 路径和保留的真实音频例子在[运行指南](multimodal.md#audio-and-video)与[样例附录](multimodal-current-io-examples.md#gemma-audio)。
+The visual-only video rows set `video_audio: false` and use 4, 8 or 16 frames. The following
+shapes were measured when replaying all 30 example requests on the locked processor.
+The grid order is time, height and width. [Processor trace](assets/processor-trace.json)
 
-用本轮锁定的处理器在 CPU 上复跑了全部 30 条完整请求。下表列出四种请求的实测形状。网格按时间、高、宽记录，候选位置为 token 索引。 [全部处理器记录](assets/processor-trace.json)
-
-| 实例 | `input_ids` | 视觉网格 | 候选标记位置 |
+| Example | `input_ids` | Vision grid | Candidate positions |
 | --- | --- | --- | --- |
-| 文本单选 | `[1, 60]` | — | `[31, 38]` |
-| 图像是非 | `[1, 369]` | `[1, 40, 30]` | `[334, 347]` |
-| 16 帧视频评分 | `[1, 4049]` | `[8, 40, 48]` | `[3983, 3997, 4011, 4027]` |
-| 图像单框 | `[1, 293]` | `[1, 26, 40]` | — |
+| Text choice | `[1, 60]` | — | `[31, 38]` |
+| Image Noul | `[1, 369]` | `[1, 40, 30]` | `[334, 347]` |
+| Video Score, 16 frames | `[1, 4049]` | `[8, 40, 48]` | `[3983, 3997, 4011, 4027]` |
+| Image Box | `[1, 293]` | `[1, 26, 40]` | — |
 
 <a name="architecture"></a>
 
-## 模型架构
+## Architecture
 
-[![v6 张量维度图，从图像和视频 patch 到共享语言骨干、候选评分与单框定位](assets/architecture.svg)](assets/architecture.svg)
+[![v6 tensor shapes from visual patches to the language backbone, candidate scorer and single-box readout](assets/architecture.en.svg)](assets/architecture.en.svg)
 
-图从下往上读。先在底部选择文本、图像或视频入口，再跟到共同的 `[B, L, 2560]` 序列，最后根据题型走到候选评分头或单框头。彩色方块示意序列位置，`C₁`、`C₂` 标出候选位置，`hₜ` 表示当前问题的末尾有效状态。点击图可放大。 [SVG 矢量图](assets/architecture.svg) · [PNG 高清图（2640 × 3856）](assets/architecture.png)
+Read from bottom to top. Text and visual inputs form one `[B, L, 2560]` sequence. Each question
+then uses the candidate or single-box branch. `C₁` and `C₂` denote candidate positions, and
+`hₜ` denotes the last valid state. [SVG](assets/architecture.en.svg) · [PNG](assets/architecture.en.png)
 
-### 视觉 patch 如何变成语言 token
+### From visual patches to language tokens
 
-图中 `B` 为批大小，`L` 为左填充后的序列长度，`K` 为该批补齐后的候选数。处理器分别为图像和视频生成 patch 张量，每个张量的 `P` 为其中所有媒体网格的 `Tg × Hg × Wg` 之和。每个 patch 含 RGB 三通道、两个时间切片和 `16 × 16` 像素，展平后宽度为 `3 × 2 × 16 × 16 = 1536`。单图复制图像内容以填满两个时间切片，16 帧视频按两帧一组形成 8 个时间格。
+`B` is batch size, `L` the left-padded sequence length, and `K` the padded candidate count.
+A visual tensor's patch count `P` is the sum of `Tg × Hg × Wg` for its media grids. Each patch
+has three channels, two time slices and `16 × 16` pixels, so its flat width is `1536`.
+A still image supplies both time slices. A 16-frame video uses eight temporal cells.
 
-以实测图像是非样本为例，网格 `[1, 40, 30]` 产生 1,200 个 patch。Conv3d 对每个 patch 做一次投影，共享视觉编码器的 24 层都保留 `[1200, 1024]`。Merger 先逐 patch 做 LayerNorm，再把空间上相邻的四个 1,024 维向量拼成一个 4,096 维向量。其 MLP 通过 `4096 → 4096 → 2560` 把 300 个合并向量映射到语言隐藏空间。
+The image Noul grid `[1, 40, 30]` yields 1,200 patches. Conv3d projects them to width 1024,
+which all 24 visual layers preserve. The merger normalizes each patch and concatenates
+spatial groups of four into width 4096. Its MLP maps `4096 → 4096 → 2560`.
 
 ```text
 [1200, 1536] → [1200, 3, 2, 16, 16] → [1200, 1024, 1, 1, 1]
              → [1200, 1024] → [300, 4096] → [300, 2560]
 ```
 
-词表查询将 `input_ids [B, L]` 变为 `[B, L, 2560]`。上例的 300 个视觉向量按占位位置写入同一序列，另有 69 个文本、模板等位置，所以骨干读到 `[1, 369, 2560]`。16 帧视频的网格 `[8, 40, 48]` 对应 15,360 个 patch 和 3,840 个视觉 token，连同 209 个其他位置形成 `[1, 4049, 2560]`。视频的时间戳属于其他位置。 [处理器实测记录](assets/processor-trace.json) · [左填充与批处理源码](https://github.com/2351548518/laya/blob/4f7e045725adf8c7c7067dfc404de1e54f68b05b/laya/multimodal_train.py#L487)
+The 300 merged vectors replace placeholders in the token embeddings. There are 69 other
+positions, giving `[1, 369, 2560]`. In the 16-frame video example, `8 × 40 × 48` gives
+15,360 patches, then 3,840 visual tokens. Adding 209 other positions, including timestamps,
+gives `[1, 4049, 2560]`.
 
-按图核对一个样本，可以依次检查三种维度。
+| Quantity | Image Noul example | Computation |
+| --- | ---: | --- |
+| Patches `P` | 1,200 | `1 × 40 × 30` |
+| Vision tokens | 300 | One token per `2 × 2` spatial patch group |
+| Sequence length `L` | 369 | 300 visual positions and 69 text or template positions |
 
-| 检查位置 | 图像是非样本 | 怎么算 |
-| --- | --- | --- |
-| patch 行数 `P` | `1,200` | 时、高、宽网格相乘，即 `1 × 40 × 30`。 |
-| 视觉 token 数 | `300` | 用空间上的 `2 × 2` 个 patch 生成一个 token。 |
-| 语言序列长度 `L` | `369` | 300 个位置装入视觉向量，另有 69 个位置留给文本和模板。 |
+Use `image_grid_thw` or `video_grid_thw` to calculate patch counts and `input_ids_shape`
+to confirm the final token count. [Measured processor shapes](assets/processor-trace.json)
 
-做练习时，在处理器记录中找 `image_grid_thw` 或 `video_grid_thw`，按网格计算 patch 数，再用 `input_ids_shape` 核对语言序列长度。媒体 token 的展开也解释了候选位置为何接近序列末尾。 [原始形状记录](assets/processor-trace.json)
+### Inside the language backbone
 
-### 语言骨干内部
+The 32 layers form eight groups of three Gated DeltaNet layers and one gated full-attention
+layer. DeltaNet's fused projection has width `8192 = 2048 + 2048 + 4096`, split into 16
+query heads, 16 key heads and 32 value heads of width 128. Full attention uses 16 query heads
+and four key/value heads of width 256. Both merge to `[B, L, 4096]` then project to
+`[B, L, 2560]` for the residual.
 
-32 层分为 8 组，每组依次是三层 Gated DeltaNet 和一层门控全注意力。Gated DeltaNet 的融合投影宽度为 `8192 = 2048 + 2048 + 4096`，分别拆成 16 个 Q 头、16 个 K 头和 32 个 V 头，每头 128 维。门控全注意力有 16 个查询头和 4 个键值头，每头 256 维。两种注意力合并输出头后都是 `[B, L, 4096]`，再经输出投影回到 `[B, L, 2560]`，以便和输入做残差相加。
+The gated MLP projects to `[B, L, 9216]`, multiplies the up branch by the SiLU gate, and
+projects down to `[B, L, 2560]`. The final RMSNorm keeps that shape for both readouts.
 
-每层 MLP 的上投影和门投影分别得到 `[B, L, 9216]`，门投影经 SiLU 后与上投影相乘，下投影再回到 `[B, L, 2560]`。末层 RMSNorm 保持同一形状，供两个读出头按位置读取。
+### Shared candidate scorer
 
-### 共享候选评分头
+`candidate_positions` locates each rendered `Candidate N: … ->` marker. The backbone
+produces `last_hidden_state [B, L, 2560]` without the language-model generation head.
+Left padding aligns each input's final valid position. The query is `[B, 2560]` and the
+gathered candidates are `[B, K, 2560]`. Separate projections and L2 normalization yield
+`[B, 1, 256]` and `[B, K, 256]`. A scaled dot product gives `[B, K]`, with padded slots
+masked. The two image Noul markers at 334 and 347 yield `[1, 2]` logits.
 
-`_prepare` 为每个选项渲染 `Candidate N: … ->`。`candidate_positions` 找到这些候选标记对应的 token。`_logits` 调用 `base.model(..., use_cache=False)` 得到 `last_hidden_state`。候选评分头取最后一个位置作为全局查询，并从候选标记处取每个候选的上下文向量。训练器给序列左填充，最后一个位置对齐到各样本的真实末尾。 [前向源码](https://github.com/2351548518/laya/blob/4f7e045725adf8c7c7067dfc404de1e54f68b05b/laya/multimodal.py#L642)
+Choice, Noul and Score share this scorer. Softmax over candidates yields a distribution.
+Choice reads its maximum, Noul reads P(true), and Score takes the expected level index.
+Local Python `answer_confidence` is the top probability. HTTP serializes each field
+according to the endpoint's contract.
+[Candidate scorer source](https://github.com/2351548518/laya/blob/4f7e045725adf8c7c7067dfc404de1e54f68b05b/laya/multimodal_readout.py#L11) · [HTTP confidence](../http-api.md#confidence-three-numbers-not-interchangeable)
 
-候选位置张量 `[B, K]` 从隐藏状态取出 `[B, K, 2560]`，全局查询为 `[B, 2560]`。两套线性层各自把最后一维变成 256，再做 L2 归一化。查询扩为 `[B, 1, 256]`，与候选向量逐元素相乘，沿 256 维求和并乘可学习的缩放系数，得到 `[B, K]` logits。填充候选由掩码屏蔽。图像是非样本在位置 334 和 347 取向量，输出 `[1, 2]`。候选数量上限为 256，`choice`、`noul` 和 `score` 共用这一个头。 [CandidateScorer](https://github.com/2351548518/laya/blob/4f7e045725adf8c7c7067dfc404de1e54f68b05b/laya/multimodal_readout.py#L11)
+### Single-box readout
 
-继续用这条图像是非题做维度练习。输入 `last_hidden_state` 是 `[1, 369, 2560]`。取末尾状态得到 `[1, 2560]` 查询，取两个标记位置得到 `[1, 2, 2560]` 候选。投影后拿一个 `[1, 1, 256]` 查询与 `[1, 2, 256]` 候选做点积。沿 256 维累加后得到两个分数，沿候选轴做 softmax 就得到本题的概率分布。
+The compact `single-v1` head uses `grounding_slots=1`. It reads the final valid state using
+the attention mask. LayerNorm preserves `[B, 2560]`. A linear layer and GELU produce
+`[B, 256]`, and the final linear layer gives `[B, 5]`. With a singleton axis, `[B, 1, 5]`
+splits into `[B, 1, 4]` coordinates and `[B, 1]` quality logits. Apply sigmoid and order
+the coordinates. Sigmoid on the quality logit estimates IoU. For a 640×480 image,
+`[0.1, 0.2, 0.6, 0.8]` maps to `[64, 96, 384, 384]` in pixels.
+[Single-box API](../grounding.md)
 
-`choice` 返回最大概率的候选键。`noul` 读取 `P(true)`。`score` 将每个档位索引乘以该档概率后求和，同时保留概率分布和各档含义。在本地 Python 结果中，`answer_confidence` 表示最大概率，`confidence` 是类型对应的置信度读数。HTTP 输出按相应端点的约定序列化。 [输出解码](https://github.com/2351548518/laya/blob/4f7e045725adf8c7c7067dfc404de1e54f68b05b/laya/multimodal.py#L692)
-
-### 单框定位头
-
-v6 设定 `grounding_slots=1`，架构名为 `single-v1`。`GroundingHead` 用注意力掩码取得最后一个有效位置。LayerNorm 保持 `[B, 2560]`，线性层与 GELU 得到 `[B, 256]`，最后一层输出 `[B, 5]`。插入单框轴后，`[B, 1, 5]` 拆成坐标 `[B, 1, 4]` 和质量 logit `[B, 1]`。坐标经过 sigmoid 与排序，构成图像内的正宽高框。质量 logit 经 sigmoid 得到估计 IoU 的质量分。若图像宽为 640、高为 480，`[0.1, 0.2, 0.6, 0.8]` 对应像素坐标 `[64, 96, 384, 384]`。 [定位头与坐标转换](https://github.com/2351548518/laya/blob/4f7e045725adf8c7c7067dfc404de1e54f68b05b/laya/grounding.py#L41) · [单框 API](../grounding.md)
-
-每个问题按所需的头部取结果，模型直接返回结构化答案，`output_tokens=0`。对同一请求的多道题，运行器可以复用媒体解码结果和符合条件的 Qwen 视觉特征。 [推理入口](https://github.com/2351548518/laya/blob/4f7e045725adf8c7c7067dfc404de1e54f68b05b/laya/multimodal.py#L725)
+Native output has zero generated tokens. Several questions on one state can share decoded media
+and compatible Qwen visual features.
 
 <a name="training"></a>
 
-## 训练方式
+## Two supervised stages
 
-[![v6 两阶段训练，展示 LoRA 维度、四卡微批、监督损失、梯度更新和检查点](assets/training.svg)](assets/training.svg)
+[![v6 training stages, LoRA shapes, four-GPU microbatches, losses and checkpoint selection](assets/training.en.svg)](assets/training.en.svg)
 
-图从上往下读。先顺着左侧确认两个阶段的输入、冻结范围和阶段产物。接着看右侧一个 LoRA 线性层的维度。最后沿下半部分走完一个全局窗口，从四卡分样本到微批反向、梯度求和和参数更新。 [SVG 矢量图](assets/training.svg) · [PNG 高清图（2640 × 4432）](assets/training.png)
+Read the diagram downwards. Follow the frozen and trainable weights in each stage, then the
+LoRA projection and four-rank optimizer step. The recorded run used physical GPUs 2–5,
+`models/pretrained/Qwen3.5-4B`, and seed 105 before initializing the heads.
+[SVG](assets/training.en.svg) · [PNG](assets/training.en.png)
 
-实际运行用物理 GPU 2、3、4、5，基座为 `models/pretrained/Qwen3.5-4B`。seed 105 在新建头部之前设置。初始化检查点、训练日志和优化器快照写入 `multimodal-runs/qwen4b-v6-fresh/`。
-
-| 项目 | 头部预热 | 联合 LoRA SFT |
+| Item | Head warmup | Joint LoRA SFT |
 | --- | --- | --- |
-| 输入 | `warmup.jsonl` 30,720 条 | `train.jsonl` 1,500,000 条 |
-| 更新预算 | 480 步 | 23,438 步 |
-| 全局 batch | 64，1 epoch | 64，1 epoch |
-| 每张卡的微批上限 | 4 条 | 2 条 |
-| 上下文及补齐后的微批 token 上限 | 16,384 | 16,384 |
-| 更新参数 | 候选评分头和单框头 | 语言 LoRA、视觉 merger、候选头和单框头 |
-| 决策损失 | soft CE + 0.1 RPS + 0.5 Brier | soft CE |
-| 峰值学习率 | 头部 `3e-4` | LoRA `5e-5`，头部 `2e-4`，merger `2e-5` |
-| 开发集评测 | 每 160 步 | 每 500 步 |
-| 优化器快照 | 每 160 步 | 每 250 步，另在评测后和最终步保存 |
+| Input | 30,720 `warmup.jsonl` rows | 1,500,000 `train.jsonl` rows |
+| Updates | 480 | 23,438 |
+| Global batch and epochs | 64, one epoch | 64, one epoch |
+| Microbatch per GPU | Up to 4 | Up to 2 |
+| Context and padded microbatch limit | 16,384 tokens | 16,384 tokens |
+| Updated weights | Candidate and box heads | Language LoRA, visual merger and both heads |
+| Decision objective | Soft CE + 0.1 RPS + 0.5 Brier | Soft CE |
+| Peak rates | Heads `3e-4` | LoRA `5e-5`, heads `2e-4`, merger `2e-5` |
+| Development evaluation | Every 160 steps | Every 500 steps |
+| Optimizer snapshots | Every 160 steps | Every 250 steps, at evaluation and at the end |
 
-预热冻结基座，随后用本次预热选出的 `head/best` 初始化 SFT，并建立新的 LoRA 适配器和 AdamW 优化器。语言 LoRA 使用 `r=32`、`alpha=64`，覆盖注意力、Qwen3.5 融合投影及 MLP 的线性层。视觉编码器冻结，视觉 merger 单独训练。两阶段都使用 fused AdamW、5% 线性学习率预热和余弦衰减，末端为峰值学习率的 10%。v6 主训练的两个阶段都是监督训练。
+The warmup freezes the backbone. SFT loads `head/best` and creates fresh adapter and optimizer
+state. The language adapters use `rank=32` and `alpha=64`. The vision encoder stays frozen while
+the merger trains. Both stages use fused AdamW, 5% linear warmup and cosine decay to 10%
+of peak learning rate. [Head configuration](assets/head-config.json) · [SFT configuration](assets/sft-config.json)
 
-[头部预热配置](assets/head-config.json) · [LoRA 配置](assets/sft-config.json) · [参数组和学习率源码](https://github.com/2351548518/laya/blob/4f7e045725adf8c7c7067dfc404de1e54f68b05b/laya/multimodal_objectives.py#L85)
+### LoRA shapes and gradients
 
-### LoRA 的输入与梯度
-
-以图中全注意力的 `o_proj` 为例，16 个查询头各产出 256 维注意力结果，拼成 `x [B, L, 4096]`。冻结的原权重 `W₀ [2560, 4096]` 和 LoRA 分支都输出 `[B, L, 2560]`。LoRA 用 `A [32, 4096]` 先得到 `[B, L, 32]`，再用 `B_L [2560, 32]` 恢复到 2,560 维，并把这路输出以 `64 / 32 = 2` 倍加到原投影结果。反向时 `A` 和 `B_L` 分别累积与各自权重同形状的梯度。这里形状里的 `B` 表示微批样本数。 [LoRA 安装源码](https://github.com/2351548518/laya/blob/4f7e045725adf8c7c7067dfc404de1e54f68b05b/laya/multimodal_train.py#L427)
-
-忽略偏置，这一个原投影的矩阵有 `2560 × 4096 = 10,485,760` 个权重，LoRA 分支训练 `32 × 4096 + 2560 × 32 = 212,992` 个矩阵参数。两个分支输出形状相同，可以逐元素相加。整轮 SFT 的可训练参数还包括其他语言适配器、视觉 merger 和两个读出头。
+In a full-attention `o_proj`, 16 query heads of 256 features produce `x [B, L, 4096]`.
+The original frozen `W₀ [2560, 4096]` and the LoRA path both output `[B, L, 2560]`.
+`A [32, 4096]` maps to `[B, L, 32]` and `B_L [2560, 32]` restores width 2560. Add
+the low-rank result with scale `64 / 32 = 2`. Backpropagation computes gradients of the
+same shapes as A and B_L. That is 212,992 adapter weights for this layer, compared with
+10,485,760 frozen projection weights.
 
 <a name="worked-losses"></a>
 
-### 损失怎样计算
+### Worked losses
 
-一个决策微批的 logits、目标分布和候选掩码都是 `[B, K]`。沿候选轴算出每条记录的损失，再对 `B` 条取均值。单框微批使用 `[B, 1, 4]` 坐标和 `[B, 1]` 质量 logits，以同样的样本均值作为该微批的损失。
+Decision logits, targets and masks use `[B, K]`. The box branch uses `[B, 1, 4]` coordinates
+and `[B, 1]` quality logits. Each microbatch averages its example losses.
 
-**选择例子。** 三个候选的预测概率为 `[0.1, 0.7, 0.2]`，正确候选是第二项。soft CE 为 `-ln(0.7) ≈ 0.3567`。预热还计入 Brier，平方误差和为 `0.14`，该样本的损失约为 `0.4267`。
+- **Choice.** Predicted probabilities `[0.1, 0.7, 0.2]` with the second label give
+  `−ln(0.7) ≈ 0.3567`. Brier is `0.14`. Warmup adds half of Brier for a loss near `0.4267`.
+- **Score.** Prediction `[0.1, 0.5, 0.4]` and target `[0, 0.6, 0.4]` give soft CE
+  near `0.7824`, Brier `0.02` and normalized RPS `0.005`. For RPS the first two
+  cumulative probabilities differ by `0.1` and `0`, so the mean square is `0.005`.
+- **Box.** Target `[0.1, 0.2, 0.6, 0.8]` and prediction `[0.2, 0.2, 0.7, 0.8]` give
+  coordinate L1 of `0.2` and IoU/GIoU of `2/3`. The objective is
+  `5 × L1 + 2 × (1 − GIoU) + 0.5 × BCE`. BCE fits the quality logit to the detached IoU.
+  At a quality logit of zero the total is about `2.0132`. Empty boxes supervise quality at zero.
 
-**评分例子。** 目标档位概率为 `[0, 0.6, 0.4]`，预测为 `[0.1, 0.5, 0.4]`。soft CE 约为 `0.7824`。预热阶段再计入归一化 RPS 和 Brier，分别约为 `0.005` 和 `0.02`。RPS 按档位累积概率计算，使跨多个等级的偏差受到更大惩罚。
-
-**定位例子。** 标注框为 `[0.1, 0.2, 0.6, 0.8]`，预测框为 `[0.2, 0.2, 0.7, 0.8]`。坐标 L1 和为 0.2，IoU 与 GIoU 均为 2/3。单框损失是 `5 × L1 + 2 × (1 − GIoU) + 0.5 × BCE`。最后一项用分离梯度后的 IoU 监督质量 logit。若质量 logit 为 0，合计约为 `2.0132`。空框样本只给质量头提供零目标。
-
-可以拿评分例子对照 CPU 输出复算。前两道档位边界的预测累计概率是 `0.1`、`0.6`，目标累计概率是 `0`、`0.6`。将两处差值平方再取平均，即 `(0.1² + 0²) ÷ 2 = 0.005`。把这个结果与 `worked_calculations.score_parts.ordinal_rps` 对照，再比较预热与 SFT 配置里的 `decision_ordinal_weight`。 [CPU 输出读法](multimodal.md#cpu-walkthrough)
-
-[决策目标函数](https://github.com/2351548518/laya/blob/4f7e045725adf8c7c7067dfc404de1e54f68b05b/laya/multimodal_objectives.py#L32) · [定位目标函数](https://github.com/2351548518/laya/blob/4f7e045725adf8c7c7067dfc404de1e54f68b05b/laya/grounding.py#L141)
+Open the CPU walkthrough and compare its `worked_calculations` with these results.
+[CPU walkthrough](multimodal.md#cpu-walkthrough) · [Training API](../reference/train.md)
 
 <a name="optimizer-step"></a>
 
-### 一次参数更新
+### One optimizer update
 
-当前代码在 `laya/train.py` 把硬标签和软标签转换成候选概率，再统一执行决策和单框训练。下方源码链接对应 v6 运行时锁定的版本。
-[当前训练接口](../reference/train.md)
+1. Read the next global window of up to 64 rows. The primary rank validates the file and shares
+   its offset index. Admitted lengths and modality help assign work to four ranks.
+2. Pack compatible requests by actual length. Lengths 8,178 and 8,150 pad to `[2, 8178]`,
+   or 16,356 tokens, and the backbone emits `[2, 8178, 2560]`. Lengths 5,000 and 10,000
+   would need 20,000 padded tokens together and run separately.
+3. Permute order-safe options and map logits back for supervision. Multiply each microbatch
+   mean by `B/N`, where `N` is the current global window size. A two-row microbatch in a
+   full window weighs `2/64`. The final SFT window has 32 rows.
+4. Sum the accumulated gradients across ranks in FP32, clip at norm 1.0 and run AdamW once.
+   SFT checkpoints activations and offloads saved tensors at 3,072 padded tokens. The
+   Qwen chunk-scan optimization affects the training gradient path.
 
-1. 读取一个最多 64 条记录的优化器窗口。`_rank_window` 根据准入长度和模态在四个 rank 间分配工作量。大 JSONL 由主 rank 校验并建立偏移索引，再共享给其余 rank。
-2. 每张卡使用实际处理后的序列长度组批。补齐后的 `B × L` 上限为 16,384。两条 8,178 与 8,150 token 的同类样本可组成 `input_ids [2, 8178]`，占 16,356 token，骨干输出 `[2, 8178, 2560]`。如果两条样本分别长 5,000 和 10,000 token，合批后要补齐到 `[2, 10000]`，因此分开执行。
-3. 对可交换的 Choice 候选重排，计算损失前按原始次序还原 logits。每个微批的平均损失先乘 `B/N` 再反向，其中 `N` 是全局窗口的实际样本数。完整窗口中两条微批的权重是 `2/64`，SFT 最后一个窗口有 32 条，分母相应为 32。
-4. 四张卡以 FP32 对累积梯度求和，按范数上限 1.0 裁剪，再更新一次 AdamW。SFT 使用激活检查点。补齐后的微批达到 3,072 token 时，反向所需的保存张量卸载到 CPU。Qwen 的分块扫描优化作用于训练梯度路径。
+The run log's `grounding step` advances once per global update. The arithmetic is
+`30,720 / 64 = 480` for warmup and `ceil(1,500,000 / 64) = 23,438` for SFT.
+[Train source interface](../reference/train.md) · [Read the run log](multimodal.md#resume)
 
-当前源码在 `laya/train.py` 划分微批并更新参数。`laya/multimodal_distributed.py` 中的
-`DistributedContext.sum_gradients` 负责跨卡求和。[训练接口](../reference/train.md)
+## Selection, evaluation and resume
 
-看到训练日志的 `grounding step` 递增一次，就表示四张卡一起完成了这套流程。用 `30,720 ÷ 64 = 480` 核对预热步数，用 `ceil(1,500,000 ÷ 64) = 23,438` 核对 SFT 步数。CPU 演示可以单独查看两个头的反向结果，真实四卡日志可以用来识别优化器步和开发集评测。 [运行演示](multimodal.md#cpu-walkthrough) · [读训练日志](multimodal.md#resume)
+`decision_dev.jsonl` has 1,624 decisions. The box split holds 23,269 records, and the
+online development subset fixes 512 rows with 449 positive boxes. Report both counts with
+IoU metrics. Warmup selects by a joint metric. The SFT selector takes the harmonic mean
+of modality-macro decision accuracy and box Acc@IoU≥0.5. Relative to the initial SFT
+checkpoint, a best model can lose at most 3 points in each decision modality and 5 points
+in box accuracy.
 
-## 选模、评测与续训
-
-- `decision_dev.jsonl` 包含 1,624 条决策，报告总体、按模态和按类型的准确率，以及 NLL、Brier 和 ECE。`dev.jsonl` 共有 23,269 条定位验证记录。SFT 在线评测固定抽取 512 条，其中 449 条是正框，用于计算平均 IoU 和 Acc@IoU≥0.5。
-- 预热按决策模态宏平均与定位指标的联合分选模。SFT 对单框 Acc@IoU≥0.5 与决策模态宏平均取调和平均，从 `sft/initial` 的评测起比较。保存 `best` 还要求各模态决策相对基线退化不超过 3 个百分点，定位退化不超过 5 个百分点。
-- `checkpoint_latest.json` 指向最近的可恢复快照。快照包含训练权重、优化器、采样顺序、各 rank 随机状态、历史评测和运行标识。训练器保留最近两个完整快照。续训使用原模型、数据、配置和 rank 数。 [本地启动和续训](multimodal.md#resume) · [快照实现](https://github.com/2351548518/laya/blob/4f7e045725adf8c7c7067dfc404de1e54f68b05b/laya/_grounding_checkpoint.py#L38)
+`checkpoint_latest.json` identifies a recoverable optimizer snapshot with model state,
+optimizer, sample order, per-rank RNG state, evaluation history and run identity. The
+trainer keeps the last two complete snapshots. [Resume](multimodal.md#resume)
 
 <a name="matched-development"></a>
 
-### 已核验的同集结果
+### Matched development results
 
-以下为 2026 年 11 月 27 日留存的同一 v6 开发集结果。v1 final 复跑了 1,624 条决策和相同的 449 个正框。训练仍在推进，更新的评测写在本地 `sft.log` 的 `GROUNDING DEV` 行。
+These November 27, 2026 measurements use the same 1,624 decisions and 449 positive boxes.
+Later results can be read from the run's `GROUNDING DEV` entries.
 
-| 检查点 | 决策准确率 | 单框 Acc@IoU≥0.5 |
+| Checkpoint | Decision accuracy | Box Acc@IoU≥0.5 |
 | --- | ---: | ---: |
-| v6 SFT 起点 | 61.95% | 24.28% |
-| v6 SFT 第 500 步 | 75.92% | 39.64% |
-| v6 SFT 第 1,000 步 | 78.63% | 40.31% |
-| v1 final 同集复测 | 86.15% | 76.39% |
+| v6 SFT start | 61.95% | 24.28% |
+| v6 SFT step 500 | 75.92% | 39.64% |
+| v6 SFT step 1,000 | 78.63% | 40.31% |
+| v1 final replay | 86.15% | 76.39% |
 
-看这张表时，先沿 v6 的行观察同一评测集上的变化。以第 500 步为例，决策准确率比 SFT 起点高 13.97 个百分点，定位高 15.36 个百分点。再看 v1 final 的一行，它给出了同一分片上的已完成训练参照。要判断另一次训练的结果是否可比，先核对评测文件、正框数量、训练步数和决策聚合方式。 [复跑与读指标](multimodal.md#evaluate)
+Step 500 improved over the v6 start by 13.97 points on decisions and 15.36 on boxes.
+The v1 reference had 20,895 completed steps. Compare data mixtures with a fixed
+initialization, update budget and learning-rate schedule.
 
-v1 final 来自已完成 20,895 步的训练。比较数据配比的独立效果需要固定起点、更新预算与学习率进程。v6 冻结评测资产共有 23 个文件，其中 22 个 JSONL 共 130,608 条。除训练中使用的验证和校准分片，还保留 MMLU-Pro、MMMU 多选、RefCOCO 系列和 Agent 决策等独立评测。 `calibration.jsonl` 的 2,971 条记录用于模型完成后的概率校准。 [校准与评测命令](multimodal.md#evaluate)
+The frozen evaluation inventory has 23 files, with 130,608 rows across 22 JSONL files.
+It includes MMLU-Pro, MMMU multiple choice, RefCOCO and agent decisions. The 2,971
+calibration rows serve probability fitting after training.
+[Evaluation commands](multimodal.md#evaluate)

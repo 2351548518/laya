@@ -1,18 +1,20 @@
 # Helpers
 
+**English** · [简体中文](../zh-CN/reference/helpers.md)
+
 ## Questions and language
 
-::: laya.common.render_options
-::: laya.lang.analyse
-::: laya.email.clean_email_body
+::: laya_multimodal.common.render_options
+::: laya_multimodal.lang.analyse
+::: laya_multimodal.email.clean_email_body
 
 ## Confidence
 
-::: laya.confidence.check_min_confidence
-::: laya.confidence.apply_confidence_gate
-::: laya.calibrate.fit_temperature_map
+::: laya_multimodal.confidence.check_min_confidence
+::: laya_multimodal.confidence.apply_confidence_gate
+::: laya_multimodal.calibrate.fit_temperature_map
 
 ## Large candidate sets
 
-::: laya.shortlist.predict_shortlist
-::: laya.shortlist.predict_tournament
+::: laya_multimodal.shortlist.predict_shortlist
+::: laya_multimodal.shortlist.predict_tournament

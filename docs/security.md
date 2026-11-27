@@ -1,5 +1,7 @@
 # Checkpoint integrity
 
+**English** · [简体中文](zh-CN/security.md)
+
 Load a trusted native checkpoint. The runtime uses safetensors for model weights and verifies
 an optional SHA-256 map before loading artifacts. It disables Transformers remote code loading.
 
@@ -17,7 +19,7 @@ reviewed. Hash the actual files you will serve. An SHA-256 map distributed with 
 does not establish their provenance.
 
 ```python
-from laya import load
+from laya_multimodal import load
 
 agent = load("models/jev-multimodal-qwen3.5-4b",
              expected_sha256={"decision_head.safetensors": "<reviewed SHA-256 digest>"})

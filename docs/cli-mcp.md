@@ -1,28 +1,30 @@
 # CLI and MCP
 
+**English** · [简体中文](zh-CN/cli-mcp.md)
+
 Set `LAYA_MULTIMODAL_MODEL` to a trained native checkpoint directory to use it with both
 the CLI and MCP. The setup script installs the merged Qwen3.5 checkpoint by default.
 [Local setup](https://github.com/2351548518/laya/blob/main/LOCAL_SETUP.md)
 
 ```bash
-laya --preset triage --json "I was charged twice."
-laya --preset triage --route-only "请帮我退款"
-laya --multimodal models/jev-multimodal-qwen3.5-4b --help
-laya train --help
-laya eval --help
+laya-multimodal --preset triage --json "I was charged twice."
+laya-multimodal --json --explain "请帮我退款"
+laya-multimodal --multimodal models/jev-multimodal-qwen3.5-4b --help
+laya-multimodal train --help
+laya-multimodal eval --help
 ```
 
 Pass `--questions` with a JSON question definition, and use `--image`, `--audio` or `--video`
 for local media. Use `--max-len` to set a request token budget.
-[Native inputs](multimodal.md) · [Fine-tuning](finetune.md#fine-tune-with-laya-train) · [Evaluation](evals.md)
+[Native inputs](multimodal.md) · [Fine-tuning](finetune.md#run-the-joint-trainer) · [Evaluation](evals.md)
 
 ## MCP Server
 
-Install `.[multimodal,mcp]` for local inference, then launch `laya-mcp-server` as a stdio
+Install `.[multimodal,mcp]` for local inference, then launch `laya-multimodal-mcp-server` as a stdio
 server from your MCP client. Choose the checkpoint and device in the process environment.
 
 ```bash
-LAYA_MULTIMODAL_MODEL=/path/to/checkpoint LAYA_DEVICE=cpu laya-mcp-server
+LAYA_MULTIMODAL_MODEL=/path/to/checkpoint LAYA_DEVICE=cpu laya-multimodal-mcp-server
 ```
 
 To share a running inference process, set `LAYA_BASE_URL=http://127.0.0.1:8000` in the MCP process.

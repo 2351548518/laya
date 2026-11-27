@@ -1,6 +1,6 @@
 # research/evals
 
-Datasets, baselines and thresholds for the `laya-evals` harness and its CI gate.
+Datasets, baselines and thresholds for the `laya-multimodal eval` harness and its CI gate.
 
 - `fixture.jsonl`: a tiny hand-written set that exercises `choice`, `score` and `noul`
   across a few tags. It exists to prove the format and to run the harness in tests. It is
@@ -9,7 +9,7 @@ Datasets, baselines and thresholds for the `laya-evals` harness and its CI gate.
 - `thresholds.json`: historical tolerances for the committed
   baselines in `research/results/`.
 - `check_regression.py`: adapts a `research/eval/laya_eval.py` report into
-  `laya.evals.EvalReport` and compares it to a committed baseline.
+  `laya_multimodal.evals.EvalReport` and compares it to a committed baseline.
 
 ## Format
 
@@ -27,13 +27,13 @@ One JSON object per line (JSONL). Blank lines and lines starting with `#` are ig
 ## Use
 
 ```bash
-laya-evals validate research/evals/fixture.jsonl
-laya-evals run data.jsonl --model multimodal --min-accuracy 0.8 --max-ece 0.05 --slice language
-laya-evals run data.jsonl --baseline baseline.json --tolerance choice_accuracy=0.02 --json out.json
+laya-multimodal eval validate research/evals/fixture.jsonl
+laya-multimodal eval run data.jsonl --model multimodal --min-accuracy 0.8 --max-ece 0.05 --slice language
+laya-multimodal eval run data.jsonl --baseline baseline.json --tolerance choice_accuracy=0.02 --json out.json
 ```
 
 `run` exits non-zero when a threshold or a baseline tolerance fails, so it drops into CI
-unchanged. `laya eval ...` is the same thing through the main CLI.
+unchanged. `laya-multimodal eval ...` is the same thing through the main CLI.
 
 Adding a dataset: point `--baseline` at a report you have reviewed, keep the tolerances in
 `thresholds.json`, and commit both beside the dataset, so a quality change is a reviewable

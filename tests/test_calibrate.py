@@ -12,7 +12,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from laya.calibrate import (  # noqa: E402
+from laya_multimodal.calibrate import (  # noqa: E402
     ECE_HOLDOUT_FRAC,
     LOG_T_MARGIN,
     MIN_BUCKET_N,
@@ -31,8 +31,8 @@ from laya.calibrate import (  # noqa: E402
     fit_temperature_map,
     fit_temperatures,
 )
-from laya.common import QTYPES, TEMP_MAX, TEMP_MIN, clamp_temperature, ece_score, temp_bucket  # noqa: E402
-import laya.calibrate as _calibrate  # noqa: E402
+from laya_multimodal.common import QTYPES, TEMP_MAX, TEMP_MIN, clamp_temperature, ece_score, temp_bucket  # noqa: E402
+import laya_multimodal.calibrate as _calibrate  # noqa: E402
 
 PASS, FAIL = [], []
 

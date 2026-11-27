@@ -1,71 +1,127 @@
 <h1 align="center">laya-multimodal</h1>
 
-<img src="https://raw.githubusercontent.com/2351548518/laya/main/assets/laya-multimodal-banner.webp" alt="Text, image, video and audio inputs converge into a local decision" width="100%">
+**English** · [简体中文](README.zh-CN.md)
 
-A local System 1 decision engine for text, images, video and audio. Each question runs one backbone
-forward pass and returns a typed answer with zero generated answer tokens. Use it for routing,
-action selection, yes/no checks, ordinal ratings and single-object localization.
+<img src="assets/laya-multimodal-banner.webp" alt="Text, image, video and audio inputs converge into a local decision" width="100%">
+
+A local System 1 decision engine for routing, action selection, checks, ratings and single-object
+localization. It reads text and native media, and returns typed decisions with zero generated
+answer tokens.
+
+[Install](#installation) · [Directory structure](#directory-structure) · [Model architecture](#model-architecture) · [Inference](#local-inference) · [Training](#training) · [Evaluation and tests](#evaluation-and-tests) · [Deployment](#deployment)
+
+[Documentation](docs/index.md)
 
 | Output | What it returns |
 | --- | --- |
-| `choice` | The selected candidate and probabilities over the supplied candidates |
-| `noul` | The probability that a yes/no condition is true |
-| `score` | A distribution over ordered levels and its expected level index |
-| `box` | One normalized bounding box for a referred object in an image, with a localization quality score |
+| `choice` | The selected candidate and a probability distribution over the options |
+| `noul` | The probability that the condition is true |
+| `score` | The probability distribution over ordered levels and its expected level index |
+| `box` | One image box with normalized `left`, `top`, `right` and `bottom` coordinates and an IoU quality estimate |
 
-| Backbone | Native inputs | Checkpoint |
+| Backbone | Supported inputs | Checkpoint |
 | --- | --- | --- |
-| Qwen3.5 | Text, images and video frames | [JEV Multimodal Qwen3.5-4B · merged native](https://huggingface.co/ZeeoRe/jev-multimodal-qwen3.5-4b) · [GGUF](https://huggingface.co/ZeeoRe/jev-multimodal-qwen3.5-4b-GGUF) |
+| Qwen3.5-4B | Text, images and visual video frames | [Merged native v1](https://huggingface.co/ZeeoRe/jev-multimodal-qwen3.5-4b) · [Quantized GGUF](https://huggingface.co/ZeeoRe/jev-multimodal-qwen3.5-4b-GGUF) |
 | Gemma 4 E2B | Text, images, waveform audio and video with optional audio | Train the decision heads on a local backbone |
 
 ## Installation
 
-Use Python 3.11 or newer for native models and install from this source checkout. Video processing requires
-`ffmpeg` and `ffprobe` on your PATH.
+Use Python 3.11 or newer. Install `ffmpeg` and `ffprobe` for video input.
 
 ```bash
 git clone https://github.com/2351548518/laya.git laya-multimodal
 cd laya-multimodal
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e '.[multimodal]'
 ```
 
-Import the package as `laya`. To serve predictions over HTTP, install
-`python -m pip install -e '.[multimodal,serve]'`.
+Import `laya_multimodal` in Python and run `laya-multimodal` from a terminal.
+The same command provides the `train` and `eval` subcommands. On Linux and Apple silicon,
+`./setup_laya.sh` creates `.venv-mm` and downloads the merged checkpoint.
+Pass `--skip-models` to use an existing checkpoint. [Host setup](LOCAL_SETUP.md)
 
-On Linux and Apple silicon, `./setup_laya.sh` prepares `.venv-mm` and downloads
-the merged Qwen checkpoint shown below. Pass `--skip-models` to use an existing checkpoint.
-On Windows, `start.bat` starts the local HTTP service with a downloaded checkpoint.
-[Host setup](https://github.com/2351548518/laya/blob/main/LOCAL_SETUP.md)
+## Directory structure
 
-For a container, mount the local checkpoint and enable the native media dependencies with
-`compose.multimodal.yaml`. [Docker setup](https://github.com/2351548518/laya/blob/main/docs/docker.md#serve-a-native-multimodal-checkpoint)
+```text
+laya_multimodal/
+    multimodal.py               Checkpoint loading, input preparation and inference
+    multimodal_readout.py       Candidate scoring
+    grounding.py                Single-box head, geometry and localization loss
+    multimodal_data.py          Native JSONL loading and batch collation
+    train.py, train_cli.py      Joint training loop and command
+    multimodal_*.py             Native training, objectives, distribution and calibration
+    systemone.py, serve.py       System One request handling and HTTP service
+    router.py, hooks.py         Checkpoint selection and inference lifecycle hooks
+    mcp/, integrations/         MCP server and optional framework integrations
+configs/multimodal/             Starter head warmup and LoRA configurations
+scripts/multimodal/             Data preparation, evaluation, calibration and export
+benchmarks/, verify/            Latency reports and native checkpoint smoke checks
+research/                       Evaluation fixtures, audit code and historical results
+sdk/python/, sdk/typescript/     HTTP clients
+examples/, notebooks/            Local inference examples and training walkthroughs
+tests/                          Runtime, training, packaging and API regression tests
+docs/, assets/                   Guides, architecture drawings and project artwork
+Dockerfile, compose*.yaml       CPU, NVIDIA CUDA and DGX Spark deployment
+setup_laya.sh, start.bat        Host setup and Windows service launcher
+```
 
-## Quickstart
+Local weights go in `models/`, prepared data in `multimodal-data/`, and training checkpoints
+and reports in `multimodal-runs/`. Use `_local/` for temporary experiments. Git ignores these
+directories.
 
-Download the merged Qwen3.5-4B checkpoint for local CPU or GPU inference.
+## Model architecture
+
+```mermaid
+flowchart LR
+    Input["State and native media"] --> Processor["Backbone processor"]
+    Question["Instructions and candidates"] --> Processor
+    Processor --> Backbone["Qwen3.5 or Gemma 4"]
+    Backbone --> Hidden["Hidden states [B, L, H]"]
+    Hidden --> Decision["Candidate scoring [B, K]"]
+    Hidden --> Grounding["Single-box readout [B, 5]"]
+    Decision --> Typed["choice / noul / score"]
+    Grounding --> Box["Normalized box and quality"]
+```
+
+1. The backbone processor turns the request into text tokens and supported image, video or audio
+   features. The backbone contextualizes the question and its inputs together.
+2. The candidate scorer uses the final decision state as a query and gathers candidate states at
+   their prompt positions. Two 256-dimensional projections and a scaled normalized dot product
+   yield one logit per candidate. The decoder restores the original option order before returning
+   probabilities. For `score`, the reported value is the expected level index.
+3. The grounding head reads the final valid state and predicts four coordinates and a quality logit.
+   Coordinates are ordered and normalized to the image. The quality score estimates target overlap.
+
+Here `B` is batch size, `L` is sequence length, `H` is backbone hidden width and `K` is candidate
+count. Qwen3.5-4B uses `H = 2560`. Each question is scored directly from the backbone activations.
+[Architecture with tensor dimensions](docs/project-readme/assets/architecture.en.svg) · [Model and loss walkthrough](docs/project-readme/multimodal-current.md)
+
+## Local inference
+
+Download the published native decision checkpoint.
 
 ```bash
 hf download ZeeoRe/jev-multimodal-qwen3.5-4b --local-dir models/jev-multimodal-qwen3.5-4b
 ```
 
+Run a text decision and a box prediction with the same agent. For the box example, put a photo
+containing a red cup at `scene.jpg`.
+
 ```python
-from laya import MultimodalAgent
+from laya_multimodal import MultimodalAgent
 
-checkpoint = "models/jev-multimodal-qwen3.5-4b"
-agent = MultimodalAgent(checkpoint, device="cuda")
-routing_questions = {
-    "route": {
+agent = MultimodalAgent("models/jev-multimodal-qwen3.5-4b", device="cpu")
+result = agent.predict(
+    "I was charged twice for the same invoice.",
+    {"team": {
         "type": "choice",
-        "instructions": "Which team should handle the request?",
-        "criteria": {"billing": "invoices and refunds", "technical": "software issues"},
-    },
-}
-decision = agent.predict("I was charged twice for the same invoice.", routing_questions)
-print(decision["answers"]["route"])
+        "instructions": "Which team should handle this request?",
+        "criteria": {"billing": "invoices and refunds", "support": "product help"},
+    }},
+)
+print(result["answers"]["team"])
 
-# Put an image containing a red cup at scene.jpg.
 location = agent.predict(
     image="scene.jpg",
     questions={"target": {"type": "box", "instructions": "the red cup"}},
@@ -73,109 +129,211 @@ location = agent.predict(
 print(location["answers"]["target"]["box"])
 ```
 
-Use `device="cpu"` for CPU inference. For Qwen video, use a state such as
-`{"text": "Inspect this clip", "video": "clip.mp4", "video_audio": False}`. A trained Gemma 4
-checkpoint also accepts `audio="clip.wav"` or a waveform and `sampling_rate`. The native guide
-covers input budgets, batch prediction, local routing and HTTP requests. [Native multimodal guide](https://github.com/2351548518/laya/blob/main/docs/multimodal.md)
+Select `device="cuda:0"` for GPU inference. Pass a local video as
+`{"text": "Inspect the clip", "video": "clip.mp4", "video_audio": False}` for visual-only Qwen input.
+With a trained audio-capable Gemma checkpoint, pass `audio="clip.wav"` or a waveform and
+`sampling_rate`. [Input formats and budgets](docs/multimodal.md#local-prediction)
 
-From a terminal, use the same native checkpoint for text and media. Set `--multimodal` to select a checkpoint explicitly.
-
-```bash
-laya --multimodal models/jev-multimodal-qwen3.5-4b \
-  --preset triage "I was charged twice for the same invoice." --json
-```
-
-Run the Python example with the downloaded checkpoint. Add `--image scene.jpg` or
-`--video clip.mp4` to try local media.
+The CLI can route a request or run a prediction against a selected checkpoint.
 
 ```bash
-python examples/native_multimodal.py models/jev-multimodal-qwen3.5-4b --device cpu
+laya-multimodal --explain --json "I was charged twice."
+laya-multimodal --multimodal models/jev-multimodal-qwen3.5-4b \
+  --preset triage --json "I was charged twice."
 ```
 
-[Runnable examples](https://github.com/2351548518/laya/tree/main/examples) ·
-[Native multimodal notebook](https://github.com/2351548518/laya/blob/main/notebooks/laya_native_multimodal.ipynb) ·
-[Native SDK examples](https://github.com/2351548518/laya/blob/main/docs/multimodal-clients.md)
+[Runnable examples](examples/README.md) · [Notebook](notebooks/laya_native_multimodal.ipynb)
 
-## Train and evaluate
+## Training
 
-The runtime feeds native media and question tokens into the backbone. A shared candidate scorer
-handles decisions, and a compact box head uses the final valid hidden state for localization.
+### Prepare separate JSONL splits
 
-```mermaid
-flowchart LR
-    Input["Text and native media"] --> Processor["Backbone processor"]
-    Question["Question and candidates"] --> Processor
-    Processor --> Backbone["Gemma 4 or Qwen3.5"]
-    Backbone --> Decision["Candidate scorer"]
-    Backbone --> Box["Single-box head"]
-    Decision --> Typed["choice / noul / score"]
-    Box --> Coordinates["Normalized box and quality"]
+Start with local JSONL containing one question per row under `questions`, with its input under
+`state`. Use `expected` for a label, Boolean or score, and `gold` for an annotated probability
+distribution. The example below supplies a label for `team`.
+
+```json
+{"id":"billing-1","state":"I was charged twice.","questions":{"team":{"type":"choice","instructions":"Which team should handle this request?","criteria":{"billing":"invoices and refunds","support":"product help"}}},"expected":{"team":"billing"}}
 ```
 
-Use JSONL records with an input state, a question, and either a decision target or a single-box
-annotation. The starter recipes first train the readouts on a frozen backbone. The Qwen LoRA
-stage then updates the readouts, language adapters and visual merger together. The training guide
-covers four-GPU training, held-out calibration and evaluation.
-[Training guide](https://github.com/2351548518/laya/blob/main/docs/multimodal.md#head-warmup-and-lora-training) ·
-[Grounding](https://github.com/2351548518/laya/blob/main/docs/grounding.md) · [Commands](https://github.com/2351548518/laya/blob/main/scripts/multimodal/README.md)
+For localization, put the image path in `state` and the normalized box
+`[left, top, right, bottom]` in `grounding.boxes`. Relative media paths start at the source JSONL
+file's directory.
 
-The v6 project guide includes architecture and training diagrams with tensor dimensions, labelled
-request examples, and a CPU walkthrough of the supervised losses.
-[v6 project guide (Chinese)](https://github.com/2351548518/laya/blob/main/docs/project-readme/index.md)
+```json
+{"id":"cup-1","state":{"image":"scene.jpg"},"questions":{"target":{"type":"box","instructions":"the red cup"}},"grounding":{"task":"single","boxes":[[0.2,0.3,0.7,0.8]]}}
+```
 
-## GGUF deployment
+Convert those rows into the training, head warmup, development and held-out test files.
+Put localization examples in `dev` and decision examples in `decision_dev`.
+The `train`, `warmup` and `test` files can include both.
 
-Use one language GGUF and its matching visual projector with the local llama.cpp-jev runtime.
-The selected files below were evaluated after the WebM loading fix on 900 decisions and 128
-positive single-box cases. Size includes both files.
+```bash
+data=multimodal-data/example/native
+python scripts/multimodal/prepare_dataset.py --training \
+  --split train=path/to/train.jsonl --split warmup=path/to/warmup.jsonl \
+  --split dev=path/to/box-dev.jsonl --split decision_dev=path/to/decision-dev.jsonl \
+  --split test=path/to/test.jsonl --out "$data"
+```
 
-| Selected configuration | Size | Decision accuracy | Box Acc@IoU ≥ 0.5 | Harmonic accuracy H |
+The prepared rows use the System One `request` envelope. The text example becomes the record below.
+The image example uses a named image under `request.assets` and a path under `media_files`.
+
+```json
+{"id":"billing-1","request":{"model":"multimodal","state":"I was charged twice.","questions":{"team":{"type":"choice","instructions":"Which team should handle this request?","criteria":{"billing":"invoices and refunds","support":"product help"}}}},"expected":{"team":"billing"}}
+```
+
+Use visual-only media rows for Qwen, with `video_audio: false` for video. Keep the final
+test set separate from training, checkpoint selection and calibration.
+[Data contracts and examples](docs/multimodal.md#local-jsonl-data-loading)
+
+### Warm up the heads and fine-tune
+
+The first stage freezes the original backbone and trains the candidate and single-box readouts.
+The second stage starts from the selected warmup checkpoint with a new optimizer and LoRA adapters.
+For Qwen, the starter LoRA recipe updates language adapters, the visual merger and both readouts
+while the visual encoder stays frozen. The joint objective combines supervised decision losses
+with coordinate L1, GIoU and box quality losses.
+
+The following example uses four available NVIDIA GPUs, an original local Qwen backbone and the
+splits prepared above. Set `CUDA_VISIBLE_DEVICES` to the four GPUs you want to use. The starter
+recipes use a global batch of 64 records, with separate budgets for the context length and padded
+microbatch. Each stage writes the selected checkpoint path to `training_report.json`.
+
+```bash
+base=models/pretrained/Qwen3.5-4B
+data=multimodal-data/example/native
+run=multimodal-runs/example
+
+torchrun --standalone --nproc_per_node=4 --module laya_multimodal.train_cli \
+  --model "$base" --data "$data" --train-split warmup --out "$run/head" \
+  --config configs/multimodal/head.json --visual-only --require-original-base --allow-unadmitted
+
+warmup_checkpoint=$(python -c 'import json, sys; print(json.load(sys.stdin)["checkpoint"])' \
+  < "$run/head/training_report.json")
+torchrun --standalone --nproc_per_node=4 --module laya_multimodal.train_cli \
+  --model "$warmup_checkpoint" --data "$data" --out "$run/sft" \
+  --config configs/multimodal/sft.json --visual-only --allow-unadmitted
+```
+
+Use `--allow-unadmitted` for local examples prepared without processor admission records. The v6
+recipe uses admitted rows checked against the original Qwen processor. For audio-capable training,
+use a Gemma 4 backbone and an audio-capable dataset without the `--visual-only` flag.
+[Training diagram](docs/project-readme/assets/training.en.svg) · [v6 reproduction and resume](docs/project-readme/multimodal.md)
+
+Run `laya-multimodal train --help` for settings. Enable `checkpoint_every` in the recipe to
+save recoverable training snapshots, and resume using the original settings with `--resume`.
+Install `.[multimodal,swanlab]` and set `--swanlab local` for local metrics. After authenticating
+with SwanLab, use `--swanlab online --swanlab-project PROJECT` for an online dashboard.
+The separate `laya-multimodal-train-decisions` command supports native decision distillation
+and reference-KL experiments. [Detailed training guide](docs/finetune.md)
+
+## Evaluation and tests
+
+Evaluate the selected checkpoint on a held-out suite. The evaluator validates the suite against
+its manifest and writes a separate JSON report.
+
+```bash
+checkpoint=$(python -c 'import json, sys; print(json.load(sys.stdin)["checkpoint"])' \
+  < multimodal-runs/example/sft/training_report.json)
+python scripts/multimodal/evaluate.py --model "$checkpoint" \
+  --suite-manifest multimodal-data/example/native/manifest.json --suite test \
+  --device cuda:0 --out multimodal-runs/example/test.json
+```
+
+Decision reports include accuracy by modality and question type, NLL, Brier and ECE. Ordinal
+decisions also report error across levels. Localization reports include mean IoU and accuracy
+at IoU ≥ 0.5. Compare checkpoints on identical labelled rows and input budgets. Fit probability
+calibration on separate calibration data before running the final test.
+[Evaluation protocol and release metrics](BENCHMARKS.md) · [Text evaluation and baseline comparison](docs/evals.md)
+
+Use the latency benchmark to record the first call, median and P95 on fixed requests. Use the
+smoke checker to verify the local checkpoint's answer structure and token accounting.
+[Latency commands](benchmarks/README.md) · [Smoke checks](verify/README.md)
+
+Run the repository checks from the root.
+
+```bash
+python -m pip install -e '.[multimodal,serve,mcp,langchain]' pytest httpx ruff
+ruff check laya_multimodal/ --select=E9,F63,F7,F82,F401,F811 --line-length=120
+python -m compileall -q laya_multimodal/ tests/
+python scripts/test_suites.py
+python -m pytest -q tests/test_evals.py tests/test_evals_shortlist.py
+```
+
+[Contribution and documentation checks](CONTRIBUTING.md)
+
+## Deployment
+
+### Local HTTP service
+
+Install the server extra and start the service.
+
+```bash
+python -m pip install -e '.[multimodal,serve]'
+export LAYA_MULTIMODAL_MODEL="$PWD/models/jev-multimodal-qwen3.5-4b"
+LAYA_HOST=127.0.0.1 LAYA_DEVICE=cpu LAYA_PRELOAD=0 laya-multimodal-serve
+```
+
+Send a health check and a text request from another terminal.
+
+```bash
+curl -fsS http://127.0.0.1:8000/health
+curl -fsS http://127.0.0.1:8000/v1/systemone \
+  -H 'Content-Type: application/json' --data-binary @examples/docker/request.json
+```
+
+| Endpoint | Use |
+| --- | --- |
+| `POST /v1/systemone` | Text decisions and named PNG or JPEG assets, including a single box |
+| `POST /v1/systemone/batch` | Multiple states with shared questions |
+| `POST /v1/multimodal` | One inline image, audio file or video with optional text context |
+| `POST /v1/route` | Inspect checkpoint routing |
+| `GET /health` | Check service liveness |
+
+Use the System One image asset contract for named images, including the required image header
+and size limits. Select `multimodal` or `default` for the native checkpoint. Set `LAYA_API_KEY`
+to require bearer authentication.
+The Python and TypeScript SDKs handle request encoding and response validation.
+Install `.[multimodal,mcp]` and run `laya-multimodal-mcp-server` for an MCP client.
+On Windows, `start.bat` launches the native HTTP service.
+[Wire format and limits](docs/http-api.md) · [SDK examples](docs/multimodal-clients.md) · [MCP setup](docs/cli-mcp.md)
+
+### Docker
+
+Mount an existing merged checkpoint read-only and serve it offline.
+
+```bash
+export LAYA_MULTIMODAL_MODEL_DIR="$PWD/models/jev-multimodal-qwen3.5-4b"
+docker compose -f compose.yaml -f compose.http.yaml -f compose.multimodal.yaml \
+  up --build laya-multimodal-serve
+```
+
+The base configuration uses CPU wheels. Add `-f compose.cuda.yaml` for NVIDIA CUDA or
+`-f compose.spark.yaml` for DGX Spark. Set `LAYA_GPU_ID` to choose a GPU and
+`LAYA_PORT` to change the service port. The one-shot service is named `laya-multimodal`.
+[Platform and driver requirements](docs/docker.md)
+
+### GGUF on a local runtime
+
+Use the llama.cpp-jev fork with a language GGUF and its matching `mmproj` for visual inputs.
+The release guide includes the tested runtime revision, build commands, the exact file pairs
+and sample requests.
+
+| Configuration | Total size | Decision accuracy | Box Acc@IoU ≥ 0.5 | Harmonic accuracy H |
 | --- | ---: | ---: | ---: | ---: |
 | Q4_K_M with FP32 heads | 2.902 GiB | 82.78% | 73.44% | 77.83% |
 | IQ2_XS / SSM4 with Q8 heads | 1.840 GiB | 81.44% | 71.09% | 75.92% |
 
-H is the harmonic mean of decision and box accuracy. These scores describe the development set
-used for model selection. The release guide gives the download pairs, runtime revision and
-patch, native export commands and evaluation scope. [Model releases and GGUF setup](https://github.com/2351548518/laya/blob/main/docs/multimodal-release.md)
-
-## Project layout
-
-| Path | Contents |
-| --- | --- |
-| `laya/` | Inference, native media processing, JSONL loading, training and calibration |
-| `assets/` | Project banner, documentation icons and referenced benchmark figures |
-| `scripts/multimodal/` | Reusable training, evaluation, merge, conversion and quantization commands |
-| `configs/multimodal/` | Portable head warmup and LoRA recipes |
-| `sdk/python/`, `sdk/typescript/` | Local HTTP clients for text decisions, media decisions and single-box results |
-| `notebooks/`, `examples/` | Runnable native decision examples and JSONL walkthroughs |
-| `docs/` and `tests/` | Usage, API contracts and regression checks |
-| `examples/clients/` | C++, Rust, .NET, Go and Java examples for the local HTTP service |
-| `benchmarks/`, `research/`, `verify/` | Local latency benchmarks, published results and checkpoint smoke tests |
-| `Dockerfile`, `compose.*` and `setup_laya.sh` | Local installation and service deployment |
-| `start.bat` | Windows launcher for the same native service |
-
-Keep downloaded weights in `models/`, local datasets in `multimodal-data/`, and checkpoints
-and reports in `multimodal-runs/`. Use `_local/` for data collection and preparation,
-experiments, generated figures and logs. These paths are ignored by Git.
-
-## Development
-
-```bash
-python -m pip install -e '.[multimodal,serve]' pytest httpx ruff
-ruff check laya/ --select=E9,F63,F7,F82,F401,F811 --line-length=120
-python -m compileall -q laya/ tests/
-python -m pytest -q tests/test_multimodal.py tests/test_grounding.py \
-  tests/test_multimodal_cli.py tests/test_multimodal_export.py
-```
-
-The contribution guide covers the full test suite and strict documentation build.
-[Contributor setup](https://github.com/2351548518/laya/blob/main/CONTRIBUTING.md)
+These v1 results use 900 decision examples and 128 positive boxes from the
+model-selection development set. Total size includes the visual projector.
+[Model files, conversion and runtime setup](docs/multimodal-release.md)
 
 ## Credits and license
 
-laya-multimodal builds on the Laya project by Convai Innovations. `laya.Agent()` and `laya.load()`
-select the native decision checkpoint. Install the `vega` extra and call `laya.load(vegaml=True)`
-to use the optional local Vega reader. [Upstream Laya](https://github.com/NandhaKishorM/laya)
+The project builds on [Laya by Convai Innovations](https://github.com/NandhaKishorM/laya).
+An optional local Vega reader is available through the `vega` extra and
+`laya_multimodal.load(vegaml=True)`. [From Laya to Vega](https://doi.org/10.20944/preprints202611.0781.v1)
 
-The source is licensed under [Apache 2.0](https://github.com/2351548518/laya/blob/main/LICENSE). The base models and datasets retain their
-respective licenses. For the original research, see [From Laya to Vega](https://doi.org/10.20944/preprints202611.0781.v1).
+The source uses the [Apache 2.0 license](LICENSE). Base models and datasets retain their
+respective licenses.

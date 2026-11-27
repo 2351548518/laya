@@ -1,14 +1,4 @@
-"""Criteria rendering: structured values must not crash or leak Python reprs.
-
-Regression tests for the bug reported in PR #2 (trocker): a `noul` question whose criteria
-values were dicts raised `TypeError: can only concatenate str (not "dict") to str`, and
-`choice`/`score` stringified dicts as Python reprs instead of JSON.
-
-A question whose *shape* is wrong is the other half of the same promise and lives at the bottom of
-this file: `Agent.system_one` rejects it by name before anything is rendered or tokenized, instead
-of raising `AttributeError: 'NoneType' object has no attribute 'items'` from `render_options` or a
-`selected index k out of range` from inside the decision head (#182).
-"""
+"""Check criteria normalization and rendering for typed native decisions."""
 import json
 import os
 import sys
@@ -17,7 +7,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from laya.common import ece_score, render_criterion, render_options  # noqa: E402
+from laya_multimodal.common import ece_score, render_criterion, render_options  # noqa: E402
 
 PASS, FAIL = [], []
 
@@ -173,7 +163,7 @@ parsed = json.loads(render_options(
 check("emitted json round-trips", parsed, {"a": 1})
 
 # public labels reach the renderer through Agent._to_internal without changing caller data
-from laya.agent import Agent  # noqa: E402
+from laya_multimodal.agent import Agent  # noqa: E402
 
 public_labels = {"true": "A", "false": "B"}
 public_question = {"type": "noul", "instructions": "Is this true?", "labels": public_labels}
@@ -192,28 +182,14 @@ check("agent/custom labels keep boolean criteria normalization", boolean_interna
       {"true": "yes", "false": "no"})
 check("agent/boolean criteria render with custom labels", render_options(boolean_internal), ["B: no", "A: yes"])
 check("agent/leaves boolean criteria unchanged", boolean_criteria, {True: "yes", False: "no"})
+default_boolean = Agent._to_internal(
+    {"type": "noul", "instructions": "Is this true?", "criteria": boolean_criteria})
+check("agent/renders boolean criteria with default labels", render_options(default_boolean),
+      ["false: no", "true: yes"])
 
-
-# --------------------------------------------------------------- CPU-fallback warning (#9 follow-up)
-# The warning must fire only when a fallback actually happened -- not merely because the machine
-# has CUDA. `laya.load(path, device="cpu")` on a GPU box is a deliberate choice, not a problem.
-import inspect  # noqa: E402
-
-from laya import agent as _agent  # noqa: E402
-
-_src = inspect.getsource(_agent.Agent.__init__)
-
-
-# --------------------------------------------------------------- malformed question shapes (#182)
-# A question that cannot be answered used to fail three frames down, as an exception that named
-# neither the question nor the fix: `AttributeError: 'NoneType' object has no attribute 'items'`
-# from `render_options` for a `choice` without criteria, `KeyError: 'bool'` from the type table,
-# and -- for a question that ended up with no options at all -- a `selected index k out of range`
-# raised inside `DecisionModel.forward`, which reads like a bug in laya rather than in the caller's
-# definition. The inference path below is real: a tiny from-config encoder, no checkpoint
-# downloaded (tests/test_local_e2e.py covers the real weights).
-
-from laya.agent import Agent  # noqa: E402
+urgency = Agent._to_internal({"type": "choice", "instructions": "Select urgency",
+                              "criteria": ["low", "medium", "high"]})
+check("agent/expands ordered choice criteria", list(urgency["crit"]), ["low", "medium", "high"])
 
 print("\n%d passed, %d failed" % (len(PASS), len(FAIL)))
 for f in FAIL:

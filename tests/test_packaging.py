@@ -2,8 +2,10 @@
 
 import ast
 from pathlib import Path
+from posixpath import relpath
 import re
 import sys
+import tomllib
 import unittest
 from urllib.parse import unquote
 
@@ -23,22 +25,42 @@ def headings(path):
 
 
 class PackagingTests(unittest.TestCase):
+    def test_documentation_language_switches_connect_each_pair(self):
+        docs = ROOT / "docs"
+        locale = docs / "zh-CN"
+        english = {page.relative_to(docs) for page in docs.rglob("*.md") if not page.is_relative_to(locale)}
+        chinese = {page.relative_to(locale) for page in locale.rglob("*.md")}
+        self.assertEqual(english, chinese)
+        for name in sorted(english):
+            with self.subTest(page=name):
+                en = docs / name
+                zh = locale / name
+                zh_link = relpath(zh.as_posix(), en.parent.as_posix())
+                en_link = relpath(en.as_posix(), zh.parent.as_posix())
+                self.assertIn(f"[简体中文]({zh_link})", en.read_text(encoding="utf-8"))
+                self.assertIn(f"[English]({en_link})", zh.read_text(encoding="utf-8"))
+
     def test_console_commands_resolve_to_shipped_functions(self):
-        project = (ROOT / "pyproject.toml").read_text()
+        config = tomllib.loads((ROOT / "pyproject.toml").read_text())
+        project = config["project"]
+        self.assertEqual(project["name"], "laya-multimodal")
+        self.assertNotIn("laya", config["tool"]["setuptools"]["packages"])
         paths = {
-            "laya": "laya.cli", "laya-train": "laya.train_cli",
-            "laya-mm-train": "laya.multimodal_train", "laya-serve": "laya.serve",
-            "laya-evals": "laya.evals_cli", "laya-mcp-server": "laya.mcp.server",
+            "laya-multimodal": "laya_multimodal.cli",
+            "laya-multimodal-serve": "laya_multimodal.serve",
+            "laya-multimodal-mcp-server": "laya_multimodal.mcp.server",
+            "laya-multimodal-train-decisions": "laya_multimodal.multimodal_train",
         }
+        self.assertEqual(project["scripts"], {cmd: f"{module}:main" for cmd, module in paths.items()})
         for command, module in paths.items():
             with self.subTest(command=command):
-                self.assertIn(f'{command} = "{module}:main"', project)
                 tree = ast.parse((ROOT / (module.replace(".", "/") + ".py")).read_text())
                 self.assertTrue(any(isinstance(node, ast.FunctionDef) and node.name == "main" for node in tree.body))
 
     def test_local_documentation_links_resolve(self):
         roots = ["docs", "examples", "benchmarks", "verify", "notebooks", "sdk"]
-        documents = [ROOT / "README.md", ROOT / "LOCAL_SETUP.md", ROOT / "AGENTS.md", ROOT / "CONTRIBUTING.md"]
+        documents = [ROOT / name for name in ("README.md", "README.zh-CN.md", "LOCAL_SETUP.md",
+                                              "AGENTS.md", "CONTRIBUTING.md")]
         for root in roots:
             documents.extend(path for path in (ROOT / root).rglob("*.md")
                              if all(part not in {"node_modules", "dist", "build"} for part in path.parts))
@@ -62,7 +84,7 @@ class PackagingTests(unittest.TestCase):
     def test_training_has_no_dependency_on_the_retired_encoder(self):
         from importlib.util import find_spec
 
-        for module in ("laya.onnx_agent", "laya.fast", "laya.grounding_train"):
+        for module in ("laya_multimodal.onnx_agent", "laya_multimodal.fast", "laya_multimodal.grounding_train"):
             self.assertIsNone(find_spec(module))
 
 

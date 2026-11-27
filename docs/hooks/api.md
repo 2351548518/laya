@@ -1,11 +1,13 @@
 # API reference
 
-Everything on this page is importable from `laya` (the common names) or `laya.hooks` (the
+**English** · [简体中文](../zh-CN/hooks/api.md)
+
+Everything on this page is importable from `laya_multimodal` (the common names) or `laya_multimodal.hooks` (the
 whole surface).
 
 ```python
-from laya import PredictContext, PredictHook, Hook, OptionStabilityHook
-from laya.hooks import HOOK_EVENTS, normalise_hooks, dispatch, aggregate_usage
+from laya_multimodal import PredictContext, PredictHook, Hook, OptionStabilityHook
+from laya_multimodal.hooks import HOOK_EVENTS, normalise_hooks, dispatch, aggregate_usage
 ```
 
 - [PredictContext](#predictcontext)
@@ -91,7 +93,7 @@ def cache_write(ctx):
     for i, result in enumerate(ctx.results or []):
         CACHE[key(ctx, i)] = result
 
-laya.load( on_predict_start=cache_read, on_predict_end=cache_write)
+laya_multimodal.load( on_predict_start=cache_read, on_predict_end=cache_write)
 ```
 
 `tests/test_hooks_api.py` execs this block, `examples/hooks/cache.py`, and the caching blocks of
@@ -134,7 +136,7 @@ If a hook defines one of the six as a non-callable, configuration fails fast (se
 Subclass it and override only the events you need.
 
 ```python
-from laya import BaseHook
+from laya_multimodal import BaseHook
 
 class Audit(BaseHook):
     def on_predict_end(self, ctx):
@@ -151,11 +153,11 @@ best when you want an explicit base to subclass and call `super()` on.
 Layout-aware (#635, #951): on checkpoints using parallel option layouts (`option_layout="parallel"`), options cannot attend to each other so reordering cannot move decisions by construction. The hook automatically detects layout from the agent config, executing rename-only probes on parallel checkpoints while running both rename and reorder probes on sequential checkpoints.
 
 ```python
-from laya import OptionStabilityHook
+from laya_multimodal import OptionStabilityHook
 
 # Required accept and escalate thresholds; pass None to disable categorical triage:
 stability_hook = OptionStabilityHook(accept=0.85, escalate=0.60, variants="fast")
-agent = laya.load( hooks=[stability_hook])
+agent = laya_multimodal.load( hooks=[stability_hook])
 ```
 
 Thresholds `accept` and `escalate` are required keyword arguments: categorical gating decisions (`ACCEPT`, `VERIFY`, `ESCALATE`) depend directly on application error tolerance, option count, and temperature calibration (Issue #1245). Pass `accept=None, escalate=None` to evaluate continuous stability signals without applying categorical gating.
@@ -175,7 +177,7 @@ It attaches a `reliability` diagnostic block to each choice question's answer:
 ### Calibrating and replaying decisions
 
 Collect `soft_stability` with `accept=None, escalate=None` on labelled evaluation examples,
-then pass those numeric values and correctness labels to `laya.hooks.calibrate_reliability`.
+then pass those numeric values and correctness labels to `laya_multimodal.hooks.calibrate_reliability`.
 Only fit or replay probed, numeric scores; exclude unprobed reports with `soft_stability=None`
 and keep their `decision=None`.
 The fitter requires equal, nonempty, sized score and label sequences; generators raise
@@ -251,12 +253,12 @@ and a hook added inside the block with `add_hook` is left in place.
 
 ## Process-wide defaults
 
-`laya.hooks` keeps a small process-wide registry, so a tracer, metrics hook or tenant tagger does
+`laya_multimodal.hooks` keeps a small process-wide registry, so a tracer, metrics hook or tenant tagger does
 not have to be threaded through every `Agent` and `Router`. Defaults run **first**, then the
 hooks installed on the instance, then per-call hooks.
 
 ```python
-from laya import hooks
+from laya_multimodal import hooks
 
 hooks.set_default_hooks(hooks=[Tracer()])          # replaces the set, accepts the hooks= arguments
 hooks.add_default_hook(Metrics())                  # appends
@@ -276,13 +278,13 @@ An event may be a coroutine. Wrap the hook in `AsyncHook` and its `async def` me
 completion in the sync core:
 
 ```python
-from laya import AsyncHook
+from laya_multimodal import AsyncHook
 
 class Remote:
     async def on_predict_end(self, ctx):
         await ship(ctx.results)
 
-agent = laya.load( hooks=[AsyncHook(Remote())])
+agent = laya_multimodal.load( hooks=[AsyncHook(Remote())])
 ```
 
 A plain async callable passed to `on_predict_start=` / `on_predict_end=` also works, because
@@ -437,7 +439,7 @@ completion from sync code, on the caller's loop if it is free, or on a backgroun
 caller already has one. `aggregate_usage` sums per-state usage blocks.
 
 ```python
-from laya.hooks import normalise_hooks, dispatch, PredictContext
+from laya_multimodal.hooks import normalise_hooks, dispatch, PredictContext
 
 hooks = normalise_hooks(on_predict_start=[log, redact])
 ctx = PredictContext(states=["..."], questions={...})

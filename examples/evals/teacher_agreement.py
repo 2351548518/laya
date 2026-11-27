@@ -4,7 +4,7 @@ From a checkout::
 
     python -m pip install -e . pyarrow
     python examples/evals/teacher_agreement.py --output-dir /tmp/laya-agreement
-    laya-evals agreement /tmp/laya-agreement/reference.json \
+    laya-multimodal eval agreement /tmp/laya-agreement/reference.json \
         /tmp/laya-agreement/repeat.json /tmp/laya-agreement/student.json
 
 The first 32 test rows and teacher repeats 0/1 are fixed before student inference.
@@ -191,8 +191,8 @@ def main() -> None:
     import torch
     import transformers
 
-    import laya
-    from laya import evals
+    import laya_multimodal
+    from laya_multimodal import evals
 
     torch.set_num_threads(2)
     torch.manual_seed(0)
@@ -202,13 +202,13 @@ def main() -> None:
         "settings": {
             "device": "cpu", "backend": "eager", "lang": "en",
             "min_confidence": None, "torch_threads": 2,
-            "laya_version": laya.__version__, "torch_version": str(torch.__version__),
+            "laya_version": laya_multimodal.__version__, "torch_version": str(torch.__version__),
             "transformers_version": transformers.__version__,
         },
         "seed": 0,
     }
     print(f"Loading {MODEL}@{MODEL_REVISION} on CPU", file=sys.stderr, flush=True)
-    with laya.load(MODEL, device="cpu", revision=MODEL_REVISION) as agent:
+    with laya_multimodal.load(MODEL, device="cpu", revision=MODEL_REVISION) as agent:
         report = evals.evaluate_agreement(
             LocalRunner(agent), reference, repeat, student_provenance=provenance,
             bootstrap_samples=2000, seed=0,

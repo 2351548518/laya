@@ -1,10 +1,10 @@
 # laya-client
 
-A dependency-free HTTP client for self-hosted Laya `laya-serve` predictions and routing snapshots. Supports ESM and
+A dependency-free HTTP client for self-hosted Laya `laya-multimodal-serve` predictions and routing snapshots. Supports ESM and
 CommonJS on Node.js 22+, and browsers with `fetch`, `AbortController`, `structuredClone`
 and `btoa`. TypeScript consumers need TypeScript 5 or newer.
 
-Inference runs in your self-hosted `laya-serve` process. JavaScript clients do
+Inference runs in your self-hosted `laya-multimodal-serve` process. JavaScript clients do
 not need Python, PyTorch, or model weights installed; the server does. This
 package does not run models directly in a browser or Node.js.
 
@@ -19,7 +19,7 @@ In a terminal at the repository root, start the server:
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e '.[multimodal,serve]'
-LAYA_HOST=127.0.0.1 LAYA_DEVICE=cpu laya-serve
+LAYA_HOST=127.0.0.1 LAYA_DEVICE=cpu laya-multimodal-serve
 ```
 
 In a second terminal, build the SDK and run the plain JavaScript example:
@@ -87,7 +87,7 @@ laya.predict({ message: 'Please refund my order' }, triageQuestions())
 
 ## Native media predictions
 
-Start `laya-serve` with `LAYA_MULTIMODAL_MODEL` pointing to a trained local checkpoint.
+Start `laya-multimodal-serve` with `LAYA_MULTIMODAL_MODEL` pointing to a trained local checkpoint.
 [Server setup](https://github.com/2351548518/laya/blob/main/docs/multimodal-clients.md)
 
 ```ts
@@ -336,8 +336,8 @@ For custom checkpoint paths or an existing agent, configure Python's router:
 
 ```python
 import uvicorn
-from laya import Router
-from laya.serve import create_app
+from laya_multimodal import Router
+from laya_multimodal.serve import create_app
 
 router = Router(multimodal="/path/to/checkpoint", device="cpu")
 router.preload(["multimodal"])
@@ -363,7 +363,7 @@ Integration testing uses real local PyTorch inference with a tiny random test
 checkpoint, compares answers against direct Python calls, and downloads no model
 weights. It verifies transport and runtime compatibility, not pretrained model
 accuracy. Run the repository's pretrained model tests separately when those
-weights are available. Presets are generated from `laya/presets.py`; regenerate
+weights are available. Presets are generated from `laya_multimodal/presets.py`; regenerate
 with `python3 scripts/sync_presets.py` after editing that source.
 
 Batch tests compare the same inference batch shape against `Router.predict_batch`, in both

@@ -8,12 +8,12 @@ import numpy as np
 import pytest
 import torch
 
-from laya.train import GroundingTrainConfig, _activation_context, _decision_microbatches, _rank_window
-from laya._qwen_training import qwen_training_delta
-from laya.multimodal import MultimodalAgent
-from laya.multimodal_calibration import (fit_ordinal_calibration, ordinal_probabilities,
+from laya_multimodal.train import GroundingTrainConfig, _activation_context, _decision_microbatches, _rank_window
+from laya_multimodal._qwen_training import qwen_training_delta
+from laya_multimodal.multimodal import MultimodalAgent
+from laya_multimodal.multimodal_calibration import (fit_ordinal_calibration, ordinal_probabilities,
                                         validate_ordinal_calibration)
-from laya.multimodal_train import metrics
+from laya_multimodal.multimodal_train import metrics
 from test_multimodal import tiny_agent
 
 
@@ -270,13 +270,13 @@ def test_real_native_qwen_vision_reuse_preserves_full_sequence_logits(kind):
     from test_decision_backbones import tiny_qwen_config
     Qwen3_5ForConditionalGeneration = pytest.importorskip(
         "transformers.models.qwen3_5.modeling_qwen3_5").Qwen3_5ForConditionalGeneration
-    from laya.multimodal_readout import CandidateScorer
+    from laya_multimodal.multimodal_readout import CandidateScorer
     torch.manual_seed(105)
     torch.set_num_threads(1)
     agent = tiny_agent()
     agent.model = Qwen3_5ForConditionalGeneration(tiny_qwen_config()).eval()
     agent.model.decision_scorer = CandidateScorer(32, 16).eval()
-    from laya.grounding import GroundingHead
+    from laya_multimodal.grounding import GroundingHead
     agent.model.grounding_head = GroundingHead(32, 16, 1, "single-v1").eval()
     agent.model_type, agent.readout = "qwen3_5", "candidate"
     token = 120 if kind == "image" else 121

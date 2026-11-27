@@ -2,8 +2,8 @@
 import torch
 import pytest
 
-from laya.multimodal_readout import CandidateScorer,candidate_positions
-from laya.multimodal_train import collate_multimodal_inputs
+from laya_multimodal.multimodal_readout import CandidateScorer,candidate_positions
+from laya_multimodal.multimodal_train import collate_multimodal_inputs
 
 
 def test_candidate_positions_follow_media_expansion():
@@ -88,7 +88,7 @@ def test_shared_scorer_supports_77_candidates_and_masks_padding():
 def test_native_candidate_logits_preserve_scores_and_training_gradients(dtype,gradients):
     import copy
     from types import SimpleNamespace
-    from laya.multimodal import MultimodalAgent
+    from laya_multimodal.multimodal import MultimodalAgent
     torch.manual_seed(31);torch.set_num_threads(1)
     original=CandidateScorer(16,8);actual_head=copy.deepcopy(original)
     hidden=torch.randn(2,7,16,dtype=dtype,requires_grad=gradients)
@@ -115,7 +115,7 @@ def test_native_candidate_logits_preserve_scores_and_training_gradients(dtype,gr
 def test_predecoded_video_preserves_official_sample_timestamps(tmp_path):
     import json
     Image = pytest.importorskip('PIL.Image')
-    from laya.multimodal import MultimodalAgent
+    from laya_multimodal.multimodal import MultimodalAgent
     path=tmp_path/'one.png';Image.new('RGB',(32,32),(12,34,56)).save(path)
     sequence=tmp_path/'clip.frames.json'
     sequence.write_text(json.dumps({'format':'laya_video_frames_v1','paths':[str(path),str(path)],
@@ -129,7 +129,7 @@ def test_real_processor_pads_multiple_audio_segments_when_cached(tmp_path):
     import numpy as np
     from pathlib import Path
     from transformers import AutoProcessor
-    from laya.multimodal import MultimodalAgent
+    from laya_multimodal.multimodal import MultimodalAgent
     cache=Path('models/gemma-4-E2B-it')
     if not cache.is_dir():pytest.skip('optional local Gemma processor is absent')
     sf = pytest.importorskip('soundfile')

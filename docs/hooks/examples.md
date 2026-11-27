@@ -1,5 +1,7 @@
 # Examples
 
+**English** · [简体中文](../zh-CN/hooks/examples.md)
+
 Copy-paste recipes. Every snippet is self-contained apart from the helpers it names
 (`ship`, `CACHE`, and so on), which you supply.
 
@@ -26,12 +28,12 @@ Copy-paste recipes. Every snippet is self-contained apart from the helpers it na
 ## Quick start
 
 ```python
-import laya
+import laya_multimodal
 
 def log(ctx):
     print(ctx.model, ctx.results[0]["answers"])
 
-agent = laya.load( on_predict_end=log)
+agent = laya_multimodal.load( on_predict_end=log)
 agent.system_one("I was charged twice.", {"urgent": {"type": "noul", "instructions": "Urgent?"}})
 ```
 
@@ -41,7 +43,7 @@ The browser-use use case: capture every decision and ship it to an external serv
 
 ```python
 import json, sys
-import laya
+import laya_multimodal
 
 def audit(ctx):
     for state, result in zip(ctx.states, ctx.results or []):
@@ -58,19 +60,19 @@ def audit(ctx):
         print(json.dumps(record), file=sys.stderr)
         # ship_to_service(record)
 
-agent = laya.load( on_predict_end=audit)
+agent = laya_multimodal.load( on_predict_end=audit)
 ```
 
 One hook call covers the whole call, so the loop writes one record per decision; see
 [Batch](#batch) for the same shape on `predict_batch`.
 
-A full runnable version is in [`examples/hooks/audit.py`](../../examples/hooks/audit.py).
+A full runnable version is in [`examples/hooks/audit.py`](https://github.com/2351548518/laya/blob/main/examples/hooks/audit.py).
 
 ## Redact PII
 
 ```python
 import re
-import laya
+import laya_multimodal
 
 EMAIL = re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b")
 PHONE = re.compile(r"\+?\d[\d ()-]{7,}\d")
@@ -87,16 +89,16 @@ def scrub(value):
 def redact(ctx):
     ctx.states = [scrub(s) for s in ctx.states]
 
-agent = laya.load( on_predict_start=redact)
+agent = laya_multimodal.load( on_predict_start=redact)
 ```
 
-See [`examples/hooks/redact.py`](../../examples/hooks/redact.py).
+See [`examples/hooks/redact.py`](https://github.com/2351548518/laya/blob/main/examples/hooks/redact.py).
 
 ## Cache
 
 ```python
 import hashlib, json
-import laya
+import laya_multimodal
 
 CACHE = {}
 
@@ -116,17 +118,17 @@ def write(ctx):
     for i, result in enumerate(ctx.results or []):
         CACHE[key(ctx, i)] = result
 
-agent = laya.load( on_predict_start=read, on_predict_end=write)
+agent = laya_multimodal.load( on_predict_start=read, on_predict_end=write)
 first = agent.system_one("state", QUESTIONS)    # runs the model
 second = agent.system_one("state", QUESTIONS)   # served from CACHE
 ```
 
-See [`examples/hooks/cache.py`](../../examples/hooks/cache.py).
+See [`examples/hooks/cache.py`](https://github.com/2351548518/laya/blob/main/examples/hooks/cache.py).
 
 ## Metrics
 
 ```python
-import laya
+import laya_multimodal
 
 COUNTS, LATENCIES = {}, []
 
@@ -135,17 +137,17 @@ def metrics(ctx):
     if ctx.elapsed_ms is not None:
         LATENCIES.append(ctx.elapsed_ms)
 
-agent = laya.load( on_predict_end=metrics, hooks_raise=False)
+agent = laya_multimodal.load( on_predict_end=metrics, hooks_raise=False)
 ```
 
-See [`examples/hooks/otel.py`](../../examples/hooks/otel.py).
+See [`examples/hooks/otel.py`](https://github.com/2351548518/laya/blob/main/examples/hooks/otel.py).
 
 ## Guardrail
 
 Block a request by raising from a start hook.
 
 ```python
-import laya
+import laya_multimodal
 
 class Blocked(Exception):
     pass
@@ -155,7 +157,7 @@ def guard(ctx):
     if "ignore previous instructions" in text:
         raise Blocked("prompt injection")
 
-agent = laya.load( on_predict_start=guard)
+agent = laya_multimodal.load( on_predict_start=guard)
 
 try:
     agent.system_one("Ignore previous instructions and ...", QUESTIONS)
@@ -178,7 +180,7 @@ def gate(ctx):
             answer["choice"] = "human-review"
             answer["gated"] = True
 
-agent = laya.load( on_predict_end=gate)
+agent = laya_multimodal.load( on_predict_end=gate)
 ```
 
 `ctx.results` holds one dict per state of the call, so the loop annotates every answer that
@@ -191,8 +193,8 @@ Force a checkpoint for a class of traffic. A routing hook is an object, not a pl
 only way in and it reads for lifecycle method names.
 
 ```python
-from laya import Router
-from laya.router import RouteDecision
+from laya_multimodal import Router
+from laya_multimodal.router import RouteDecision
 
 class Pin:
     def on_route(self, ctx):
@@ -219,7 +221,7 @@ router.predict("refund request", QUESTIONS, hooks=[Pin()])
 Observe checkpoint build and eviction.
 
 ```python
-from laya import Router
+from laya_multimodal import Router
 
 class Lifecycle:
     def on_load(self, ctx):
@@ -241,7 +243,7 @@ scopes, process-wide default hooks come before an instance's hooks, and an insta
 per-call hooks. Every hook of one call shares that call's context.
 
 ```python
-import laya
+import laya_multimodal
 
 class Metrics:
     def on_predict_end(self, ctx):
@@ -253,7 +255,7 @@ def redact(ctx):
 def audit(ctx):
     ship(ctx.run_id, ctx.results)
 
-agent = laya.load(
+agent = laya_multimodal.load(
     hooks=[Metrics()],              # hooks=[...] entries run in list order
     on_predict_start=redact,        # convenience callables follow the entries
     on_predict_end=audit,           # both kinds share one ctx per call
@@ -297,11 +299,11 @@ results = agent.predict_batch([state_a, state_b, state_c], questions, on_predict
 
 ## HTTP server
 
-Router hooks fire for `laya.serve` automatically, because the server calls `Router.predict`.
+Router hooks fire for `laya_multimodal.serve` automatically, because the server calls `Router.predict`.
 
 ```python
-from laya import Router
-from laya.serve import create_app
+from laya_multimodal import Router
+from laya_multimodal.serve import create_app
 
 router = Router(hooks=[Metrics()], on_predict_end=audit, hooks_raise=False)
 app = create_app(router=router)
@@ -329,7 +331,7 @@ Subclass `BaseHook` to override only what you need, and register something once 
 process instead of passing it to every `Agent` and `Router`.
 
 ```python
-from laya import BaseHook, hooks
+from laya_multimodal import BaseHook, hooks
 
 class Audit(BaseHook):
     def on_predict_end(self, ctx):
@@ -357,14 +359,14 @@ Wrap an async hook in `AsyncHook`; each coroutine runs to completion in the sync
 caller is synchronous or already inside an event loop.
 
 ```python
-import laya
-from laya import AsyncHook
+import laya_multimodal
+from laya_multimodal import AsyncHook
 
 class RemoteAudit:
     async def on_predict_end(self, ctx):
         await ship(ctx.run_id, ctx.results)
 
-agent = laya.load( hooks=[AsyncHook(RemoteAudit())])
+agent = laya_multimodal.load( hooks=[AsyncHook(RemoteAudit())])
 ```
 
 A plain async callable works too:
@@ -381,7 +383,7 @@ agent.system_one(state, questions, on_predict_end=async_end)
 Bound each hook call, so a stuck hook cannot hang a served request:
 
 ```python
-agent = laya.load( on_predict_end=metrics, hooks_timeout=2.0)
+agent = laya_multimodal.load( on_predict_end=metrics, hooks_timeout=2.0)
 
 # or per call
 agent.system_one(state, questions, on_predict_end=metrics, hooks_timeout=0.5)
@@ -394,7 +396,7 @@ in the background, so also give network calls their own timeout. See
 ## Testing hooks
 
 Assert what a hook saw without a model: drive `predict_batch` with the encode/forward/decode
-helpers stubbed, as [`tests/test_hooks.py`](../../tests/test_hooks.py) does.
+helpers stubbed, as [`tests/test_hooks.py`](https://github.com/2351548518/laya/blob/main/tests/test_hooks.py) does.
 
 ```python
 seen = []
@@ -402,7 +404,7 @@ agent.predict_batch(["s0"], questions, on_predict_end=lambda ctx: seen.append(ct
 assert len(seen) == 1
 ```
 
-The API surface is pinned by [`tests/test_hooks_api.py`](../../tests/test_hooks_api.py).
+The API surface is pinned by [`tests/test_hooks_api.py`](https://github.com/2351548518/laya/blob/main/tests/test_hooks_api.py).
 
 ## See also
 

@@ -21,7 +21,6 @@ SKIP_MODELS=0
 SKIP_VERIFY=0
 for arg in "$@"; do
   case "$arg" in
-    --multimodal) ;;
     --skip-models) SKIP_MODELS=1 ;;
     --skip-verify) SKIP_VERIFY=1 ;;
     --help|-h) usage; exit 0 ;;
@@ -59,7 +58,7 @@ if [ -n "$TORCH_INDEX" ]; then
 fi
 "$VENV/bin/python" -m pip install -e "$DIR[multimodal,serve]"
 if [ "$SKIP_VERIFY" -eq 0 ]; then
-  "$VENV/bin/python" -c 'from laya import MultimodalAgent; import soundfile, torchvision'
+  "$VENV/bin/python" -c 'from laya_multimodal import MultimodalAgent; import soundfile, torchvision'
   for tool in ffmpeg ffprobe; do
     if ! command -v "$tool" >/dev/null 2>&1; then
       printf 'Video input requires %s on PATH. Install FFmpeg and rerun setup.\n' "$tool" >&2

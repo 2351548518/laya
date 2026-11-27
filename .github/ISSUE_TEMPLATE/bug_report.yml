@@ -25,9 +25,9 @@ body:
       description: The smallest script or sequence that shows the problem.
       render: python
       placeholder: |
-        import laya
+        import laya_multimodal
 
-        agent = laya.load("./my-native-checkpoint", device="cpu")
+        agent = laya_multimodal.load("./my-native-checkpoint", device="cpu")
         questions = {"refund": {"type": "noul", "instructions": "Is this a refund request?"}}
         print(agent.predict("I was billed twice. Please refund the duplicate charge.", questions))
     validations:
@@ -46,7 +46,7 @@ body:
     id: laya-version
     attributes:
       label: Laya version
-      description: The output of `python -c "import laya; print(laya.__version__)"`.
+      description: The output of `python -c "import laya_multimodal; print(laya_multimodal.__version__)"`.
     validations:
       required: true
 

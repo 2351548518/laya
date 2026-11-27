@@ -1,6 +1,8 @@
 # Native media from Python and TypeScript
 
-Run `laya-serve` with a trained native checkpoint. The Python and TypeScript SDKs send file
+**English** · [简体中文](zh-CN/multimodal-clients.md)
+
+Run `laya-multimodal-serve` with a trained native checkpoint. The Python and TypeScript SDKs send file
 bytes to `POST /v1/multimodal`. Their image asset methods use `POST /v1/systemone`.
 
 ## Start the service
@@ -11,7 +13,7 @@ Use the downloaded checkpoint and run these commands from the repository root.
 ```sh
 python -m pip install -e '.[multimodal,serve]'
 LAYA_HOST=127.0.0.1 LAYA_PRELOAD=0 \
-  LAYA_MULTIMODAL_MODEL="$PWD/models/jev-multimodal-qwen3.5-4b" laya-serve
+  LAYA_MULTIMODAL_MODEL="$PWD/models/jev-multimodal-qwen3.5-4b" laya-multimodal-serve
 ```
 
 The first request loads the checkpoint when `LAYA_PRELOAD=0`. If you set `LAYA_API_KEY`,
@@ -21,12 +23,12 @@ On Windows PowerShell, select your checkpoint and start the launcher.
 
 ```powershell
 $env:LAYA_MULTIMODAL_MODEL = "$PWD\models\jev-multimodal-qwen3.5-4b"
-.\start.bat --multimodal
+.\start.bat
 ```
 
 The launcher uses `.venv-mm` and installs CPU PyTorch on first use. Set `TORCH_INDEX_URL` before
 creating the environment to choose a different PyTorch wheel index. Use
-`.\start.bat --multimodal 8080` for a different port.
+`.\start.bat 8080` for a different port.
 
 ## Python
 
@@ -113,8 +115,8 @@ const result = await client.predictImageAssets(
 );
 ```
 
-Use PNG or JPEG images with each side between 280 and 1,568 pixels. A Box answer can carry
-null confidence when the server does not report localization quality. [System One HTTP contract](http-api.md)
+A Box answer can carry null confidence when the server omits localization quality.
+[System One HTTP contract](http-api.md)
 
 ## HTTP without an SDK
 

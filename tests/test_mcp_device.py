@@ -1,4 +1,4 @@
-"""LAYA_DEVICE normalisation *and* parseability: the laya.mcp.device env contract.
+"""LAYA_DEVICE normalisation *and* parseability: the laya_multimodal.mcp.device env contract.
 
 The variable is read once, in `env_device`, and the same string is handed to torch
 (``Router(device=...)``) and reported by `resolve_device` / `laya_status`. Case and
@@ -35,7 +35,7 @@ except ImportError:
     print("SKIP: torch not importable, so there is no device parser to check")
     sys.exit(0)
 
-from laya.mcp.device import agent_device, env_device, resolve_device  # noqa: E402
+from laya_multimodal.mcp.device import agent_device, env_device, resolve_device  # noqa: E402
 
 PASS, FAIL = [], []
 

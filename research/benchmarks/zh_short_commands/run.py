@@ -68,7 +68,7 @@ def stub_logits(cases):
 def choice_records(config, cases, logits, agent):
     """One record per case, in the shape laya_eval.py emits."""
     import numpy as np
-    from laya.common import QTYPES
+    from laya_multimodal.common import QTYPES
 
     gold_index = [prompts.LABELS.index(c["gold"]) for c in cases]
     confidences, corrects, preds, records = [], [], [], []
@@ -112,7 +112,7 @@ def choice_records(config, cases, logits, agent):
 def noul_records(config, cases, logits, agent):
     """One record per (case, dimension); accuracy is per dimension, not top-1."""
     import numpy as np
-    from laya.common import QTYPES
+    from laya_multimodal.common import QTYPES
 
     dims = prompts.NOUL_DIMENSIONS
     questions = prompts.noul_questions(config)
@@ -175,12 +175,12 @@ def checkpoint_provenance(args, agent):
 
     import torch
     import transformers
-    import laya
+    import laya_multimodal
     from pathlib import Path
 
     revision = agent.checkpoint_revision
     info.update(revision=revision, torch=torch.__version__, transformers=transformers.__version__,
-                laya=laya.__version__)
+                laya_multimodal=laya_multimodal.__version__)
     path = Path(args.checkpoint).expanduser()
     if revision and not path.is_dir():
         from huggingface_hub import snapshot_download
@@ -220,13 +220,13 @@ def main(argv=None) -> int:
     cases = load_cases()
     print("cases: %d  configs: %s" % (len(cases), ", ".join(configs)))
 
-    from laya.revisions import default_checkpoint
+    from laya_multimodal.revisions import default_checkpoint
 
     args.checkpoint = args.checkpoint or default_checkpoint()
     agent = None
     if not args.stub:
-        import laya
-        agent = laya.load(args.checkpoint, device=args.device)
+        import laya_multimodal
+        agent = laya_multimodal.load(args.checkpoint, device=args.device)
 
     report, summary = {}, {}
     for config in configs:

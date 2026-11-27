@@ -90,7 +90,7 @@ DEFERRAL = re.compile(r'(?P<topics>[A-Za-z0-9 ,&/]+?)\s+(?:is|are) in the\s+'
 
 # What may sit between a backticked symbol and the citation after it. Punctuation and spacing
 # cover both live idioms -- "`Foo.bar` (`file:12`)" and "`Foo.bar`, (`file:12`)" -- and the
-# connectors cover "`Router.predict_batch` -- see laya/router.py:961". Longer than that is a new
+# connectors cover "`Router.predict_batch` -- see laya_multimodal/router.py:961". Longer than that is a new
 # clause, and binding across a clause is how a checker starts inventing violations.
 GAP_LIMIT = 24
 CONNECTORS = {"see", "via", "at", "in", "as", "is", "where", "shows", "says", "and"}
@@ -101,7 +101,7 @@ SKIP_DIRS = {".git", ".venv", ".venv-mm", "node_modules", "__pycache__", "dist",
 
 
 def target_of(cited: str) -> Optional[str]:
-    """Resolve a cited path in the tree, tolerating the ``laya/x.py`` and ``x.py`` spellings."""
+    """Resolve a cited path in the tree, tolerating the ``laya_multimodal/x.py`` and ``x.py`` spellings."""
     for cand in ({cited, cited.split("/", 1)[-1]} if "/" in cited else {cited}):
         if cand.endswith(".py") and os.path.isfile(os.path.join(ROOT, cand.replace("/", os.sep))):
             return cand
@@ -112,7 +112,7 @@ def text_files() -> List[str]:
     listed = []
     if os.path.exists(os.path.join(ROOT, ".git")):
         try:
-            listed = subprocess.check_output(["git", "-C", ROOT, "ls-files", "-z"],
+            listed = subprocess.check_output(["git", "-C", ROOT, "ls-files", "-c", "-o", "--exclude-standard", "-z"],
                                              stderr=subprocess.DEVNULL, text=True).split("\0")
         except (OSError, subprocess.SubprocessError):
             pass
@@ -150,11 +150,11 @@ def positive_controls() -> None:
     """Prove the two detectors fire, against a symbol read from the tree rather than a literal.
 
     Without this, a checker that always returns "fine" passes exactly as loudly as one that works.
-    The spans come from `laya/agent.py` as it is now, so the fixtures cannot themselves go stale.
+    The spans come from `laya_multimodal/agent.py` as it is now, so the fixtures cannot themselves go stale.
     """
-    fn = [s for s in symbols("laya/agent.py") if s.name == "_to_internal"]
+    fn = [s for s in symbols("laya_multimodal/agent.py") if s.name == "_to_internal"]
     check_true("the control has a function to cite", bool(fn),
-               "no `_to_internal` in laya/agent.py")
+               "no `_to_internal` in laya_multimodal/agent.py")
     if not fn:
         return
     first, last = fn[0].start, fn[0].end
@@ -173,22 +173,22 @@ def positive_controls() -> None:
     check_true("control: a fragment of the function is still accepted",
                cites_inside(first + 1, first + 3, fn), "%d-%d rejected" % (first + 1, first + 3))
 
-    stale = "`Agent._to_internal` (`laya/agent.py:%d`)" % (last + 300)
-    got = bound_symbol(stale, stale.index("laya/agent.py"))
+    stale = "`Agent._to_internal` (`laya_multimodal/agent.py:%d`)" % (last + 300)
+    got = bound_symbol(stale, stale.index("laya_multimodal/agent.py"))
     check_true("control: the `symbol` (`file:NNN`) idiom binds",
                got == "Agent._to_internal", got)
     far = ("`Agent._to_internal` is the function that normalizes instructions before hashing, "
-           "and it lives at (`laya/agent.py:%d`)" % last)
-    got = bound_symbol(far, far.index("laya/agent.py"))
+           "and it lives at (`laya_multimodal/agent.py:%d`)" % last)
+    got = bound_symbol(far, far.index("laya_multimodal/agent.py"))
     check_true("control: a citation two clauses away does not bind", got is None, got)
-    form = "`laya/agent.py::Agent._to_internal`"
+    form = "`laya_multimodal/agent.py::Agent._to_internal`"
     got = bound_symbol(form, form.index("Agent._to_internal"))
     check_true("control: a `::` citation is not read as a line citation", got is None, got)
 
     # The window itself, isolated: a gap of nothing but punctuation is still a gap of 31, and the
     # arm that only checks words-in-the-gap would bind here and call a distant symbol the subject.
-    padded = "`Agent._to_internal`" + ("-" * 30) + "(`laya/agent.py:%d`)" % last
-    got = bound_symbol(padded, padded.index("laya/agent.py"))
+    padded = "`Agent._to_internal`" + ("-" * 30) + "(`laya_multimodal/agent.py:%d`)" % last
+    got = bound_symbol(padded, padded.index("laya_multimodal/agent.py"))
     check_true("control: a symbol 31 punctuation marks away is not the citation's subject",
                got is None, got)
 
@@ -229,7 +229,7 @@ def main() -> int:
     positive_controls()
     landing_page()
     files = text_files()
-    expected = {"README.md", "docs/index.md", "laya/multimodal.py", "scripts/multimodal/train.py",
+    expected = {"README.md", "docs/index.md", "laya_multimodal/multimodal.py", "scripts/multimodal/train.py",
                 "examples/native_multimodal.py", "research/README.md", "benchmarks/README.md",
                 "sdk/python/README.md", "sdk/typescript/README.md", "tests/test_hooks_api.py"}
     missing = sorted(expected.difference(files))

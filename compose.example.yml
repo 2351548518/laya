@@ -1,6 +1,6 @@
 # Mount one-shot request data and media together. Request paths use /inputs inside the container.
 services:
-  laya:
+  laya-multimodal:
     environment:
       LAYA_REQUEST_FILE: "${LAYA_REQUEST_FILE:-/inputs/request.json}"
     volumes:

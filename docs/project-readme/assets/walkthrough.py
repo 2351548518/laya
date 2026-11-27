@@ -9,13 +9,13 @@ import sys
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from laya.common import QTYPES
-from laya.grounding import GroundingHead, grounding_loss, validate_boxes
-from laya.multimodal import MultimodalAgent
-from laya.multimodal_data import normalize_record, record_modality
-from laya.multimodal_objectives import decision_loss
-from laya.multimodal_readout import CandidateScorer
-from laya.train import decision_target
+from laya_multimodal.common import QTYPES
+from laya_multimodal.grounding import GroundingHead, grounding_loss, validate_boxes
+from laya_multimodal.multimodal import MultimodalAgent
+from laya_multimodal.multimodal_data import normalize_record, record_modality
+from laya_multimodal.multimodal_objectives import decision_loss
+from laya_multimodal.multimodal_readout import CandidateScorer
+from laya_multimodal.train import decision_target
 
 
 def check_examples(directory):

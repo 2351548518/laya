@@ -10,8 +10,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import laya.integrations.langchain as langchain_module
-from laya.integrations.langchain import (
+import laya_multimodal.integrations.langchain as langchain_module
+from laya_multimodal.integrations.langchain import (
     _RUNNABLE_AVAILABLE,
     LayaEvaluator,
     LayaGuardrail,
@@ -736,9 +736,9 @@ else:
 
 
 # --------------------------------------------------------------- 6. LayaDecision
-from laya.integrations import langchain as langchain_module  # noqa: E402
-from laya.integrations.langchain import LayaDecision  # noqa: E402
-from laya.structured import DecisionResult, SchemaError, decide  # noqa: E402
+from laya_multimodal.integrations import langchain as langchain_module  # noqa: E402
+from laya_multimodal.integrations.langchain import LayaDecision  # noqa: E402
+from laya_multimodal.structured import DecisionResult, SchemaError, decide  # noqa: E402
 
 DECISION_SCHEMA = {
     "type": "object",
@@ -788,8 +788,8 @@ check("decision/boolean planned as noul", asked["needs_human"]["type"], "noul")
 check("decision/state extracted", decision_agent.calls[0]["state"],
       "I was billed twice, is anyone going to help?")
 
-# The runnable is `laya.decide` over the same runner: byte-identical output is the contract.
-check("decision/parity with laya.decide", decision.invoke("some text"),
+# The runnable is `laya_multimodal.decide` over the same runner: byte-identical output is the contract.
+check("decision/parity with laya_multimodal.decide", decision.invoke("some text"),
       decide(decision_agent, "some text", schema=DECISION_SCHEMA))
 
 details = LayaDecision(DECISION_SCHEMA, return_details=True, agent=RecordingAgent()).invoke("x")
@@ -832,12 +832,12 @@ def fake_call_remote(base_url, state, questions, api_key=None, model=None):
 _real_call_remote = langchain_module._call_remote
 langchain_module._call_remote = fake_call_remote
 try:
-    remote_decision = LayaDecision(DECISION_SCHEMA, base_url="http://laya:8000", api_key="k", model="laya")
+    remote_decision = LayaDecision(DECISION_SCHEMA, base_url="http://laya:8000", api_key="k", model="multimodal")
     check("decision/remote values", remote_decision.invoke({"query": "billed twice"}), values)
     check("decision/remote one call", len(remote_calls), 1)
     check("decision/remote endpoint", remote_calls[0]["base_url"], "http://laya:8000")
     check("decision/remote credentials", remote_calls[0]["api_key"], "k")
-    check("decision/remote model", remote_calls[0]["model"], "laya")
+    check("decision/remote model", remote_calls[0]["model"], "multimodal")
     check("decision/remote questions", sorted(remote_calls[0]["questions"]),
           ["department", "needs_human", "urgency"])
 finally:
@@ -861,9 +861,9 @@ finally:
 # decision could not widen its own window or attach the cache/audit hook its siblings can. These
 # checks drive the whole control family through the bypass and read it back off the runner.
 import inspect  # noqa: E402
-from laya.agent import Agent  # noqa: E402
-from laya.integrations import _controls  # noqa: E402
-from laya.router import Router  # noqa: E402
+from laya_multimodal.agent import Agent  # noqa: E402
+from laya_multimodal.integrations import _controls  # noqa: E402
+from laya_multimodal.router import Router  # noqa: E402
 
 DECISION_ALL_CONTROLS = {"max_len": 1024, "head_max_len": 512, "hooks": ["H"],
                          "on_predict_start": "S", "on_predict_end": "E",
@@ -982,7 +982,7 @@ try:
           {"model": None, "max_len": 1024, "head_max_len": 384})
     LayaDecision(DECISION_SCHEMA, base_url="http://laya:8000").invoke("x")
     check("decision/remote omits an unset budget", _dremote[-1], {"model": None})
-    # Both routing hints are laya-serve body controls too, so they ride in the same JSON, and a
+    # Both routing hints are laya-multimodal-serve body controls too, so they ride in the same JSON, and a
     # blank `lang_guess` is core's documented "fall through to detection" rather than an absence.
     LayaDecision(DECISION_SCHEMA, base_url="http://laya:8000",
                  task="typed-decisions", lang_guess="de").invoke("x")
@@ -1003,12 +1003,12 @@ try:
     check_true("decision/remote callable lang_guess names itself",
                "lang_guess" in _dcallable_message)
     check_true("decision/remote callable lang_guess names the endpoint",
-               "laya-serve" in _dcallable_message)
+               "laya-multimodal-serve" in _dcallable_message)
     _drefused = False
     try:
         LayaDecision(DECISION_SCHEMA, base_url="http://laya:8000", hooks=[object()]).invoke("x")
     except ValueError as exc:
-        _drefused = "hooks" in str(exc) and "laya-serve" in str(exc)
+        _drefused = "hooks" in str(exc) and "laya-multimodal-serve" in str(exc)
     check_true("decision/remote refuses a hook", _drefused)
 finally:
     langchain_module._call_remote = _dreal
@@ -1056,11 +1056,11 @@ except ImportError:
     PASS.append("decision/lcel skipped (langchain-core not installed)")
 
 # Exported from the package the way the other integration nodes are.
-import laya  # noqa: E402
-from laya.integrations import __all__ as integrations_all  # noqa: E402
+import laya_multimodal  # noqa: E402
+from laya_multimodal.integrations import __all__ as integrations_all  # noqa: E402
 
-check("decision/laya attribute", laya.LayaDecision, LayaDecision)
-check_true("decision/in laya.__all__", "LayaDecision" in laya.__all__)
+check("decision/laya attribute", laya_multimodal.LayaDecision, LayaDecision)
+check_true("decision/in laya_multimodal.__all__", "LayaDecision" in laya_multimodal.__all__)
 check_true("decision/in integrations.__all__", "LayaDecision" in integrations_all)
 
 
@@ -1124,7 +1124,7 @@ for name, build in BUDGET_NODES:
           {"model": "laya-multilingual", "head_max_len": 256})
 
 
-# `laya-serve` accepts `max_len` / `head_max_len` (#566), so a remote node forwards the override
+# `laya-multimodal-serve` accepts `max_len` / `head_max_len` (#566), so a remote node forwards the override
 # in the request body instead of dropping it.
 budget_remote_calls = []
 _budget_real_call_remote = langchain_module._call_remote
@@ -1186,14 +1186,14 @@ finally:
 # --------------------------------------------------------------- 7b. Per-request lang / abstention
 #
 # `lang` and `min_confidence` are core's language routing and abstention gate (#361). Both are
-# read by `Agent.predict`/`system_one` AND `Router.predict`, and both are laya-serve
+# read by `Agent.predict`/`system_one` AND `Router.predict`, and both are laya-multimodal-serve
 # `BODY_CONTROLS`, so they are safe to forward on the local and the remote path alike -- unlike
 # `task` / `lang_guess`, which are Router-only. A wrapper that drops them cannot route a
 # non-English state or measure the abstention gate it is supposed to honor.
-from laya.integrations import _controls  # noqa: E402
+from laya_multimodal.integrations import _controls  # noqa: E402
 import inspect  # noqa: E402
-from laya.agent import Agent  # noqa: E402
-from laya.router import Router  # noqa: E402
+from laya_multimodal.agent import Agent  # noqa: E402
+from laya_multimodal.router import Router  # noqa: E402
 
 DECISION_CRITERIA = {"billing": "invoices", "tech": "bugs"}
 DECISION_NODES = (
@@ -1298,8 +1298,7 @@ finally:
 
 
 # --------------------------------------------------------------- 7. Prediction hooks
-from laya.integrations import langchain as langchain_module  # noqa: E402
-from laya.hooks import PredictContext  # noqa: E402
+from laya_multimodal.integrations import langchain as langchain_module  # noqa: E402
 
 
 class HookAgent:
@@ -1366,8 +1365,8 @@ for name, build in HOOK_NODES:
 # core instead of at the call site. Whether the hooks then run is core's contract, pinned by
 # tests/test_hooks.py; a mock runner that ignores its kwargs could not prove it either way.
 import inspect  # noqa: E402
-from laya.agent import Agent  # noqa: E402
-from laya.router import Router  # noqa: E402
+from laya_multimodal.agent import Agent  # noqa: E402
+from laya_multimodal.router import Router  # noqa: E402
 
 agent_params = set(inspect.signature(Agent.system_one).parameters)
 router_params = set(inspect.signature(Router.predict).parameters)
@@ -1378,7 +1377,7 @@ for param in ALL_HOOK_KWARGS:
 
 # --------------------------------------------------------------- 7c. The control family, derived
 #
-# `laya/integrations/_controls.py` says the shared tuples are checked by this suite and that this
+# `laya_multimodal/integrations/_controls.py` says the shared tuples are checked by this suite and that this
 # suite asserts every wrapper's constructor accepts all of them. The two literals above name the
 # controls by copying them, so neither half happens here: tests/test_crewai.py and
 # tests/test_llamaindex.py read their control set out of the module, which makes a control added
@@ -1453,14 +1452,14 @@ try:
             raised, message = True, str(e)
         check_true("hooks/remote refuses %s" % param, raised)
         check_true("hooks/remote %s names itself" % param, param in message)
-        check_true("hooks/remote %s names the endpoint" % param, "laya-serve" in message)
+        check_true("hooks/remote %s names the endpoint" % param, "laya-multimodal-serve" in message)
     check("hooks/remote made no extra call", len(remote_hook_calls), 1)
 finally:
     langchain_module._call_remote = _real_call_remote
 
 
 # ------------------------------------ 8. The two Router-only routing hints, on every entry point
-from laya.integrations import _controls as controls_module  # noqa: E402
+from laya_multimodal.integrations import _controls as controls_module  # noqa: E402
 
 ROUTER_HINTS = tuple(controls_module.ROUTER_ONLY_CONTROLS)
 
@@ -1573,8 +1572,8 @@ for cls in (LayaRouter, LayaGuardrail, LayaTriage, LayaEvaluator, LayaDecision):
         check_true("routing/%s declares %s as a field" % (cls.__name__, _c),
                    _c in cls.__annotations__)
 
-# The remote path: both hints are laya-serve body controls, so they ride in the JSON, and a blank
-# one stays in it. `LayaDecision` bypasses `_execute_decision` and calls `laya.decide` against a
+# The remote path: both hints are laya-multimodal-serve body controls, so they ride in the JSON, and a blank
+# one stays in it. `LayaDecision` bypasses `_execute_decision` and calls `laya_multimodal.decide` against a
 # schema, so its own remote body is checked in section 6b.
 remote_routing_calls = []
 _real_remote = langchain_module._call_remote
@@ -1613,7 +1612,7 @@ try:
               remote_routing_calls[-1], {"lang_guess": ""})
 
         # A `lang_guess` may also be a callable taking the state, and only the code string has a
-        # wire form: `laya-serve` validates it as a string and answers 422 to anything else, so the
+        # wire form: `laya-multimodal-serve` validates it as a string and answers 422 to anything else, so the
         # callable would fail as an HTTP status after the request had already gone out.
         raised, message = False, ""
         try:
@@ -1623,7 +1622,7 @@ try:
         check_true("routing/%s remote refuses a callable lang_guess" % name, raised)
         check_true("routing/%s callable lang_guess names itself" % name, "lang_guess" in message)
         check_true("routing/%s callable lang_guess names the endpoint" % name,
-                   "laya-serve" in message)
+                   "laya-multimodal-serve" in message)
     check("routing/remote made no call for a refused hint", len(remote_routing_calls), 1)
 finally:
     langchain_module._call_remote = _real_remote
@@ -1746,7 +1745,7 @@ except ValueError as exc:
 # multilingual checkpoint for every one of these. The no-hint column is printed, not pinned: it is
 # the current detection heuristic's behaviour, and a run that fixes #54 should move the print, not
 # turn the suite red.
-from laya.router import Router as _RoutingRouter  # noqa: E402
+from laya_multimodal.router import Router as _RoutingRouter  # noqa: E402
 
 _DE_NO_DIACRITICS = [
     "Zahlung fehlgeschlagen", "Wo finde ich meine Rechnung", "Ich kann mich nicht anmelden",
@@ -1778,7 +1777,7 @@ check("routing/with the de hint no German query is read as English",
 
 # --------------------------------------------------------------- Non-Object Remote Response
 #
-# A remote laya-serve body is arbitrary JSON: a gateway, a mis-pointed `base_url`, or a proxy error
+# A remote laya-multimodal-serve body is arbitrary JSON: a gateway, a mis-pointed `base_url`, or a proxy error
 # page can answer with a top-level array, string, number or `true`/`null`. `json.loads` accepts each
 # of those and the consumers read the result with `result.get("answers", …)`, so before the guard a
 # non-object leaked `AttributeError: 'list' object has no attribute 'get'` past the fail-closed path

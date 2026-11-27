@@ -6,7 +6,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from laya import BaseHook, Router  # noqa: E402
+from laya_multimodal import BaseHook, Router  # noqa: E402
 from test_multimodal import Q, tiny_agent  # noqa: E402
 
 

@@ -1,11 +1,9 @@
 # Staged adoption
 
-Laya returns a typed decision, not permission to execute it. Adopt a decision engine in stages so
-that the application keeps control of the real action while evidence accumulates.
+**English** · [简体中文](zh-CN/staged-adoption.md)
 
-This guide describes the application-side rollout around Laya. Laya supplies the decision,
-probabilities, confidence and hook events; the application owns the incumbent action, rollout
-policy, review boundary and rollback.
+Introduce model decisions in stages. The application keeps control of execution and review
+while the model supplies decisions, probabilities and hook events for comparison.
 
 ## 1. Shadow: observe without side effects
 
@@ -17,11 +15,11 @@ record should contain enough context to reproduce a comparison later:
 - the incumbent action and the eventual reviewed or ground-truth outcome;
 - latency, errors and any fallback or review decision.
 
-Use the existing prediction hooks for Laya-side evidence. The logging functions below are
-application-owned placeholders; they are not Laya APIs:
+Use prediction hooks to collect model evidence. Implement the logging and incumbent handlers
+in your own application.
 
 ```python
-from laya import Router
+from laya_multimodal import Router
 
 class ShadowLog:
     def on_predict_end(self, ctx):
@@ -39,7 +37,7 @@ router = Router(hooks=[ShadowLog()])
 
 def handle(request):
     try:
-        laya_result = router.predict(request.state, request.questions)
+        router.predict(request.state, request.questions)
     except Exception as exc:
         record_laya_failure(request, exc)
         return run_incumbent_action(request)
@@ -78,7 +76,7 @@ owner with the policy. Re-evaluate it when those inputs change. Confidence order
 not establish that a decision is correct, and high confidence is never execution permission by
 itself.
 
-Four of those six come from the evaluation harness: a `laya-evals run --json` report records the
+Four of those six come from the evaluation harness: a `laya-multimodal eval run --json` report records the
 checkpoint commit that answered (`config.revisions`), the dataset's bytes and question schema
 (`config.dataset_sha256`, `config.questions_sha256`) and the gate it was scored under
 (`config.thresholds`). A checkpoint given as a local directory has no commit to name, so its entry in
@@ -86,10 +84,8 @@ that block is `null`. Calibration method and owner are the application's to reco
 [Evaluation harness](evals.md) for the run identity and the comparability check between a baseline
 and a candidate.
 
-The README's [Automated Confidence Gating](https://github.com/NandhaKishorM/laya#automated-confidence-gating),
-[Calibration](https://github.com/NandhaKishorM/laya#calibration), and [Honest limits](https://github.com/NandhaKishorM/laya#honest-limits) sections
-give the existing calibration and confidence context. Keep irreversible or high-cost actions behind
-an explicit review boundary even when their confidence is high.
+Review irreversible or high-cost actions before execution even at high model confidence.
+[Confidence fields](questions-and-answers.md#reading-confidence) · [Native calibration](multimodal.md#calibration-and-evaluation)
 
 ### Attacker-controlled context
 
@@ -156,7 +152,5 @@ real request
   between a baseline and a candidate.
 - [Hook API reference](hooks/api.md) — `PredictContext` fields and lifecycle events.
 - [Tracing](hooks/tracing.md) — `run_id` and span correlation.
-- [README: Automated Confidence Gating](https://github.com/NandhaKishorM/laya#automated-confidence-gating) — confidence is a
-  policy input, not a correctness guarantee.
-- [README: Calibration](https://github.com/NandhaKishorM/laya#calibration) and [Honest limits](https://github.com/NandhaKishorM/laya#honest-limits).
+- [Historical guardrail measurements](guardrail-limitations.md) records the earlier checkpoint results.
 

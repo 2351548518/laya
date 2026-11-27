@@ -5,7 +5,7 @@ experiments belong in the ignored `_local/` workbench.
 
 | Command | Purpose |
 | --- | --- |
-| `train.py` | Checkout entry point for `laya-train`, from head warmup through joint adaptation |
+| `train.py` | Checkout entry point for `laya-multimodal train`, from head warmup through joint adaptation |
 | `monitor_swanlab.py` | Backfill SwanLab metrics from legacy training logs |
 | `calibrate.py` | Fit held-out calibration and check it on independent development records |
 | `prepare_dataset.py` | Convert native JSONL and Kev records to a shared request and supervision layout |
@@ -16,7 +16,7 @@ experiments belong in the ignored `_local/` workbench.
 | `quantize_gguf.py` | Create smaller language GGUFs and a Q8 visual projector; optionally test Q8 head matrices |
 
 Install the native dependencies with `python -m pip install -e '.[multimodal]'`. The runtime
-and training implementation live in `laya/`. Store local checkpoints in `models/` or
+and training implementation live in `laya_multimodal/`. Store local checkpoints in `models/` or
 `multimodal-runs/`. Use a compatible `llama.cpp-jev` checkout built in `build-laya/` for GGUF
 conversion and quantization. [Runtime setup](../../docs/multimodal-release.md#run-the-decision-server)
 

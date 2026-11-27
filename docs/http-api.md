@@ -1,5 +1,7 @@
 # HTTP API
 
+**English** · [简体中文](zh-CN/http-api.md)
+
 `POST /v1/systemone` uses the TypeSafe System One format for text, image decisions and
 single-box localization. The default is the released Qwen3.5-4B decision checkpoint. Set
 `LAYA_MULTIMODAL_MODEL` to choose another trained checkpoint, such as a Gemma model for
@@ -12,10 +14,10 @@ on the server. [Python SDK](https://github.com/2351548518/laya/tree/main/sdk/pyt
 
 ```bash
 python -m pip install -e '.[multimodal,serve]'
-laya-serve            # http://0.0.0.0:8000
+LAYA_HOST=127.0.0.1 laya-multimodal-serve
 ```
 
-The same entry point runs embedded in any ASGI server: `laya.serve.create_app()` builds the FastAPI
+The same entry point runs embedded in any ASGI server: `laya_multimodal.serve.create_app()` builds the FastAPI
 app, optionally with a `Router` you inject (`create_app(router)`) instead of one built from the
 environment.
 
@@ -36,9 +38,9 @@ Everything is environment variables, so one image serves a laptop dev run and a 
 | `LAYA_IDLE_UNLOAD_SECONDS` | unload resident checkpoints after this many idle seconds; the next request loads its checkpoint again. Zero disables unloading | `0` |
 | `LAYA_MAX_LOADED` | checkpoints kept resident at once; a cap below what routing chooses rebuilds one per switch, and `preload()` raises it to hold whatever it builds | `2` |
 | `LAYA_MAX_TOKEN_BUDGET` | server-side ceiling on the per-request `max_len` and `head_max_len` overrides; a larger value is a `422`. Unparseable or non-positive input logs a warning and falls back | `8192` |
-| `LAYA_DEFAULT_MODEL` | default registered checkpoint. `laya` and `default` resolve to `multimodal` | `multimodal` |
+| `LAYA_DEFAULT_MODEL` | default registered checkpoint. `default` resolves to `multimodal` | `multimodal` |
 | `LAYA_EXTRA_MODELS` | JSON object mapping names to local native checkpoint directories or Hub repo IDs | empty |
-| `LAYA_API_KEY` | if set, require `Authorization: Bearer <key>` on every route, and stop serving `/docs`, `/redoc` and `/openapi.json` (FastAPI's own routes, which per-route auth never covered) | none |
+| `LAYA_API_KEY` | require `Authorization: Bearer <key>` on prediction and routing, restrict health details, and disable `/docs`, `/redoc` and `/openapi.json` | none |
 | `LAYA_LOG_LEVEL` | uvicorn log level | `info` |
 | `LAYA_MAX_CONCURRENT` | requests admitted past auth at once; excess gets `503` | `16` |
 | `LAYA_BODY_READ_TIMEOUT` | seconds a request may spend delivering its body before the server answers `408` and releases the admission slot it was holding. Unparseable, non-positive or infinite input falls back | `10` |
@@ -205,7 +207,7 @@ curl -s localhost:8000/v1/systemone -H 'content-type: application/json' -d '{
 |---|---|---|
 | `state` | yes | the one context every question in the request is answered against: text, email, ticket or JSON; a missing or `null` state is a `400` |
 | `questions` | yes | object keyed by question ID. Use `choice`, `score`, `noul`, or `box` with uploaded images |
-| `model` | no | names a checkpoint; a path or unpublished Hub id is a `422`, anything else is ignored (see below) |
+| `model` | no | selects a registered checkpoint or uses the default according to the rules below |
 | `assets` | no | image reference map with inline PNG/JPEG data or multipart file part names |
 | `task` | no | select a registered checkpoint by name when `model` is omitted |
 | `lang` | no | optional language metadata for an attached engine |
@@ -221,11 +223,11 @@ hook arguments `predict` also takes -- `hooks`, `on_predict_start`, `on_predict_
 `hooks_raise`, `hooks_timeout` -- are refused with a `422` rather than dropped: a hook is a callable
 that runs inside the server process, and the last two say how the hooks a deployment installed
 execute, so no value a caller sends has a meaning here. The same five are refused client-side by a
-LangChain node with a `base_url` (`laya.integrations.langchain`), so a chain and a raw HTTP client
+LangChain node with a `base_url` (`laya_multimodal.integrations.langchain`), so a chain and a raw HTTP client
 now get the same answer. Upload images to System One with `assets`. Requests with
 inline `image`, `audio` or `video` fields go to `/v1/multimodal`.
 
-Use `multimodal`, `laya`, `default`, the released checkpoint ID
+Use `multimodal`, `default`, the released checkpoint ID
 `ZeeoRe/jev-multimodal-qwen3.5-4b`, or a name registered in `LAYA_EXTRA_MODELS`.
 Client model IDs such as `jev-1` select the server's default. Arbitrary paths and
 unregistered Hub repo IDs return HTTP 422. Configure checkpoint sources on the service.
@@ -241,12 +243,12 @@ the text in the native model prompt.
 A `box` question needs one distinct referenced image. The response carries `left`, `top`,
 `right` and `bottom` in `[0, 1]` and localization confidence.
 
-~~~bash
+```bash
 curl -fsS http://127.0.0.1:8000/v1/systemone \
   -H 'TypeSafe-Danger-Zone-Images: true' \
   -F 'request={"model":"multimodal","state":{"photo":"scene-ref"},"assets":{"scene-ref":{"type":"image","part":"scene"}},"questions":{"target":{"type":"box","instructions":"Locate the red mug."}}};type=application/json' \
   -F 'scene=@scene.jpg;type=image/jpeg'
-~~~
+```
 
 For JSON uploads, give the asset `format` and `data_base64` instead of `part`. The
 first multipart part is the JSON request and every file part belongs to one asset. Images
@@ -331,7 +333,7 @@ The `answer_confidence` used by the gate is the largest decision probability.
   and `score` answers only (a Jev `noul` answer has no confidence). It uses TypeSafe's own
   formulas: `(p_max - 1/n)/(1 - 1/n)` for `choice`, and for `score` one minus the probability-weighted
   distance from the most likely level, scaled by the same distance for a uniform distribution.
-  The formula is the library's own, not the server's: `laya.jev_confidence(answer)` takes one
+  The formula is the library's own, not the server's: `laya_multimodal.jev_confidence(answer)` takes one
   answer dict -- the shape this route returns and the shape `Agent.predict` returns -- and gives
   the unrounded number, so a caller running Laya in-process filters on the same quantity the
   served field carries without an HTTP round trip.
@@ -398,6 +400,7 @@ state and packs compatible questions within its own token budget.
 |---|---|---|
 | `400` | body is not valid JSON, not an object, has no `questions`, `state` is missing or `null`, `questions` is not an object, or a string anywhere in the body holds an unpaired `\udXXX` surrogate escape | what is wrong |
 | `401` | `LAYA_API_KEY` is set and the bearer token is missing or wrong | `invalid or missing bearer token` |
+| `408` | request body arrived after the configured read deadline | request body read timed out |
 | `413` | any limit above | which limit and by how much |
 | `422` | the question is well-formed JSON but invalid to Laya (unknown type, options over the head budget), or a request control (`lang`, `min_confidence`, a hook argument) is not in the form this endpoint accepts | names the question or the field and what to fix |
 | `500` | inference failed for any other reason | `inference failed` -- always this string, so paths, weights and memory state never leak; the cause is in the server log |

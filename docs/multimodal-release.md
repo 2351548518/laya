@@ -1,8 +1,10 @@
 # Models and GGUF deployment
 
+**English** · [简体中文](zh-CN/multimodal-release.md)
+
 The published checkpoint is the completed Qwen3.5-4B v1 run, trained on text, images and
 visual-only video. The native release has its LoRA merged and contains the trained visual
-merger, candidate scorer and single-box head. Load it with `laya.MultimodalAgent`.
+merger, candidate scorer and single-box head. Load it with `laya_multimodal.MultimodalAgent`.
 [Native model and runtime requirements](https://huggingface.co/ZeeoRe/jev-multimodal-qwen3.5-4b)
 
 ## Select a GGUF pair

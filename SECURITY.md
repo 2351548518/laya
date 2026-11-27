@@ -14,7 +14,7 @@ filenames and the llama.cpp-jev revision. [Model release reference](docs/multimo
 
 ## Reporting a Vulnerability
 
-We appreciate the efforts of security researchers and operators who help keep Laya secure. If you believe you have found a security vulnerability in Laya, `laya-serve`, `laya-ts`, or the official Docker containers, **please do not disclose it in a public GitHub issue, pull request, or discussion.**
+We appreciate the efforts of security researchers and operators who help keep Laya secure. If you believe you have found a security vulnerability in Laya, `laya-multimodal-serve`, `laya-ts`, or the official Docker containers, **please do not disclose it in a public GitHub issue, pull request, or discussion.**
 
 ### Reporting Channels
 
@@ -30,7 +30,7 @@ We appreciate the efforts of security researchers and operators who help keep La
 
 To accelerate triage and verification, please provide:
 - **Vulnerability classification**: (e.g., authentication bypass, denial of service, remote memory exhaustion, unhandled exception crash, path traversal).
-- **Affected component**: (`laya` Python core, `laya.serve`, `laya-ts`, official Docker image, MCP integration).
+- **Affected component**: (`laya_multimodal` Python core, `laya_multimodal.serve`, TypeScript SDK, Docker image, MCP integration).
 - **Affected versions**: Specific commit SHA or release tag (e.g., `v0.5.3`).
 - **Reproduction steps**: A minimal script, curl command, or payload demonstrating the vulnerability.
 - **Impact assessment**: Practical severity, threat model, prerequisites, and realistic exploit scenarios.
@@ -46,7 +46,7 @@ To accelerate triage and verification, please provide:
 
 ## Security Architecture & Operational Hardening
 
-When deploying Laya in production environments (especially when self-hosting `laya-serve` or running on shared hosts), adhere to the following security guidelines:
+When deploying Laya in production environments (especially when self-hosting `laya-multimodal-serve` or running on shared hosts), adhere to the following security guidelines:
 
 ### 1. Model Weights & Supply Chain Integrity
 - **Safe Weight Deserialization**: Laya checkpoints rely on modern, safe serialization formats (`safetensors` and ONNX). The engine avoids unsafe arbitrary object pickling.
@@ -57,16 +57,16 @@ When deploying Laya in production environments (especially when self-hosting `la
   directory. Use its recorded language and projector pair for GGUF deployments.
   [Native model releases](docs/multimodal-release.md)
 
-### 2. HTTP Server Hardening (`laya-serve`)
+### 2. HTTP Server Hardening (`laya-multimodal-serve`)
 - **Bearer Token Authentication**:
   - When `LAYA_API_KEY` is set, `/v1/systemone`, `/v1/systemone/batch`, `/v1/route`, and
     `/v1/multimodal` require `Authorization: Bearer <token>`.
   - Authentication comparisons use constant-time `hmac.compare_digest` across UTF-8 encoded bytes with surrogate-escape handling to prevent both timing attacks and latin-1 decoding exceptions.
   - **Warning**: If `LAYA_API_KEY` is unset, authentication is disabled and the server answers requests without credentials. Always set `LAYA_API_KEY` in non-isolated environments.
 - **Network Interface Binding**:
-  - By default, `laya-serve` binds to `0.0.0.0:8000` (`LAYA_HOST=0.0.0.0`).
+  - By default, `laya-multimodal-serve` binds to `0.0.0.0:8000` (`LAYA_HOST=0.0.0.0`).
   - For local or loopback-only deployments, explicitly set `LAYA_HOST=127.0.0.1` to prevent exposure on external network interfaces.
-  - For public or multi-tenant deployments, place `laya-serve` behind a hardened reverse proxy (e.g., NGINX, Envoy, Caddy) that enforces TLS termination, strict rate limiting, connection limits, and request timeouts.
+  - For public or multi-tenant deployments, place `laya-multimodal-serve` behind a hardened reverse proxy (e.g., NGINX, Envoy, Caddy) that enforces TLS termination, strict rate limiting, connection limits, and request timeouts.
 - **Denial of Service & Memory Amplification Protections**:
   - **Option Amplification Guard**: `MAX_CHOICE_OPTIONS = 100`. The server automatically rejects choice questions with more than 100 options with HTTP 413 before running inference, preventing memory and forward-pass amplification attacks.
   - **Token Budget Ceiling**: Per-request overrides (`max_len`, `head_max_len`) are validated and capped by `DEFAULT_MAX_TOKEN_BUDGET = 8192` (configurable via `LAYA_MAX_TOKEN_BUDGET`).

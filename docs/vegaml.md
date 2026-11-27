@@ -1,10 +1,12 @@
 # Optional Vega reader
 
+**English** · [简体中文](zh-CN/vegaml.md)
+
 Install `.[vega]` to use the upstream multimodal Vega reader. Construct it explicitly when a
 workflow needs Vega's fitted heads or conformal calibration.
 
 ```python
-from laya import VegaAgent
+from laya_multimodal import VegaAgent
 
 reader = VegaAgent(vegaml=True, device="cpu")
 questions = {"direct": {"type": "noul", "instructions": "Is a refund requested?"}}

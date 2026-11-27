@@ -19,8 +19,8 @@ you already have weights. Use `TORCH_INDEX_URL` to select a PyTorch wheel index.
 
 ```bash
 export LAYA_MULTIMODAL_MODEL="$PWD/models/jev-multimodal-qwen3.5-4b"
-laya --device cpu --preset triage "I was charged twice."
-LAYA_DEVICE=cpu laya-serve
+laya-multimodal --device cpu --preset triage "I was charged twice."
+LAYA_DEVICE=cpu laya-multimodal-serve
 ```
 
 Set `LAYA_DEVICE=cuda:0` for an NVIDIA GPU or `LAYA_DEVICE=mps` on Apple silicon. The in-process
@@ -36,7 +36,7 @@ sets the HTTP port.
 
 ```bash
 python verify/multimodal_smoke_test.py --help
-python -m laya.train_cli --help
+python -m laya_multimodal.train_cli --help
 ```
 
 The packaged trainer uses the files in the installed source checkout. Start a fresh run with a

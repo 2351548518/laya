@@ -1,5 +1,7 @@
 # Lifecycle
 
+**English** · [简体中文](../zh-CN/hooks/lifecycle.md)
+
 This page is the precise order of events for each entry point. If you only read one diagram,
 read the [Router](#routerpredict) one; it is the superset.
 
@@ -60,7 +62,7 @@ The same `ctx` object flows through start, error and end, so `run_id` correlates
 hook can read `ctx.error`.
 
 The `finally` guard is `ctx.results is not None`, not truthiness, and the empty batch is the only
-case where they differ: `predict_batch([])` sets `ctx.results = []` (`laya/multimodal.py::MultimodalAgent.predict_batch`),
+case where they differ: `predict_batch([])` sets `ctx.results = []` (`laya_multimodal/multimodal.py::MultimodalAgent.predict_batch`),
 so the guard passes, `ctx.usage` becomes `{"input_tokens": 0, "output_tokens": 0}`, and the confidence
 gate still runs over the (empty) result list. A call that raised before any result leaves
 `ctx.results` and `ctx.usage` both `None`. So for an end hook `usage is None` means "this call
@@ -166,7 +168,7 @@ Key points:
   that shares the dict, including those whose start hooks ran earlier, and the caller too. Assign
   a new dict to `ctx.questions` instead.
 - The checkpoint name is resolved before grouping, so an `on_route` hook that pins a request by
-  an alias such as `"laya"` shares the native checkpoint's group. `ctx.model` is the resolved name.
+  the `"default"` alias shares the native checkpoint's group. `ctx.model` is the resolved name.
 - A request may carry its own `max_len`. A start hook that sets `ctx.max_len` overrides it.
   The Router sends requests with different budgets in separate calls to `agent.predict_batch`.
 - Every started request gets exactly one `on_predict_end`, even when another request's end hook
@@ -217,7 +219,7 @@ on_predict_start
         └─ on_predict_end can store the result
 ```
 
-See [`examples/hooks/cache.py`](../../examples/hooks/cache.py) for a working cache.
+See [`examples/hooks/cache.py`](https://github.com/2351548518/laya/blob/main/examples/hooks/cache.py) for a working cache.
 
 ## Empty inputs
 

@@ -1,4 +1,4 @@
-"""`import laya` must not import torch; torch-backed names stay lazy.
+"""`import laya_multimodal` must not import torch; torch-backed names stay lazy.
 
 The pure-Python surface (routing, language detection, email cleaning) has to be usable
 without torch installed. The torch-backed names must still resolve when it is available.
@@ -6,6 +6,7 @@ without torch installed. The torch-backed names must still resolve when it is av
 import os
 import subprocess
 import sys
+from types import ModuleType
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -31,20 +32,20 @@ class Blocker:
         return None
 sys.meta_path.insert(0, Blocker())
 
-import laya
-assert "torch" not in sys.modules, "import laya pulled in torch"
-# `laya.serve` (#31) defers fastapi/uvicorn/torch into its functions, so importing it must
+import laya_multimodal
+assert "torch" not in sys.modules, "import laya_multimodal pulled in torch"
+# `laya_multimodal.serve` (#31) defers fastapi/uvicorn/torch into its functions, so importing it must
 # stay cheap too -- otherwise the lazy package init buys nothing for the server entry point.
-import laya.serve  # noqa: F401
-assert "torch" not in sys.modules, "import laya.serve pulled in torch"
-script = laya.detect_script("The customer was charged twice")
+import laya_multimodal.serve  # noqa: F401
+assert "torch" not in sys.modules, "import laya_multimodal.serve pulled in torch"
+script = laya_multimodal.detect_script("The customer was charged twice")
 try:
-    laya.Agent
+    laya_multimodal.Agent
     agent = "resolved-without-torch"
 except ImportError:
     agent = "blocked"
 try:
-    laya.shortlist_choice
+    laya_multimodal.shortlist_choice
     sh = "resolved-without-torch"
 except ImportError:
     sh = "blocked"
@@ -52,8 +53,8 @@ except ImportError:
 # tells operators to pass one, and pinning matters most in the offline and on-device
 # deployments that may not have torch imported at all.
 try:
-    pins = "ok" if laya.PINNED_REVISIONS and all(
-        isinstance(v, str) for v in laya.PINNED_REVISIONS.values()) else "broken"
+    pins = "ok" if laya_multimodal.PINNED_REVISIONS and all(
+        isinstance(v, str) for v in laya_multimodal.PINNED_REVISIONS.values()) else "broken"
 except Exception:
     # Guarded like the probes above: an unguarded raise here kills the subprocess before the
     # print, so every check in this file reports None and the failure looks unrelated.
@@ -62,7 +63,7 @@ print(script, agent, sh, pins)
 ''' % ROOT
 
 proc = subprocess.run([sys.executable, "-c", PROBE], capture_output=True, text=True)
-check("no-torch/import laya succeeds", proc.returncode, 0)
+check("no-torch/import laya_multimodal succeeds", proc.returncode, 0)
 out = proc.stdout.strip().split()
 check("no-torch/detect_script works", out[0] if out else None, "latin")
 check("no-torch/Agent stays lazy", out[1] if len(out) > 1 else None, "blocked")
@@ -71,12 +72,18 @@ check("no-torch/PINNED_REVISIONS resolves", out[3] if len(out) > 3 else None, "o
 
 
 # ------------------------------------------------------------------ torch available
-import laya  # noqa: E402
+import laya_multimodal  # noqa: E402
 
-missing = [n for n in laya.__all__ if not hasattr(laya, n)]
+missing = [n for n in laya_multimodal.__all__ if not hasattr(laya_multimodal, n)]
 check("all __all__ names resolve with torch", missing, [])
-check("from-import of a lazy name", laya.Agent.__name__, "MultimodalAgent")
-check("__dir__ lists lazy names", "load" in dir(laya), True)
+check("from-import of a lazy name", laya_multimodal.Agent.__name__, "MultimodalAgent")
+check("__dir__ lists lazy names", "load" in dir(laya_multimodal), True)
+
+for name in ("confidence", "email", "hooks", "lang", "presets", "router", "structured"):
+    check("%s is exposed as a module" % name, isinstance(getattr(laya_multimodal, name), ModuleType), True)
+for name in ("confidence", "email", "hooks", "lang", "presets"):
+    docstring = getattr(laya_multimodal, name).__doc__ or ""
+    check("%s has a docstring for the reference guide" % name, len(docstring) > 50, True)
 
 
 # ------------------------------------------------------------------ USE_TF guard (#915)
@@ -84,7 +91,7 @@ check("__dir__ lists lazy names", "load" in dir(laya), True)
 # and importing that module runs a chain (`loss_utils` -> `loss_d_fine` ->
 # `loss_for_object_detection` -> `image_transforms`) that ends in `import tensorflow`. Where
 # TensorFlow is installed but cannot load, that is a native crash, not an exception -- `Fatal
-# Python error: Bus error` -- out of a library laya never uses. `laya/__init__.py` now sets
+# Python error: Bus error` -- out of a library laya never uses. `laya_multimodal/__init__.py` now sets
 # `USE_TF=0` before anything can import transformers.
 #
 # The check is done in a subprocess because transformers decides TensorFlow's availability when it
@@ -104,12 +111,12 @@ class Blocker:
         return None
 sys.meta_path.insert(0, Blocker())
 
-import laya
+import laya_multimodal
 print(os.environ.get("USE_TF"), "tensorflow" in sys.modules)
 ''' % ROOT
 
 guard = subprocess.run([sys.executable, "-c", TF_GUARD], capture_output=True, text=True)
-check("USE_TF/import laya succeeds with tensorflow blocked", guard.returncode, 0)
+check("USE_TF/import laya_multimodal succeeds with tensorflow blocked", guard.returncode, 0)
 gout = guard.stdout.strip().split()
 check("USE_TF/is set to 0 on import", gout[0] if gout else None, "0")
 check("USE_TF/tensorflow is not imported", gout[1] if len(gout) > 1 else None, "False")
@@ -119,7 +126,7 @@ check("USE_TF/tensorflow is not imported", gout[1] if len(gout) > 1 else None, "
 RESPECT = r'''
 import os, sys
 sys.path.insert(0, %r)
-import laya
+import laya_multimodal
 print(os.environ["USE_TF"])
 ''' % ROOT
 
@@ -130,7 +137,7 @@ for preset in ("1", "0"):
 
 
 # ------------------------------------------------------------------ the mcp extra's import surface
-# `laya/mcp/__init__.py` documents that "the submodules ``device``, ``remote`` and ``tools`` are
+# `laya_multimodal/mcp/__init__.py` documents that "the submodules ``device``, ``remote`` and ``tools`` are
 # importable without the ``mcp`` dependency; only ``server`` requires the extra." Nothing checks it.
 # Both CI lanes that run this suite install `-e ".[mcp,serve,langchain]"` (ci.yml:94 and :225), so
 # `import mcp` always succeeds there, and `tests/test_mcp.py` skips wholesale when the extra is
@@ -147,15 +154,15 @@ class Blocker:
         return None
 sys.meta_path.insert(0, Blocker())
 
-import laya
-import laya.mcp
-import laya.mcp.device  # noqa: F401
-import laya.mcp.remote  # noqa: F401
-import laya.mcp.tools  # noqa: F401
-assert "mcp" not in sys.modules, "the laya.mcp import surface pulled in the mcp dependency"
+import laya_multimodal
+import laya_multimodal.mcp
+import laya_multimodal.mcp.device  # noqa: F401
+import laya_multimodal.mcp.remote  # noqa: F401
+import laya_multimodal.mcp.tools  # noqa: F401
+assert "mcp" not in sys.modules, "the laya_multimodal.mcp import surface pulled in the mcp dependency"
 print("ok")
 try:
-    import laya.mcp.server  # noqa: F401
+    import laya_multimodal.mcp.server  # noqa: F401
     print("imported without the extra")
     print("")
 except ImportError as exc:
@@ -165,17 +172,17 @@ except ImportError as exc:
 
 nomcp = subprocess.run([sys.executable, "-c", NO_MCP], capture_output=True, text=True)
 lines = nomcp.stdout.splitlines()
-check("no-mcp/import laya.mcp succeeds", nomcp.returncode, 0)
+check("no-mcp/import laya_multimodal.mcp succeeds", nomcp.returncode, 0)
 check("no-mcp/device, remote and tools import without the extra", lines[0] if lines else None, "ok")
 check("no-mcp/server fails as an ImportError", lines[1] if len(lines) > 1 else None, "ImportError")
-# The hint is the documented install path (`pip install "laya[mcp]"`), so name both halves of it
+# The hint is the documented install path (`pip install "laya-multimodal[mcp]"`), so name both halves of it
 # rather than the whole sentence: a reworded message is fine, a bare "No module named 'mcp'" is not.
 check("no-mcp/server names the extra and how to install it",
-      [part for part in ("laya[mcp]", "pip install") if part not in (lines[2] if len(lines) > 2 else "")],
+      [part for part in ("laya-multimodal[mcp]", "pip install") if part not in (lines[2] if len(lines) > 2 else "")],
       [])
 
 # ...and the same surface stays pure-Python without torch, which is this file's own premise: `remote`
-# reaches for `laya.serve` and `laya.router`, `tools` for `laya.confidence`/`hooks`/`presets`.
+# reaches for `laya_multimodal.serve` and `laya_multimodal.router`, `tools` for `laya_multimodal.confidence`/`hooks`/`presets`.
 NO_MCP_NO_TORCH = r'''
 import sys
 sys.path.insert(0, %r)
@@ -187,9 +194,9 @@ class Blocker:
         return None
 sys.meta_path.insert(0, Blocker())
 
-import laya.mcp.device  # noqa: F401
-import laya.mcp.remote  # noqa: F401
-import laya.mcp.tools  # noqa: F401
+import laya_multimodal.mcp.device  # noqa: F401
+import laya_multimodal.mcp.remote  # noqa: F401
+import laya_multimodal.mcp.tools  # noqa: F401
 print(sorted(dep for dep in ("mcp", "torch") if dep in sys.modules))
 ''' % ROOT
 

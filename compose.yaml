@@ -1,5 +1,5 @@
 services:
-  laya:
+  laya-multimodal:
     build:
       context: .
       args:

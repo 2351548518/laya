@@ -1,23 +1,32 @@
-# 按模态与输出类型查看真实样例
+# Request examples by modality and answer type
 
-v6 的每个有数据的「模态 × 输出类型」组合各取三条训练记录，共 30 条。代码块展示请求与监督目标。媒体路径用示意文件名替换，原始记录可以用 ID 或样例索引定位。音频参考样例取自 Gemma 训练集。
+**English** · [简体中文](../zh-CN/project-readme/multimodal-current-io-examples.md)
 
-## 按输入和答案查找
+The v6 snapshot supplies three rows for each populated modality and output-type combination,
+30 requests in all. The blocks show the request and its supervision. Example filenames stand
+for local media. The source and record ID identify each original row. Audio examples come
+from the Gemma training split.
 
-| 模态 | 本页的题型 | 阅读重点 |
+## Find an input and answer type
+
+| Input | Question types | What to inspect |
 | --- | --- | --- |
-| [文本](#text-examples) | 单选、是非、评分 | 比较选项键、布尔值和等级索引如何作为标签。 |
-| [图像](#image-examples) | 单选、是非、评分、单框 | 找到图片引用及其文件。单框题再检查四个归一化坐标。 |
-| [视频](#video-examples) | 单选、是非、评分 | 找到视频引用，检查采样帧数和音轨设置。 |
-| [Gemma 音频](#gemma-audio) | 单选、是非、评分 | 对照问题和波形输入，理解音频监督目标。 |
+| [Text](#text-examples) | Choice, Noul, Score | Label keys, Booleans and ordered level indexes |
+| [Images](#image-examples) | Choice, Noul, Score, Box | Image references, files and normalized box coordinates |
+| [Video](#video-examples) | Choice, Noul, Score | Clip reference, frame count and audio handling |
+| [Gemma audio](#gemma-audio) | Choice, Noul, Score | Sound input and its target |
 
-每条样例先读顶部的来源、记录 ID 和行号。展开 `request.questions` 确认题目 ID，再到 `expected` 或 `gold` 找同名键。`expected` 给出参考答案，`gold` 可以保留来源分布。推理结果另从 `answers` 的同名键读取。 [输入与监督说明](multimodal-current.md#input-to-model) · [运行推理](multimodal.md#python-inference)
+Read the source, ID and line number first. Find the question ID under `request.questions`.
+Use the same key in `expected` or `gold` to read the supervision and in `answers` to read a
+prediction. [Inputs and targets](multimodal-current.md#input-to-model) · [Run inference](multimodal.md#python-inference)
 
 <a name="read-original-row"></a>
 
-## 用索引打开一条真实记录
+## Open an original dataset row
 
-如果本机有完整 v6，下面的命令用附录索引查第一张单框图像。先核对 v6 清单的训练文件标识，再按 `byte_offset` 跳到该行。用二进制模式打开文件以使偏移量与索引一致。
+The following command uses the v6 sample index to look up the first single-box image.
+It checks the training file fingerprint in the manifest, then seeks to `byte_offset` in
+binary mode.
 
 ```bash
 python - <<'PY'
@@ -44,15 +53,18 @@ for part, path in record.get("media_files", {}).items():
 PY
 ```
 
-预期会看到第 928,181 行，来源为 `jxu124/refcocoplus`，题目是 `ground`，描述为 `black turban`。用输出的图片路径打开照片，再按照 `left`、`top`、`right`、`bottom` 检查标注位置。想看另一组时，将 `index["io"]` 换成 `index["tasks"]`，用 `modality` 和 `task` 筛选。全部示例可用 CPU 脚本一次核验。 [样例索引](assets/examples-index.json) · [核验命令](multimodal.md#cpu-walkthrough) · [细任务查找](multimodal-current-examples.md)
+The indexed row is 928,181 from `jxu124/refcocoplus`. Its question ID is `ground` with
+the description `black turban`. Open the resolved image and use the four coordinates to
+inspect the target. Switch from `index["io"]` to `index["tasks"]` to filter by specific
+`modality` and `task`. [Sample index](assets/examples-index.json) · [CPU checks](multimodal.md#cpu-walkthrough) · [Task examples](multimodal-current-examples.md)
 
 <a name="text-examples"></a>
 
-## 文本
+## Text
 
-### 文本 · `choice` 单选
+### Text · `choice`
 
-**样例 1** · `tasksource:toxic-chat/toxicchat0124/toxicity` · `tasksource:toxic-chat-toxicchat0124-toxicity-259fcfe274:train:4210` · 训练集第 1,425,303 行。
+**Example 1** · `tasksource:toxic-chat/toxicchat0124/toxicity` · `tasksource:toxic-chat-toxicchat0124-toxicity-259fcfe274:train:4210` · training line 1,425,303.
 
 ```json
 {
@@ -76,7 +88,7 @@ PY
 }
 ```
 
-**样例 2** · `tasksource:glue/sst2` · `tasksource:glue-sst2-a91549683f:train:15149` · 训练集第 1,384,423 行。
+**Example 2** · `tasksource:glue/sst2` · `tasksource:glue-sst2-a91549683f:train:15149` · training line 1,384,423.
 
 ```json
 {
@@ -100,7 +112,7 @@ PY
 }
 ```
 
-**样例 3** · `tasksource:financial_phrasebank/sentences_allagree` · `tasksource:financial-phrasebank-sentences-allagree-fb77247656:train:511` · 训练集第 1,383,678 行。
+**Example 3** · `tasksource:financial_phrasebank/sentences_allagree` · `tasksource:financial-phrasebank-sentences-allagree-fb77247656:train:511` · training line 1,383,678.
 
 ```json
 {
@@ -125,9 +137,9 @@ PY
 }
 ```
 
-### 文本 · `noul` 是非判断
+### Text · `noul`
 
-**样例 1** · `tasksource:go_emotions/simplified` · `tasksource:go-emotions-simplified-c563c5a238:train:9616:noul-label-verification` · 训练集第 1,387,589 行。
+**Example 1** · `tasksource:go_emotions/simplified` · `tasksource:go-emotions-simplified-c563c5a238:train:9616:noul-label-verification` · training line 1,387,589.
 
 ```json
 {
@@ -147,7 +159,7 @@ PY
 }
 ```
 
-**样例 2** · `tasksource:clinc_oos/plus` · `tasksource:clinc-oos-plus-1b9b3d1a5a:train:15203:noul-label-verification` · 训练集第 1,379,513 行。
+**Example 2** · `tasksource:clinc_oos/plus` · `tasksource:clinc-oos-plus-1b9b3d1a5a:train:15203:noul-label-verification` · training line 1,379,513.
 
 ```json
 {
@@ -167,7 +179,7 @@ PY
 }
 ```
 
-**样例 3** · `tasksource:dynahate` · `tasksource:dynahate-224d6896b5:train:1664:noul-label-verification` · 训练集第 1,382,218 行。
+**Example 3** · `tasksource:dynahate` · `tasksource:dynahate-224d6896b5:train:1664:noul-label-verification` · training line 1,382,218.
 
 ```json
 {
@@ -187,9 +199,9 @@ PY
 }
 ```
 
-### 文本 · `score` 评分
+### Text · `score`
 
-**样例 1** · `tasksource:multilingual/AfriSenti-twitter-sentiment/twi` · `tasksource:multilingual-AfriSenti-twitter-sentiment-twi-32a4496e5c:train:1486` · 训练集第 554,444 行。
+**Example 1** · `tasksource:multilingual/AfriSenti-twitter-sentiment/twi` · `tasksource:multilingual-AfriSenti-twitter-sentiment-twi-32a4496e5c:train:1486` · training line 554,444.
 
 ```json
 {
@@ -227,7 +239,7 @@ PY
 }
 ```
 
-**样例 2** · `tasksource:multilingual/tweet_sentiment_multilingual` · `tasksource:multilingual-tweet-sentiment-multilingual-31edbb5b11:train:8470` · 训练集第 1,396,432 行。
+**Example 2** · `tasksource:multilingual/tweet_sentiment_multilingual` · `tasksource:multilingual-tweet-sentiment-multilingual-31edbb5b11:train:8470` · training line 1,396,432.
 
 ```json
 {
@@ -252,7 +264,7 @@ PY
 }
 ```
 
-**样例 3** · `tasksource:multilingual/AfriSenti-twitter-sentiment/ary` · `tasksource:multilingual-AfriSenti-twitter-sentiment-ary-4c2d98e466:train:5541` · 训练集第 1,444,840 行。
+**Example 3** · `tasksource:multilingual/AfriSenti-twitter-sentiment/ary` · `tasksource:multilingual-AfriSenti-twitter-sentiment-ary-4c2d98e466:train:5541` · training line 1,444,840.
 
 ```json
 {
@@ -279,11 +291,11 @@ PY
 
 <a name="image-examples"></a>
 
-## 图像
+## Image
 
-### 图像 · `choice` 单选
+### Image · `choice`
 
-**样例 1** · `Cognitive-Lab/NayanaOCR_Corpus_2025:extractive-mcq` · `nayana:zh:document_10026_page_41:4` · 训练集第 1,032,798 行。
+**Example 1** · `Cognitive-Lab/NayanaOCR_Corpus_2025:extractive-mcq` · `nayana:zh:document_10026_page_41:4` · training line 1,032,798.
 
 ```json
 {
@@ -321,7 +333,7 @@ PY
 }
 ```
 
-**样例 2** · `HuggingFaceM4/A-OKVQA:native-mc` · `aokvqa-native:hjMqaofRj93ndSRibZqeZq` · 训练集第 355,446 行。
+**Example 2** · `HuggingFaceM4/A-OKVQA:native-mc` · `aokvqa-native:hjMqaofRj93ndSRibZqeZq` · training line 355,446.
 
 ```json
 {
@@ -359,7 +371,7 @@ PY
 }
 ```
 
-**样例 3** · `derek-thomas/ScienceQA:native-image` · `scienceqa-native:a0eaea2b9af55e19bd8bfb41cdf29ad2a30f63d6ce6b4e414f473bab78120eca` · 训练集第 1,349,262 行。
+**Example 3** · `derek-thomas/ScienceQA:native-image` · `scienceqa-native:a0eaea2b9af55e19bd8bfb41cdf29ad2a30f63d6ce6b4e414f473bab78120eca` · training line 1,349,262.
 
 ```json
 {
@@ -396,9 +408,9 @@ PY
 }
 ```
 
-### 图像 · `noul` 是非判断
+### Image · `noul`
 
-**样例 1** · `lmms-lab-encoder/VQAv2:unanimous-native-binary` · `vqa2-unanimous:525101015` · 训练集第 1,321,141 行。
+**Example 1** · `lmms-lab-encoder/VQAv2:unanimous-native-binary` · `vqa2-unanimous:525101015` · training line 1,321,141.
 
 ```json
 {
@@ -430,7 +442,7 @@ PY
 }
 ```
 
-**样例 2** · `VQA-v2:official-train-consensus` · `vqa2-train:384740002` · 训练集第 1,245,713 行。
+**Example 2** · `VQA-v2:official-train-consensus` · `vqa2-train:384740002` · training line 1,245,713.
 
 ```json
 {
@@ -462,7 +474,7 @@ PY
 }
 ```
 
-**样例 3** · `docling-project/DocLayNet-v1.1` · `doclaynet:79f6a44c875a6992f27f85cb65b6cdc48c45a8ccc5c67c4bd3521a4bdf685ad8:presence:table` · 训练集第 1,203,886 行。
+**Example 3** · `docling-project/DocLayNet-v1.1` · `doclaynet:79f6a44c875a6992f27f85cb65b6cdc48c45a8ccc5c67c4bd3521a4bdf685ad8:presence:table` · training line 1,203,886.
 
 ```json
 {
@@ -494,9 +506,9 @@ PY
 }
 ```
 
-### 图像 · `score` 评分
+### Image · `score`
 
-**样例 1** · `koniq` · `koniq:5602815566.jpg` · 训练集第 507,874 行。
+**Example 1** · `koniq` · `koniq:5602815566.jpg` · training line 507,874.
 
 ```json
 {
@@ -552,7 +564,7 @@ PY
 }
 ```
 
-**样例 2** · `tasksource:vision/met-meme/offensiveness` · `tasksource:vision/met-meme/offensiveness:train:040f969d61e6b54f7aaac5f2:437004ba3497a904:2fd8b6d4cd85060123e8b917` · 训练集第 913,871 行。
+**Example 2** · `tasksource:vision/met-meme/offensiveness` · `tasksource:vision/met-meme/offensiveness:train:040f969d61e6b54f7aaac5f2:437004ba3497a904:2fd8b6d4cd85060123e8b917` · training line 913,871.
 
 ```json
 {
@@ -598,7 +610,7 @@ PY
 }
 ```
 
-**样例 3** · `Rapidata/human-coherence-preferences-images` · `rapidata-coherence:d3b0708116f8830c8f1eb6d8bcb13b90cfddfe0948f124dad1c4e7cf30e65ed5` · 训练集第 1,481,256 行。
+**Example 3** · `Rapidata/human-coherence-preferences-images` · `rapidata-coherence:d3b0708116f8830c8f1eb6d8bcb13b90cfddfe0948f124dad1c4e7cf30e65ed5` · training line 1,481,256.
 
 ```json
 {
@@ -643,9 +655,9 @@ PY
 }
 ```
 
-### 图像 · `box` 单框定位
+### Image · `box`
 
-**样例 1** · `jxu124/refcocoplus` · `17c5eb26b236dc2b41093891c83dd7cebfd5c23c7053776c43808a34a52619d7` · 训练集第 928,181 行。
+**Example 1** · `jxu124/refcocoplus` · `17c5eb26b236dc2b41093891c83dd7cebfd5c23c7053776c43808a34a52619d7` · training line 928,181.
 
 ```json
 {
@@ -686,7 +698,7 @@ PY
 }
 ```
 
-**样例 2** · `coco2017` · `6cacf307bf1b5cb1a9c4dd3764766269f6a1872f8529eef5e6d43e46dee5621f` · 训练集第 668,985 行。
+**Example 2** · `coco2017` · `6cacf307bf1b5cb1a9c4dd3764766269f6a1872f8529eef5e6d43e46dee5621f` · training line 668,985.
 
 ```json
 {
@@ -727,7 +739,7 @@ PY
 }
 ```
 
-**样例 3** · `jxu124/refcoco` · `278a1c49f2297ea80280dfa0b526e4e7b71c9922be663da60e0b88c9c6e1c138` · 训练集第 589,273 行。
+**Example 3** · `jxu124/refcoco` · `278a1c49f2297ea80280dfa0b526e4e7b71c9922be663da60e0b88c9c6e1c138` · training line 589,273.
 
 ```json
 {
@@ -770,11 +782,11 @@ PY
 
 <a name="video-examples"></a>
 
-## 视频
+## Video
 
-### 视频 · `choice` 单选
+### Video · `choice`
 
-**样例 1** · `CLEVRER` · `clevrer:video_09884:descriptive:0` · 训练集第 11,023 行。
+**Example 1** · `CLEVRER` · `clevrer:video_09884:descriptive:0` · training line 11,023.
 
 ```json
 {
@@ -806,7 +818,7 @@ PY
 }
 ```
 
-**样例 2** · `nextqa` · `nextqa:3536560404:8` · 训练集第 608,171 行。
+**Example 2** · `nextqa` · `nextqa:3536560404:8` · training line 608,171.
 
 ```json
 {
@@ -850,7 +862,7 @@ PY
 }
 ```
 
-**样例 3** · `CLEVRER` · `clevrer:video_06890:descriptive:6` · 训练集第 14,219 行。
+**Example 3** · `CLEVRER` · `clevrer:video_06890:descriptive:6` · training line 14,219.
 
 ```json
 {
@@ -882,9 +894,9 @@ PY
 }
 ```
 
-### 视频 · `noul` 是非判断
+### Video · `noul`
 
-**样例 1** · `ssv2:native-action-verification` · `v5-ssv2:166017:verify:0edbab6b16d59191` · 训练集第 1,464,800 行。
+**Example 1** · `ssv2:native-action-verification` · `v5-ssv2:166017:verify:0edbab6b16d59191` · training line 1,464,800.
 
 ```json
 {
@@ -912,7 +924,7 @@ PY
 }
 ```
 
-**样例 2** · `CLEVRER` · `clevrer:video_07868:descriptive:10` · 训练集第 748,653 行。
+**Example 2** · `CLEVRER` · `clevrer:video_07868:descriptive:10` · training line 748,653.
 
 ```json
 {
@@ -946,7 +958,7 @@ PY
 }
 ```
 
-**样例 3** · `ucf101-full` · `ucf101-full:v_PushUps_g08_c02.avi` · 训练集第 410,550 行。
+**Example 3** · `ucf101-full` · `ucf101-full:v_PushUps_g08_c02.avi` · training line 410,550.
 
 ```json
 {
@@ -980,9 +992,9 @@ PY
 }
 ```
 
-### 视频 · `score` 评分
+### Video · `score`
 
-**样例 1** · `TIGER-Lab/VideoFeedback:annotated` · `videofeedback:0003567:dynamic degree` · 训练集第 259,275 行。
+**Example 1** · `TIGER-Lab/VideoFeedback:annotated` · `videofeedback:0003567:dynamic degree` · training line 259,275.
 
 ```json
 {
@@ -1016,7 +1028,7 @@ PY
 }
 ```
 
-**样例 2** · `MMSP/KoNViD-1k:native-mos` · `konvid-mos:7700672030` · 训练集第 1,108,835 行。
+**Example 2** · `MMSP/KoNViD-1k:native-mos` · `konvid-mos:7700672030` · training line 1,108,835.
 
 ```json
 {
@@ -1051,7 +1063,7 @@ PY
 }
 ```
 
-**样例 3** · `teowu/DIVIDE-MaxWell:official-train-MOS` · `divide-maxwell:1042.mp4` · 训练集第 179,154 行。
+**Example 3** · `teowu/DIVIDE-MaxWell:official-train-MOS` · `divide-maxwell:1042.mp4` · training line 179,154.
 
 ```json
 {
@@ -1088,24 +1100,24 @@ PY
 
 <a name="gemma-audio"></a>
 
-## Gemma 音频参考样例
+## Gemma audio examples
 
-下列九条来自本地 `open-jev-omni-gemma-filtered` 的训练分片，展示项目的音频输入能力。v6 的 Qwen3.5-4B 训练集音频记录数为 0。
+These nine examples come from the local `open-jev-omni-gemma-filtered` training split. The v6 Qwen3.5-4B split contains zero audio rows.
 
-### 音频 · 单选
+### Audio · choice
 
-- **audio-jev:next_speaker** · `audio-jev:rlcd-ami-ES2013b-0132ddccdc9d1770deea-next_speaker`。输入包含音频和文本 ``。问题 `Predict who will next begin speaking within 2 seconds after this audio ends. Number people by the order their…`。监督目标 `{"probabilities":{"new_speaker":0.0,"none":0.0,"speaker_1":1.0}}`。
-- **inclusionAI/AudioMCQ** · `audiomcq-v5:7abdbf61f5d1f1bfaef98a4c5b8c987ede18284744d8b092afa336c07183d341`。输入包含音频和文本 ``。问题 `When does the sound end in the audio clip?`。监督目标 `{"probabilities":{"A":0.0,"B":0.0,"C":0.0,"D":1.0}}`。
-- **speech-commands** · `speech-commands:0d6d7360:off:0d6d7360_nohash_4.wav`。输入包含音频和文本 ``。问题 `Which command word is spoken in this recording?`。监督目标 `{"probabilities":{"go":0.0,"left":0.0,"bed":0.0,"seven":0.0,"eight":0.0,"follow":0.0,"visual":0.0,"house":0.0,"learn":0.0,"two":0.0,"down":0.0,"cat":0.0,"off":1.0,"wow":0.0,"four":0.0,"happy":0.0,"marvin":0.0,"five":0.0,"right":0.0,"bird":0.0}}`。
+- **audio-jev:next_speaker** · `audio-jev:rlcd-ami-ES2013b-0132ddccdc9d1770deea-next_speaker`. The state contains an audio clip. Question: `Predict who will next begin speaking within 2 seconds after this audio ends. Number people by the order their…`. Target: `{"probabilities":{"new_speaker":0.0,"none":0.0,"speaker_1":1.0}}`.
+- **inclusionAI/AudioMCQ** · `audiomcq-v5:7abdbf61f5d1f1bfaef98a4c5b8c987ede18284744d8b092afa336c07183d341`. The state contains an audio clip. Question: `When does the sound end in the audio clip?`. Target: `{"probabilities":{"A":0.0,"B":0.0,"C":0.0,"D":1.0}}`.
+- **speech-commands** · `speech-commands:0d6d7360:off:0d6d7360_nohash_4.wav`. The state contains an audio clip. Question: `Which command word is spoken in this recording?`. Target: `{"probabilities":{"go":0.0,"left":0.0,"bed":0.0,"seven":0.0,"eight":0.0,"follow":0.0,"visual":0.0,"house":0.0,"learn":0.0,"two":0.0,"down":0.0,"cat":0.0,"off":1.0,"wow":0.0,"four":0.0,"happy":0.0,"marvin":0.0,"five":0.0,"right":0.0,"bird":0.0}}`.
 
-### 音频 · 是非判断
+### Audio · noul
 
-- **audio-jev:speech_activity** · `audio-jev:rlcd-ami-ES2015b-f39a6b8f7c50a0593837-speech_activity`。输入包含音频和文本 ``。问题 `Does any person speak in the final 200 milliseconds of this audio?`。监督目标 `{"probabilities":{"false":1.0,"true":0.0}}`。
-- **fsd50k** · `fsd50k:395407:dominant:/m/01j3sz`。输入包含音频和文本 ``。问题 `Is laughter a predominant sound in this recording?`。监督目标 `{"probabilities":{"false":0.0,"true":1.0}}`。
-- **speech-commands** · `speech-commands:98170b49:dog:98170b49_nohash_0.wav`。输入包含音频和文本 ``。问题 `Which command word is spoken in this recording? Is it dog?`。监督目标 `{"probabilities":{"false":0.0,"true":1.0}}`。
+- **audio-jev:speech_activity** · `audio-jev:rlcd-ami-ES2015b-f39a6b8f7c50a0593837-speech_activity`. The state contains an audio clip. Question: `Does any person speak in the final 200 milliseconds of this audio?`. Target: `{"probabilities":{"false":1.0,"true":0.0}}`.
+- **fsd50k** · `fsd50k:395407:dominant:/m/01j3sz`. The state contains an audio clip. Question: `Is laughter a predominant sound in this recording?`. Target: `{"probabilities":{"false":0.0,"true":1.0}}`.
+- **speech-commands** · `speech-commands:98170b49:dog:98170b49_nohash_0.wav`. The state contains an audio clip. Question: `Which command word is spoken in this recording? Is it dog?`. Target: `{"probabilities":{"false":0.0,"true":1.0}}`.
 
-### 音频 · 评分
+### Audio · score
 
-- **audio-jev:speaker_count** · `audio-jev:rlcd-ami-ES2008b-9c095476614c0c1f288b-speaker_count`。输入包含音频和文本 ``。问题 `How many distinct people are audibly speaking anywhere in this audio window? Count each person once, including…`。监督目标 `{"probabilities":{"0":0.0,"1":0.0,"2":0.0,"3":0.0,"4":1.0,"5":0.0,"6":0.0,"7":0.0,"8":0.0,"9":0.0,"10":0.0}}`。
-- **declare-lab/MELD** · `meld:dia10_utt1:sentiment`。输入包含音频和文本 `{"preceding_utterances": [{"speaker": "Phoebe", "utterance": "Nobody!"}], "current_ut…`。问题 `What sentiment does the current speaker express in this utterance?`。监督目标 `{"probabilities":{"0":1.0,"1":0.0,"2":0.0}}`。
-- **fsd50k** · `fsd50k:406720:prominence:/m/07q7njn`。输入包含音频和文本 ``。问题 `Rate the audibility/prominence of chink and clink.`。监督目标 `{"probabilities":{"0":0.0,"1":0.0,"2":1.0}}`。
+- **audio-jev:speaker_count** · `audio-jev:rlcd-ami-ES2008b-9c095476614c0c1f288b-speaker_count`. The state contains an audio clip. Question: `How many distinct people are audibly speaking anywhere in this audio window? Count each person once, including…`. Target: `{"probabilities":{"0":0.0,"1":0.0,"2":0.0,"3":0.0,"4":1.0,"5":0.0,"6":0.0,"7":0.0,"8":0.0,"9":0.0,"10":0.0}}`.
+- **declare-lab/MELD** · `meld:dia10_utt1:sentiment`. The state contains audio and text `{"preceding_utterances": [{"speaker": "Phoebe", "utterance": "Nobody!"}], "current_ut…`. Question: `What sentiment does the current speaker express in this utterance?`. Target: `{"probabilities":{"0":1.0,"1":0.0,"2":0.0}}`.
+- **fsd50k** · `fsd50k:406720:prominence:/m/07q7njn`. The state contains an audio clip. Question: `Rate the audibility/prominence of chink and clink.`. Target: `{"probabilities":{"0":0.0,"1":0.0,"2":1.0}}`.

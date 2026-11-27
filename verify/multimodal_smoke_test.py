@@ -5,7 +5,7 @@ import json
 import math
 from pathlib import Path
 
-from laya import MultimodalAgent
+from laya_multimodal import MultimodalAgent
 
 
 def validate_prediction(result, modality, questions):

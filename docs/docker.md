@@ -1,5 +1,7 @@
 # Deploy native decisions with Docker
 
+**English** · [简体中文](zh-CN/docker.md)
+
 The same image runs one-shot decisions and serves the System One HTTP API. It includes the
 Qwen3.5 and Gemma 4 runtime, FFmpeg and the media dependencies.
 
@@ -11,7 +13,7 @@ model weights. Run from the repository root.
 ```bash
 export LAYA_MULTIMODAL_MODEL_DIR="$PWD/models/jev-multimodal-qwen3.5-4b"
 docker compose -f compose.yaml -f compose.http.yaml -f compose.multimodal.yaml \
-  up --build laya-serve
+  up --build laya-multimodal-serve
 ```
 
 The overlay mounts the checkpoint read-only and enables offline loading. To use a Hub
@@ -56,7 +58,7 @@ Use the host setup for Apple silicon with PyTorch MPS.
 
 ```bash
 docker compose -f compose.yaml -f compose.http.yaml -f compose.multimodal.yaml \
-  run --build --rm laya
+  run --build --rm laya-multimodal
 ```
 
 For your own request file, set `LAYA_INPUT_DIR` to the directory containing it and add

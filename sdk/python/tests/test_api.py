@@ -77,10 +77,10 @@ class APITests(unittest.TestCase):
 
     def test_no_inference_or_http_dependencies_in_client_environment(self):
         names = {d.metadata["Name"].lower().replace("_", "-") for d in importlib.metadata.distributions()}
-        forbidden = {"laya", "torch", "transformers", "numpy", "safetensors",
+        forbidden = {"laya", "laya-multimodal", "torch", "transformers", "numpy", "safetensors",
                      "huggingface-hub", "requests", "httpx"}
         self.assertFalse(names & forbidden, names & forbidden)
-        self.assertFalse(set(sys.modules) & {"laya", "torch", "transformers", "numpy"})
+        self.assertFalse(set(sys.modules) & {"laya", "laya_multimodal", "torch", "transformers", "numpy"})
 
 
 if __name__ == "__main__":

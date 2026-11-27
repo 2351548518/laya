@@ -13,8 +13,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import laya  # noqa: E402
-from laya import structured  # noqa: E402
+import laya_multimodal  # noqa: E402
+from laya_multimodal import structured  # noqa: E402
 
 PASS, FAIL = [], []
 
@@ -92,7 +92,7 @@ check("DecisionResult/…and defaults answer_confidence", structured.DecisionRes
     {"v": 1}, {"c": 1}, {"p": {}}, {"a": {}}).answer_confidence, {})
 
 # --------------------------------------------------------------- methods
-for label, cls in (("Agent", laya.Agent), ("Router", laya.Router)):
+for label, cls in (("Agent", laya_multimodal.Agent), ("Router", laya_multimodal.Router)):
     fn = getattr(cls, "decide", None)
     check_true("%s.decide exists" % label, callable(fn))
     if fn is not None:
@@ -104,9 +104,9 @@ for label, cls in (("Agent", laya.Agent), ("Router", laya.Router)):
 
 # --------------------------------------------------------------- exports
 for name in ("decide", "DecisionResult"):
-    check_true("__all__/%s" % name, name in laya.__all__)
-    check_true("laya.%s exists" % name, hasattr(laya, name))
-check_true("laya.structured.SchemaError is a ValueError", issubclass(structured.SchemaError, ValueError))
+    check_true("__all__/%s" % name, name in laya_multimodal.__all__)
+    check_true("laya.%s exists" % name, hasattr(laya_multimodal, name))
+check_true("laya_multimodal.structured.SchemaError is a ValueError", issubclass(structured.SchemaError, ValueError))
 
 
 print("\n%d passed, %d failed" % (len(PASS), len(FAIL)))

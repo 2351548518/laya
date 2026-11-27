@@ -1,5 +1,7 @@
 # Patterns and anti-patterns
 
+**English** · [简体中文](../zh-CN/hooks/patterns.md)
+
 Hooks are a small seam, and it is easy to use them well or badly. This page collects the shapes
 that hold up in production and the ones that bite.
 
@@ -54,7 +56,7 @@ def audit(ctx):
         }, sys.stdout)
         sys.stdout.write("\n")
 
-laya.load( on_predict_end=audit)
+laya_multimodal.load( on_predict_end=audit)
 ```
 
 A hook fires once per call, and a `predict_batch` call carries every state in it, so the record is
@@ -79,7 +81,7 @@ def redact(ctx):
         for s in ctx.states
     ]
 
-laya.load( on_predict_start=redact)
+laya_multimodal.load( on_predict_start=redact)
 ```
 
 A redaction hook is a policy hook: keep `hooks_raise=True`, because a silently broken redactor
@@ -111,7 +113,7 @@ def write(ctx):
     for i, result in enumerate(ctx.results or []):
         CACHE[key(ctx, i)] = result
 
-laya.load( on_predict_start=read, on_predict_end=write)
+laya_multimodal.load( on_predict_start=read, on_predict_end=write)
 ```
 
 Hooks fire once per call, so keying on one state is not enough on `predict_batch`: `ctx.skip()`
@@ -135,7 +137,7 @@ def metrics(ctx):
     if ctx.elapsed_ms is not None:
         LATENCIES.append(ctx.elapsed_ms)
 
-laya.load( on_predict_end=metrics, hooks_raise=False)
+laya_multimodal.load( on_predict_end=metrics, hooks_raise=False)
 ```
 
 ### Guardrails
@@ -151,7 +153,7 @@ def guard(ctx):
     if any("ssn" in str(state).lower() for state in ctx.states):
         raise Blocked("possible PII in state")
 
-laya.load( on_predict_start=guard)
+laya_multimodal.load( on_predict_start=guard)
 ```
 
 Test it against the state shape. A guard that only reads `ctx.states[0]` blocks a single call and
@@ -170,7 +172,7 @@ def gate(ctx):
             answer["choice"] = "human-review"
             answer["gated"] = True
 
-laya.load( on_predict_end=gate)
+laya_multimodal.load( on_predict_end=gate)
 ```
 
 Mutate through `ctx.results`, which holds one dict per state of the call: gating only the first
@@ -183,7 +185,7 @@ hook object: the convenience callables cover `on_predict_start` / `on_predict_en
 function in `hooks=` is refused (see [plain callables in `hooks=`](#plain-callables-in-hooks)).
 
 ```python
-from laya.router import RouteDecision
+from laya_multimodal.router import RouteDecision
 
 class Pin:
     def on_route(self, ctx):
@@ -226,7 +228,7 @@ def make_audit(tenant):
         ship(tenant, ctx.run_id, ctx.results)
     return audit
 
-agent = laya.load( on_predict_end=make_audit("acme"))
+agent = laya_multimodal.load( on_predict_end=make_audit("acme"))
 ```
 
 ### Composition
@@ -237,7 +239,7 @@ scopes, process-wide default hooks come before an instance's hooks, and an insta
 per-call hooks.
 
 ```python
-agent = laya.load(
+agent = laya_multimodal.load(
     hooks=[Metrics(), Guardrail()],     # metrics first, then policy
     on_predict_start=redact,            # convenience callables appended after hooks
     hooks_raise=True,                   # policy failures are fatal
@@ -267,7 +269,7 @@ A tracer or metrics hook that every decision should see can be registered once, 
 passed to each `Agent` and `Router`. Defaults run before the instance and per-call hooks.
 
 ```python
-from laya import BaseHook, hooks
+from laya_multimodal import BaseHook, hooks
 
 class Metrics(BaseHook):
     def on_predict_end(self, ctx):
@@ -293,7 +295,7 @@ def widen_for_many_options(ctx):
     if option_count >= 50:
         ctx.max_len = max(ctx.agent.max_len, ctx.max_len or 0, 8192)
 
-agent = laya.load(on_predict_start=widen_for_many_options)
+agent = laya_multimodal.load(on_predict_start=widen_for_many_options)
 ```
 
 This hook controls the single call's prompt budget. For very large option sets,
@@ -303,7 +305,7 @@ evaluate a [shortlist or tournament](../evals.md) on labelled examples.
 
 ### Blocking work
 
-Hooks run on the calling thread, and `laya.serve` uses a single inference worker. A hook that
+Hooks run on the calling thread, and `laya_multimodal.serve` uses a single inference worker. A hook that
 sleeps, waits on a network round-trip, or calls `input()` stalls every other request behind it.
 
 ```python
@@ -317,7 +319,7 @@ def audit(ctx):
 ```
 
 If you must do slow work, set `hooks_concurrent=False` to at least keep the hook itself from
-overlapping, and run `laya.serve` behind a queue.
+overlapping, and run `laya_multimodal.serve` behind a queue.
 
 ### Raising from end hooks for control flow
 
@@ -423,10 +425,10 @@ rejected. Use `on_predict_start=` / `on_predict_end=`.
 
 ```python
 # bad: TypeError
-laya.load( hooks=[lambda ctx: None])
+laya_multimodal.load( hooks=[lambda ctx: None])
 
 # good
-laya.load( on_predict_end=lambda ctx: None)
+laya_multimodal.load( on_predict_end=lambda ctx: None)
 ```
 
 ### Assuming results exist in end hooks

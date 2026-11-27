@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Documentation
-    url: https://nandhakishorm.github.io/laya/
-    about: Installation, routing, serving, fine-tuning and prediction hooks.
-  - name: README and examples
-    url: https://github.com/NandhaKishorM/laya#readme
-    about: Quickstart, benchmarks and usage examples.
+    url: https://github.com/2351548518/laya/blob/main/docs/index.md
+    about: Native inference, training, evaluation, and deployment guides.
+  - name: 中文 README
+    url: https://github.com/2351548518/laya/blob/main/README.zh-CN.md
+    about: 安装、模型架构、训练、评测和部署示例。

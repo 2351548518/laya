@@ -12,7 +12,7 @@ one of its two arms:
     Ran 5 tests in 0.165s
     OK
 
-Run that mutated script against a live `laya-serve` (mounted over the image's own entrypoint) and
+Run that mutated script against a live `laya-multimodal-serve` (mounted over the image's own entrypoint) and
 the service is left unauthenticated: `POST /v1/systemone` with no `Authorization` header answers
 400 instead of 401. Nothing in the suite said so. The names are therefore read out of the script
 itself and each one is driven through the whole contract, including the `_FILE` removal, which no
@@ -121,7 +121,7 @@ class EntrypointTests(unittest.TestCase):
         entrypoint's audience includes the Windows path it runs a child on. Read as plain
         utf-8 the mark becomes U+FEFF, which `.strip()` does not remove (it is not
         whitespace), so the loaded variable carried one leading character no consumer --
-        the Hub for `HF_TOKEN`, `laya-serve`'s bearer check for `LAYA_API_KEY` -- accepts.
+        the Hub for `HF_TOKEN`, `laya-multimodal-serve`'s bearer check for `LAYA_API_KEY` -- accepts.
         """
         for name in SECRET_NAMES:
             with self.subTest(secret=name):

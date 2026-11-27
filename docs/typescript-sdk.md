@@ -1,19 +1,19 @@
 # TypeScript SDK design
 
-`laya-client` is a dependency-free HTTP client for a self-hosted `laya-serve`
-server. It uses the existing prediction and routing endpoints and adds no Python production
-code or server dependencies.
-The npm package starts at version `0.1.0`, independently of Python releases.
+**English** · [简体中文](zh-CN/typescript-sdk.md)
+
+`laya-client` is a dependency-free HTTP client for a self-hosted `laya-multimodal-serve`
+server. The SDK is released independently from the Python runtime.
 
 ## Boundaries
 
 | Component | Responsibility |
 | --- | --- |
 | `sdk/typescript` | Question/answer types, presets, validation, native fetch, errors and cancellation |
-| `laya/serve.py` | Existing HTTP endpoint, Bearer authentication, health and request limits |
-| `laya/router.py` | Checkpoint selection, loading and inference routing |
-| `laya/multimodal.py` | Native input preparation, PyTorch inference and typed answers |
-| `laya/presets.py` | Source for the five generated TypeScript question presets |
+| `laya_multimodal/serve.py` | Existing HTTP endpoint, Bearer authentication, health and request limits |
+| `laya_multimodal/router.py` | Checkpoint selection, loading and inference routing |
+| `laya_multimodal/multimodal.py` | Native input preparation, PyTorch inference and typed answers |
+| `laya_multimodal/presets.py` | Source for the five generated TypeScript question presets |
 
 ```mermaid
 flowchart LR
@@ -24,25 +24,21 @@ flowchart LR
 
 The SDK exports `predict`, `predictBatch`, `predictImageAssets`, `predictMultimodal`, `route` and a Laya-only `health` probe. It ships ESM,
 CommonJS and declarations, retaining inferred question IDs and choice labels.
-Use `laya-client` to send text and media to a self-hosted Python `laya-serve`.
+Use `laya-client` to send text and media to a self-hosted Python `laya-multimodal-serve`.
 
 ## Shared contract
 
 Text requests contain `state` and `questions`. Unless configured or supplied for a
-text prediction, `laya-client` omits `model`, letting `laya-serve` select a local
+text prediction, `laya-client` omits `model`, letting `laya-multimodal-serve` select a local
 checkpoint automatically. A client-wide or per-call `model` can select a local
 checkpoint, as can the other per-request controls in the table below. Choice label
 arrays are normalized to maps with null descriptions before transport.
 
-Responses preserve `model`, `answers`, and token `usage`. Laya's `routing` and
-answer `action` fields are optional extensions; Noul confidence is optional too.
-Choice and Score confidence, distributions, and Score legends remain required.
-Every answer carries `answer_confidence`, the `max(p)` mass on the reported answer,
-which is the same quantity on all three question types. A call that passed
-`min_confidence` reports `abstention` and `abstention_threshold` on each of its
-answers and `low_confidence: true` on the ones below the threshold; with no
-threshold set, none of those three keys are sent, and that absence is the report.
-Optional extensions are validated when present.
+Responses preserve `model`, `answers` and token `usage`. Choice and Score carry confidence
+and distributions, and Score carries a legend. The client validates optional fields when present.
+In the extended response, `answer_confidence` is the top candidate probability, and a
+`min_confidence` policy may add `abstention`, `abstention_threshold` and `low_confidence`.
+Read these fields from deployments that enable the extended response. [HTTP confidence fields](http-api.md#confidence-three-numbers-not-interchangeable)
 
 `predict` posts `/v1/systemone`, `predictBatch` posts `/v1/systemone/batch`, `route` posts `/v1/route`, and `health` gets `/health`.
 Each call makes one request. `route(state, questions = {}, options = {})` reads the deployed
@@ -127,16 +123,15 @@ FastAPI errors, JSON validation, deadlines and cancellation, and hold this
 page's control table to the fields the client actually puts on the wire.
 Type checks cover optional metadata, inferred
 answer types, and ESM/CommonJS consumers. The live integration test starts the
-unchanged `laya.serve` application with a tiny offline checkpoint, compares SDK
+unchanged `laya_multimodal.serve` application with a tiny offline checkpoint, compares SDK
 predictions against direct Python inference, and exercises routing, presets,
 authentication and request limits. Batch parity uses the same inference batch shape, in
-extended and strict modes, and includes tournament results. CI also checks a pinned v0.4.7
-server and installs the npm tarball into an isolated ESM/CommonJS and TypeScript consumer.
+extended and strict modes, and includes tournament results. CI installs the npm tarball into
+an isolated ESM/CommonJS and TypeScript consumer.
 CI runs the SDK checks on Node.js 22 and 24.
 
 Tiny random weights verify transport and numerical parity, not pretrained
 quality or performance.
 
-See the [SDK guide](https://github.com/2351548518/laya/blob/main/sdk/typescript/README.md) for setup, examples, and npm
-publishing. The package will be published under the `laya-client` name. Python release workflows
-are unchanged.
+Run `npm test`, `npm run test:integration` and `npm run test:package` in `sdk/typescript`.
+[Setup, examples and release commands](https://github.com/2351548518/laya/blob/main/sdk/typescript/README.md)

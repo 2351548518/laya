@@ -21,7 +21,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-from laya.serve import (  # noqa: E402
+from laya_multimodal.serve import (  # noqa: E402
     BATCH_BODY_CALL_CONTROLS,
     BATCH_BODY_OUT_PARAMETERS,
     BATCH_BODY_ITEM_CONTROLS,
@@ -52,7 +52,7 @@ from laya.serve import (  # noqa: E402
 
 # Read from the router rather than copied here: the workload below has to reach the
 # typed-decisions checkpoint the same way a request does.
-from laya.revisions import DEFAULT_CHECKPOINT  # noqa: E402
+from laya_multimodal.revisions import DEFAULT_CHECKPOINT  # noqa: E402
 
 
 class FakeRouter:
@@ -318,7 +318,7 @@ class ScriptedUsageRouter(FakeRouter):
 
 def _state_truncated_logs(caplog):
     return [r for r in caplog.records
-            if r.name == "laya.serve" and r.levelno == logging.WARNING
+            if r.name == "laya_multimodal.serve" and r.levelno == logging.WARNING
             and "state truncated" in r.getMessage()]
 
 
@@ -328,7 +328,7 @@ def test_truncated_state_is_logged_on_systemone(monkeypatch, caplog):
     monkeypatch.setenv("LAYA_JEV_STRICT", "0")
     client = TestClient(create_app(router=ScriptedUsageRouter([dict(CUT_USAGE)])))
 
-    with caplog.at_level(logging.WARNING, logger="laya.serve"):
+    with caplog.at_level(logging.WARNING, logger="laya_multimodal.serve"):
         response = client.post("/v1/systemone", json=REQ)
 
     assert response.status_code == 200, response.text
@@ -352,7 +352,7 @@ def test_intact_responses_do_not_log_truncation(monkeypatch, caplog):
     """An uncut result keeps today's payload and does not warn, on either decision route."""
     monkeypatch.setenv("LAYA_JEV_STRICT", "0")
     client, _ = _client(monkeypatch)
-    with caplog.at_level(logging.WARNING, logger="laya.serve"):
+    with caplog.at_level(logging.WARNING, logger="laya_multimodal.serve"):
         single = client.post("/v1/systemone", json=REQ)
         batch = client.post("/v1/systemone/batch", json={"states": ["one", "two"],
                                                          "questions": REQ["questions"]})
@@ -369,7 +369,7 @@ def test_intact_responses_do_not_log_truncation(monkeypatch, caplog):
     caplog.clear()
     explicit = TestClient(create_app(router=ScriptedUsageRouter(
         [dict(INTACT_USAGE), dict(INTACT_USAGE), dict(INTACT_USAGE)])))
-    with caplog.at_level(logging.WARNING, logger="laya.serve"):
+    with caplog.at_level(logging.WARNING, logger="laya_multimodal.serve"):
         kept = explicit.post("/v1/systemone", json=REQ)
         kept_batch = explicit.post("/v1/systemone/batch", json={"states": ["one", "two"],
                                                                 "questions": REQ["questions"]})
@@ -386,7 +386,7 @@ def test_batch_logs_mixed_truncation_once(monkeypatch, caplog):
     monkeypatch.delenv("LAYA_JEV_STRICT", raising=False)
     client = TestClient(create_app(router=ScriptedUsageRouter([dict(CUT_USAGE), dict(INTACT_USAGE)])))
 
-    with caplog.at_level(logging.WARNING, logger="laya.serve"):
+    with caplog.at_level(logging.WARNING, logger="laya_multimodal.serve"):
         response = client.post("/v1/systemone/batch", json={"states": ["cut", "kept"],
                                                             "questions": REQ["questions"]})
 
@@ -413,7 +413,7 @@ def test_strict_mode_logs_truncation_before_projection(monkeypatch, caplog):
     monkeypatch.setenv("LAYA_JEV_STRICT", "1")
     client = TestClient(create_app(router=ScriptedUsageRouter([dict(CUT_USAGE), dict(CUT_USAGE), dict(INTACT_USAGE)])))
 
-    with caplog.at_level(logging.WARNING, logger="laya.serve"):
+    with caplog.at_level(logging.WARNING, logger="laya_multimodal.serve"):
         single = client.post("/v1/systemone", json=REQ)
     assert single.status_code == 200, single.text
     body = single.json()
@@ -427,7 +427,7 @@ def test_strict_mode_logs_truncation_before_projection(monkeypatch, caplog):
     assert "r0" in logs[0].getMessage() and "r1" in logs[0].getMessage()
 
     caplog.clear()
-    with caplog.at_level(logging.WARNING, logger="laya.serve"):
+    with caplog.at_level(logging.WARNING, logger="laya_multimodal.serve"):
         batch = client.post("/v1/systemone/batch", json={"states": ["cut", "kept"],
                                                          "questions": REQ["questions"]})
     assert batch.status_code == 200, batch.text
@@ -455,7 +455,7 @@ def test_missing_or_malformed_usage_stays_a_success(monkeypatch, caplog, usage):
     monkeypatch.setenv("LAYA_JEV_STRICT", "0")
     client = TestClient(create_app(router=ScriptedUsageRouter([usage, usage, usage])))
 
-    with caplog.at_level(logging.WARNING, logger="laya.serve"):
+    with caplog.at_level(logging.WARNING, logger="laya_multimodal.serve"):
         single = client.post("/v1/systemone", json=REQ)
         batch = client.post("/v1/systemone/batch", json={"states": ["one", "two"],
                                                          "questions": REQ["questions"]})
@@ -585,7 +585,7 @@ def test_tournament_refuses_unhashable_choice_labels_as_a_422(monkeypatch):
 
 
 def test_tournament_plan_names_the_question_on_unhashable_labels():
-    from laya import serve
+    from laya_multimodal import serve
     with pytest.raises(ValueError, match="queue"):
         serve._tournament_plan({"queue": {"type": "choice",
                                           "criteria": [["a", 1], ["b", 2], ["c", 3]]}}, 2)
@@ -902,7 +902,7 @@ def test_body_read_preserves_parse_error_codes(monkeypatch):
 class DeviceRouter:
     """A Router with resident checkpoints whose real devices are known.
 
-    `Agent.device` is a `torch.device`; `laya.mcp.device.agent_device` also accepts the
+    `Agent.device` is a `torch.device`; `laya_multimodal.mcp.device.agent_device` also accepts the
     plain string, which keeps this stub free of torch and of checkpoint weights.
     """
 
@@ -949,7 +949,7 @@ def test_health_without_a_resident_checkpoint_flags_the_preference(monkeypatch):
 def test_health_agrees_with_the_mcp_status_tool(monkeypatch):
     """One fact about the device, reported the same way by both surfaces."""
     pytest.importorskip("mcp")
-    from laya.mcp.tools import laya_status
+    from laya_multimodal.mcp.tools import laya_status
 
     monkeypatch.setenv("LAYA_DEVICE", "cuda")
     fake = DeviceRouter(english="cpu")
@@ -961,7 +961,7 @@ def test_health_agrees_with_the_mcp_status_tool(monkeypatch):
 
 
 def test_health_needs_neither_the_mcp_extra_nor_torch():
-    """`laya.mcp.device` is documented as importable without `mcp`; prove the server agrees."""
+    """`laya_multimodal.mcp.device` is documented as importable without `mcp`; prove the server agrees."""
     probe = r'''
 import sys
 class Blocker:
@@ -970,13 +970,13 @@ class Blocker:
             raise ImportError("mcp blocked")
 sys.meta_path.insert(0, Blocker())
 sys.path.insert(0, %r)
-from laya.mcp.device import agent_device, env_device, resolve_device, router_agent
+from laya_multimodal.mcp.device import agent_device, env_device, resolve_device, router_agent
 assert agent_device(type("A", (), {"device": "cpu"})()) == "cpu"
-assert env_device.__module__ == "laya.mcp.device"
-import laya.serve
-assert "mcp" not in sys.modules, "laya.mcp.device reached the mcp distribution"
+assert env_device.__module__ == "laya_multimodal.mcp.device"
+import laya_multimodal.serve
+assert "mcp" not in sys.modules, "laya_multimodal.mcp.device reached the mcp distribution"
 from fastapi.testclient import TestClient
-client = TestClient(laya.serve.create_app(router=type("R", (), {"loaded": ["multimodal"],
+client = TestClient(laya_multimodal.serve.create_app(router=type("R", (), {"loaded": ["multimodal"],
     "_agents": {"multimodal": type("A", (), {"device": "cpu"})()}})()))
 body = client.get("/health").json()
 assert body["device"] == "cpu" and body["checkpoint_devices"] == {"multimodal": "cpu"}, body
@@ -989,8 +989,8 @@ print("ok")
 
 def test_build_router_strips_the_device_before_torch_sees_it(monkeypatch):
     """A value pasted from a Dockerfile or a `.env` file carries a trailing newline."""
-    import laya.router
-    import laya.serve
+    import laya_multimodal.router
+    import laya_multimodal.serve
 
     seen = {}
 
@@ -1001,20 +1001,20 @@ def test_build_router_strips_the_device_before_torch_sees_it(monkeypatch):
         def preload(self, names=None):
             seen["preloaded"] = names
 
-    monkeypatch.setattr(laya.router, "Router", RecordingRouter)
+    monkeypatch.setattr(laya_multimodal.router, "Router", RecordingRouter)
     monkeypatch.setenv("LAYA_PRELOAD", "0")
     for raw, want in ((" cpu\n", "cpu"), ("cuda ", "cuda"), ("   ", None), ("cpu", "cpu")):
         monkeypatch.setenv("LAYA_DEVICE", raw)
-        laya.serve.build_router()
+        laya_multimodal.serve.build_router()
         assert seen["device"] == want, "%r -> %r" % (raw, seen["device"])
     monkeypatch.delenv("LAYA_DEVICE")
-    laya.serve.build_router()
+    laya_multimodal.serve.build_router()
     assert seen["device"] is None, repr(seen["device"])      # unset means auto
 
 
 def test_build_router_preloads_the_configured_native_checkpoint_by_default(monkeypatch):
-    import laya.router
-    import laya.serve
+    import laya_multimodal.router
+    import laya_multimodal.serve
 
     class RecordingRouter:
         def __init__(self, **options):
@@ -1024,17 +1024,17 @@ def test_build_router_preloads_the_configured_native_checkpoint_by_default(monke
         def preload(self, names=None):
             self.preloaded.append(names)
 
-    monkeypatch.setattr(laya.router, "Router", RecordingRouter)
+    monkeypatch.setattr(laya_multimodal.router, "Router", RecordingRouter)
     monkeypatch.setenv("LAYA_PRELOAD", "1")
     monkeypatch.setenv("LAYA_MULTIMODAL_MODEL", " trained-checkpoint ")
     monkeypatch.delenv("LAYA_MODELS", raising=False)
-    router = laya.serve.build_router()
+    router = laya_multimodal.serve.build_router()
     assert router.options["multimodal"] == "trained-checkpoint"
     assert router.preloaded == [["multimodal"]]
     monkeypatch.setenv("LAYA_MODELS", "english, multimodal")
-    assert laya.serve.build_router().preloaded == [["english", "multimodal"]]
+    assert laya_multimodal.serve.build_router().preloaded == [["english", "multimodal"]]
     monkeypatch.setenv("LAYA_PRELOAD", "0")
-    assert laya.serve.build_router().preloaded == []
+    assert laya_multimodal.serve.build_router().preloaded == []
 
 
 def test_health_supports_router_without_loaded_revisions(monkeypatch):
@@ -1119,7 +1119,7 @@ def test_resolve_port_reads_a_blank_value_as_unset(monkeypatch):
     one answers "unset": `_env_bool` above, `_default_model_option`, `_resolve_max_concurrent`,
     `_resolve_max_loaded`, `_resolve_max_batch_tokens`, `_resolve_max_token_budget`,
     `_resolve_tournament_group` and `_resolve_idle_unload_seconds` -- and outside the server,
-    `laya.mcp.server._remote_base_url`, whose own documentation says "Blank or unset means the
+    `laya_multimodal.mcp.server._remote_base_url`, whose own documentation says "Blank or unset means the
     default." On the base commit the startup path answered the same `SystemExit` it gives a bad
     port, so a declared-but-unfilled `.env` line stopped the server from starting and the message
     blamed the operator for a value they never wrote. Blank carries no number for a fallback to
@@ -1157,7 +1157,7 @@ def test_resolve_port_reads_a_blank_value_as_unset(monkeypatch):
 
 
 def test_resolve_model_follows_the_router_registry(monkeypatch):
-    from laya import router as router_mod
+    from laya_multimodal import router as router_mod
 
     monkeypatch.setitem(router_mod.DEFAULT_MODELS, "vision", "example/vision-checkpoint")
     monkeypatch.setitem(router_mod._ALIASES, "visual", "vision")
@@ -1263,8 +1263,8 @@ class _StubAgent:
 
 
 def _server_router(monkeypatch, **env):
-    """The Router `laya-serve` builds for `env`, with loads recorded instead of performed."""
-    from laya.serve import build_router
+    """The Router `laya-multimodal-serve` builds for `env`, with loads recorded instead of performed."""
+    from laya_multimodal.serve import build_router
 
     monkeypatch.setenv("LAYA_PRELOAD", "0")       # nothing may download
     monkeypatch.delenv("LAYA_MULTIMODAL_MODEL", raising=False)
@@ -1314,7 +1314,7 @@ def _run_workload(router, cycles):
 
 
 def test_max_loaded_reaches_the_router_the_server_builds(monkeypatch):
-    from laya.router import Router
+    from laya_multimodal.router import Router
 
     # Unset has to be reported as "not set", not as a copy of Router's default, or the two
     # numbers drift the day the default moves. Checked at the resolver, because a copy of 2 and
@@ -1364,14 +1364,14 @@ def test_raising_the_cap_stops_the_server_rebuilding_a_checkpoint(monkeypatch):
 # senha") carries nothing identifying its language and so goes to `default`. Both packaged
 # servers build their Router from the environment and neither could pass it: the only reader of
 # LAYA_DEFAULT_MODEL was examples/server.py, so the demo server honoured the variable while
-# laya-serve routed the ambiguous states to the English checkpoint it was told not to use.
+# laya-multimodal-serve routed the ambiguous states to the English checkpoint it was told not to use.
 #
 # Unlike the numeric knobs above, an unresolvable name is fatal here. `LAYA_MAX_LOADED=abc`
 # falling back to 2 costs a rebuild; `LAYA_DEFAULT_MODEL=mutli` falling back to english costs the
 # wrong checkpoint answering every ambiguous state, which is the failure the operator was trying
 # to configure away. So the message is core's and the server refuses to start.
 def test_default_model_reaches_the_router_the_server_builds(monkeypatch):
-    from laya.serve import _default_model_option
+    from laya_multimodal.serve import _default_model_option
 
     monkeypatch.delenv("LAYA_DEFAULT_MODEL", raising=False)
     assert _default_model_option() == {}
@@ -1385,7 +1385,7 @@ def test_default_model_reaches_the_router_the_server_builds(monkeypatch):
 
 
 def test_an_unresolvable_default_stops_the_server_with_core_s_words(monkeypatch):
-    from laya.serve import build_router
+    from laya_multimodal.serve import build_router
 
     monkeypatch.setenv("LAYA_PRELOAD", "0")
     monkeypatch.delenv("LAYA_DEFAULT_MODEL", raising=False)
@@ -1396,7 +1396,7 @@ def test_an_unresolvable_default_stops_the_server_with_core_s_words(monkeypatch)
     # Names the variable, quotes the value the operator typed, and then says in core's own words
     # what the accepted set is -- so the typo is fixed from the message, not from the source.
     assert message.startswith("invalid LAYA_DEFAULT_MODEL 'mutli-lingual': unknown model"), message
-    for name in ("multimodal", "default", "laya"):
+    for name in ("multimodal", "default"):
         assert name in message, message
     # The contrast with the numeric knobs has to stay the contrast: with the name fixed, the bad
     # number below still falls back instead of stopping the server.
@@ -1524,7 +1524,7 @@ def test_inference_failure_is_logged_and_not_leaked(monkeypatch, caplog):
     monkeypatch.delenv("LAYA_API_KEY", raising=False)
     client = TestClient(create_app(router=ExplodingRouter(secret)), raise_server_exceptions=False)
 
-    with caplog.at_level(logging.ERROR, logger="laya.serve"):
+    with caplog.at_level(logging.ERROR, logger="laya_multimodal.serve"):
         response = client.post("/v1/systemone", json=REQ)
 
     assert response.status_code == 500
@@ -1556,7 +1556,7 @@ def test_validation_errors_are_not_logged_as_failures(monkeypatch, caplog):
     monkeypatch.delenv("LAYA_API_KEY", raising=False)
     client = TestClient(create_app(router=RejectingRouter()), raise_server_exceptions=False)
 
-    with caplog.at_level(logging.ERROR, logger="laya.serve"):
+    with caplog.at_level(logging.ERROR, logger="laya_multimodal.serve"):
         response = client.post("/v1/systemone", json=REQ)
 
     assert response.status_code == 422, response.text
@@ -1575,7 +1575,7 @@ class ValidatingRouter:
     loaded = ["multimodal"]
 
     def predict(self, state, questions, model=None):
-        from laya.agent import Agent
+        from laya_multimodal.agent import Agent
         for qid, qdef in questions.items():
             Agent._check_question(qid, qdef)
         raise AssertionError("validation should have rejected this before predict()")
@@ -1827,12 +1827,12 @@ def test_accepted_connections_set_tcp_nodelay(monkeypatch):
 
     import uvicorn
 
-    import laya.serve
+    import laya_multimodal.serve
 
     captured = {}
     monkeypatch.setattr(uvicorn, "run", lambda app, **kwargs: captured.update(kwargs))
-    monkeypatch.setattr(laya.serve, "create_app", lambda: None)
-    laya.serve.main()
+    monkeypatch.setattr(laya_multimodal.serve, "create_app", lambda: None)
+    laya_multimodal.serve.main()
 
     async def drive():
         config = uvicorn.Config(create_app(router=FakeRouter()), host="127.0.0.1", port=0,
@@ -1964,32 +1964,32 @@ def test_a_bad_log_level_is_refused_before_uvicorn_sees_it(monkeypatch):
     """`main()` is where the level is handed over, so that is where the promise is checked."""
     import uvicorn
 
-    import laya.serve
+    import laya_multimodal.serve
 
     captured = {}
     monkeypatch.setattr(uvicorn, "run", lambda app, **kwargs: captured.update(kwargs))
-    monkeypatch.setattr(laya.serve, "create_app", lambda: None)
+    monkeypatch.setattr(laya_multimodal.serve, "create_app", lambda: None)
 
     monkeypatch.setenv("LAYA_LOG_LEVEL", "  WARNING  ")
-    laya.serve.main()
+    laya_multimodal.serve.main()
     assert captured["log_level"] == "warning"
 
     monkeypatch.setenv("LAYA_LOG_LEVEL", "")
     captured.clear()
-    laya.serve.main()
+    laya_multimodal.serve.main()
     assert captured["log_level"] == DEFAULT_LOG_LEVEL
 
     captured.clear()
     monkeypatch.setenv("LAYA_LOG_LEVEL", "verbose")
     with pytest.raises(SystemExit, match=r"invalid LAYA_LOG_LEVEL 'verbose'"):
-        laya.serve.main()
+        laya_multimodal.serve.main()
     assert captured == {}, "the refusal must happen before uvicorn.run is reached"
 
 
 def test_uvicorn_dies_on_the_values_the_resolver_refuses():
     """The witness that the guard guards a real crash: this is uvicorn's own behaviour, unmediated.
 
-    No `laya` code is on this path, which is the point -- `laya-serve` passed the environment
+    No `laya` code is on this path, which is the point -- `laya-multimodal-serve` passed the environment
     straight through, so every `KeyError` here is one the CLI printed.
     """
     import uvicorn
@@ -2093,7 +2093,7 @@ def test_batch_missing_questions_returns_400(monkeypatch):
 
 def test_batch_too_many_states_returns_413(monkeypatch):
     client, _ = _client(monkeypatch)
-    from laya.serve import MAX_BATCH_STATES
+    from laya_multimodal.serve import MAX_BATCH_STATES
     oversized = {"states": ["state"] * (MAX_BATCH_STATES + 1), "questions": REQ["questions"]}
     r = client.post("/v1/systemone/batch", json=oversized)
     assert r.status_code == 413
@@ -2142,7 +2142,7 @@ def test_batch_within_the_budget_is_passed_no_batch_size(monkeypatch):
     that works today must not start answering differently. Not-passing is the only way to guarantee
     that: it leaves `predict_batch` on its own default.
     """
-    import laya.serve as serve_mod
+    import laya_multimodal.serve as serve_mod
 
     client, fake = _batch_env_client(monkeypatch)
     rows = serve_mod.DEFAULT_MAX_BATCH_TOKENS // serve_mod._BATCH_ROW_TOKENS_ASSUMED
@@ -2156,7 +2156,7 @@ def test_batch_within_the_budget_is_passed_no_batch_size(monkeypatch):
 
 def test_batch_over_the_budget_is_split_not_refused(monkeypatch):
     """The 4096-row shape still answers; it is chunked so one pass stays inside the budget."""
-    import laya.serve as serve_mod
+    import laya_multimodal.serve as serve_mod
 
     client, fake = _batch_env_client(monkeypatch)
     r = client.post("/v1/systemone/batch",
@@ -2174,7 +2174,7 @@ def test_batch_over_the_budget_is_split_not_refused(monkeypatch):
 
 def test_batch_one_row_over_the_budget_is_split(monkeypatch):
     """One row over, with both factors inside their own caps, so the comparison cannot be off by one."""
-    import laya.serve as serve_mod
+    import laya_multimodal.serve as serve_mod
 
     client, fake = _batch_env_client(monkeypatch)
     rows = serve_mod.DEFAULT_MAX_BATCH_TOKENS // serve_mod._BATCH_ROW_TOKENS_ASSUMED
@@ -2194,7 +2194,7 @@ def test_batch_a_raised_max_len_chunks_harder(monkeypatch):
     512, so 256 rows at 8192 is the same token count as 4096 rows at 512 and collates the same tensor.
     Counting tokens means a wider row buys proportionally fewer rows per pass.
     """
-    import laya.serve as serve_mod
+    import laya_multimodal.serve as serve_mod
 
     wide = serve_mod.DEFAULT_MAX_TOKEN_BUDGET
     assert wide > serve_mod._BATCH_ROW_TOKENS_ASSUMED
@@ -2223,7 +2223,7 @@ def test_batch_an_explicit_batch_size_shapes_a_pass_but_cannot_widen_one(monkeyp
     tokens (64 states x 8192) with every documented limit satisfied. A smaller value still wins,
     because asking for a *narrower* pass is asking for less work than the plan allows.
     """
-    import laya.serve as serve_mod
+    import laya_multimodal.serve as serve_mod
 
     rows_that_do_not_fit = {"states": ["hi"] * serve_mod.MAX_BATCH_STATES,
                             "questions": _noul_questions(serve_mod.MAX_QUESTIONS)}
@@ -2253,7 +2253,7 @@ def test_batch_an_explicit_batch_size_shapes_a_pass_but_cannot_widen_one(monkeyp
 
 def test_batch_chunking_follows_a_raised_budget(monkeypatch):
     """A deployment whose hardware can take more stops being chunked."""
-    import laya.serve as serve_mod
+    import laya_multimodal.serve as serve_mod
 
     client, fake = _batch_env_client(monkeypatch, LAYA_MAX_BATCH_TOKENS="2097152")
     r = client.post("/v1/systemone/batch",
@@ -2265,7 +2265,7 @@ def test_batch_chunking_follows_a_raised_budget(monkeypatch):
 
 def test_batch_chunking_follows_a_lowered_budget(monkeypatch):
     """And a LOWERED one -- the regime an operator on small hardware actually uses."""
-    import laya.serve as serve_mod
+    import laya_multimodal.serve as serve_mod
 
     assert 2048 < serve_mod.DEFAULT_MAX_BATCH_TOKENS, "2048 must be the lowered regime"
     client, fake = _batch_env_client(monkeypatch, LAYA_MAX_BATCH_TOKENS="2048")
@@ -2279,10 +2279,10 @@ def test_batch_chunking_follows_a_lowered_budget(monkeypatch):
 @pytest.mark.parametrize("raw", ["nonsense", "0", "-5", "3.5"])
 def test_batch_budget_warns_and_falls_back_on_an_unusable_value(monkeypatch, caplog, raw):
     """A bad knob must not disable the chunking, and must say so in the log."""
-    import laya.serve as serve_mod
+    import laya_multimodal.serve as serve_mod
 
     monkeypatch.setenv("LAYA_MAX_BATCH_TOKENS", raw)
-    with caplog.at_level(logging.WARNING, logger="laya.serve"):
+    with caplog.at_level(logging.WARNING, logger="laya_multimodal.serve"):
         assert serve_mod._resolve_max_batch_tokens() == serve_mod.DEFAULT_MAX_BATCH_TOKENS
     assert "LAYA_MAX_BATCH_TOKENS" in caplog.text, caplog.text
     assert ("invalid" in caplog.text or "must be positive" in caplog.text), caplog.text
@@ -2297,7 +2297,7 @@ def test_batch_budget_warns_and_falls_back_on_an_unusable_value(monkeypatch, cap
 
 def test_batch_an_empty_environment_value_falls_back_silently(monkeypatch):
     """Unset and empty both mean "not configured", which is not worth a warning."""
-    import laya.serve as serve_mod
+    import laya_multimodal.serve as serve_mod
 
     monkeypatch.setenv("LAYA_MAX_BATCH_TOKENS", "")
     assert serve_mod._resolve_max_batch_tokens() == serve_mod.DEFAULT_MAX_BATCH_TOKENS
@@ -2309,7 +2309,7 @@ def test_batch_chunk_plan_floors_at_one_state(monkeypatch):
     At that floor one pass carries `len(questions)` rows, which is exactly what one `/v1/systemone`
     request can already ask for -- so the batch route's worst pass is the single route's worst pass.
     """
-    import laya.serve as serve_mod
+    import laya_multimodal.serve as serve_mod
 
     monkeypatch.delenv("LAYA_MAX_BATCH_TOKENS", raising=False)
     plan = serve_mod._batch_chunk_size(serve_mod.MAX_BATCH_STATES, serve_mod.MAX_QUESTIONS,
@@ -2322,7 +2322,7 @@ def test_batch_chunk_plan_floors_at_one_state(monkeypatch):
 @pytest.mark.parametrize("states,questions", [(0, 4), (4, 0), (0, 0)])
 def test_batch_chunk_plan_is_none_for_a_degenerate_shape(monkeypatch, states, questions):
     """Nothing to split, and no division by the question count."""
-    import laya.serve as serve_mod
+    import laya_multimodal.serve as serve_mod
 
     monkeypatch.delenv("LAYA_MAX_BATCH_TOKENS", raising=False)
     assert serve_mod._batch_chunk_size(states, questions) is None
@@ -2346,7 +2346,7 @@ def test_batch_a_non_object_questions_body_keeps_its_own_400(monkeypatch):
 
 def test_batch_too_many_questions_still_gets_its_own_413(monkeypatch):
     """Chunking does not replace the per-question cap: 300 questions is still refused, by name."""
-    import laya.serve as serve_mod
+    import laya_multimodal.serve as serve_mod
 
     client, _ = _batch_env_client(monkeypatch)
     r = client.post("/v1/systemone/batch",
@@ -2357,7 +2357,7 @@ def test_batch_too_many_questions_still_gets_its_own_413(monkeypatch):
 
 def test_batch_individual_oversized_state_returns_413(monkeypatch):
     client, _ = _client(monkeypatch)
-    from laya.serve import MAX_STATE_CHARS
+    from laya_multimodal.serve import MAX_STATE_CHARS
     bad_req = {
         "states": ["ok", "X" * (MAX_STATE_CHARS + 10)],
         "questions": REQ["questions"],
@@ -2541,7 +2541,7 @@ def test_both_decision_routes_refuse_the_escape_before_the_router_sees_it(path, 
     `predict_batch`, which raises the `TypeError` above for all three slots on the real one, so each
     is a `500 inference failed` on a live server plus a `_log.exception` traceback per request. That
     is exactly the shape 06462bf was written to stop. So each slot is its own case, the message is
-    read from `laya.serve` rather than retyped here, and the router is asserted to have seen
+    read from `laya_multimodal.serve` rather than retyped here, and the router is asserted to have seen
     nothing: the refusal has to land before the forward pass it exists to prevent.
     """
     monkeypatch.delenv("LAYA_API_KEY", raising=False)
@@ -2622,7 +2622,7 @@ _ZWSP_STATE = {"body": "\u200b" * 8332}    # len(str()) == 50004, serialized == 
 
 
 def _serialized_len(state):
-    """The length `laya.common.serialize_state` produces, without importing torch."""
+    """The length `laya_multimodal.common.serialize_state` produces, without importing torch."""
     return len(json.dumps(state, ensure_ascii=False))
 
 
@@ -2689,16 +2689,16 @@ def test_the_declared_limit_is_the_limit_for_ordinary_states(monkeypatch, reques
 def test_the_gate_agrees_with_the_function_that_feeds_the_tokenizer():
     """Pin serve.py's inline `json.dumps` to `serialize_state` itself.
 
-    serve.py cannot import it -- `laya.common` imports torch at module level and
-    `import laya.serve` must not (tests/test_lazy_import.py) -- so the mirror is held here
+    serve.py cannot import it -- `laya_multimodal.common` imports torch at module level and
+    `import laya_multimodal.serve` must not (tests/test_lazy_import.py) -- so the mirror is held here
     instead. Looked up rather than imported at module scope so that a serve.py without the
     helper fails this one check instead of aborting the suite's import.
     """
-    import laya.serve as serve_mod
+    import laya_multimodal.serve as serve_mod
 
     state_length = getattr(serve_mod, "_state_length", None)
-    assert state_length is not None, "laya.serve no longer measures the state through _state_length"
-    serialize_state = pytest.importorskip("laya.common").serialize_state
+    assert state_length is not None, "laya_multimodal.serve no longer measures the state through _state_length"
+    serialize_state = pytest.importorskip("laya_multimodal.common").serialize_state
     for state in (_QUOTE_STATE, _ZWSP_STATE, "plain text", {}, [],
                   {"a": {"b": ["c", 1, 1.5, None, True]}},
                   ["\u4e2d\u6587", '"', "'", "\n", "\x00", "\U0001f600"],
@@ -2766,7 +2766,7 @@ def test_the_probe_refuses_an_oversized_value_without_serializing_the_state(monk
     This is the check that goes red if `_state_length_lower_bound_over` is removed: without it the gate
     still answers 413, so the *absence of the dump* is the only observable difference.
     """
-    import laya.serve as serve_mod
+    import laya_multimodal.serve as serve_mod
 
     calls = []
     real_dumps = json.dumps
@@ -2797,7 +2797,7 @@ def test_the_probe_verdict_always_matches_the_exact_measurement():
     are compared across shapes placed deliberately on both sides of the limit -- including the
     escape-heavy values where `repr` and JSON diverge, which is what the gate exists for.
     """
-    import laya.serve as serve_mod
+    import laya_multimodal.serve as serve_mod
     cap = serve_mod.MAX_STATE_CHARS
     shapes = []
     for ch in ("a", '"', "\u200b", "\U000e0001", "\n", "\\", "\u4e2d"):
@@ -2829,7 +2829,7 @@ def test_the_early_refusal_reports_a_number_it_measured():
     """The 413 must not invent a count. Reporting `cap + 1` would answer "50001 > 50000" for a
     60 012-character state -- the same fabricated count this gate was written to remove.
     """
-    import laya.serve as serve_mod
+    import laya_multimodal.serve as serve_mod
     cap = serve_mod.MAX_STATE_CHARS
     # `cap + 1` is NOT the tell: {"body": "a" * 50001} legitimately sums to exactly that. The
     # property that distinguishes a measured bound from a fabricated one is `cap < reported <= exact`.
@@ -2848,7 +2848,7 @@ def test_the_probe_is_bounded_and_falls_through_rather_than_guessing():
     A state of 200 000 small values is not provably over within that budget, and must fall through
     to the encoder rather than be refused on a partial sum.
     """
-    import laya.serve as serve_mod
+    import laya_multimodal.serve as serve_mod
     assert serve_mod._STATE_PROBE_VALUES <= 256
     wide = {("k%06d" % i): "x" for i in range(200000)}
     assert serve_mod._state_length_lower_bound_over(wide, serve_mod.MAX_STATE_CHARS) == 0
@@ -2861,7 +2861,7 @@ def test_the_probe_walks_exact_container_types_only():
     13-character state refused as `60000 > 50000`. No HTTP request can reach it -- `json.loads`
     builds exact types -- but the 400 branch exists for in-process callers.
     """
-    import laya.serve as serve_mod
+    import laya_multimodal.serve as serve_mod
 
     class Lying(dict):
         def values(self):
@@ -2875,7 +2875,7 @@ def test_the_probe_walks_exact_container_types_only():
 # --------------------------------------------------------------------- per-call controls
 #
 # `Router.predict` takes nine arguments beyond `state` and `questions` that a JSON body could
-# state. `laya/serve.py` splits them into the two lists the tests below read, and the first test
+# state. `laya_multimodal/serve.py` splits them into the two lists the tests below read, and the first test
 # pins those lists against core's own signature: a control added to `predict` cannot be silently
 # ignored by the HTTP surface, because it has to be placed on one side of that line first.
 
@@ -2886,7 +2886,7 @@ NEW_CONTROL_VALUES = {"task": "multimodal", "lang": "de", "lang_guess": "de",
 
 def test_every_predict_control_is_forwarded_or_refused():
     """`BODY_CONTROLS` and `BODY_REFUSALS` must cover `Router.predict` exactly, both directions."""
-    from laya.router import Router
+    from laya_multimodal.router import Router
 
     taken = set(inspect.signature(Router.predict).parameters) - {"self", "state", "questions"}
     declared = set(BODY_CONTROLS) | set(BODY_REFUSALS) | set(MEDIA_REFUSALS)
@@ -2947,13 +2947,13 @@ def test_a_language_control_must_be_a_code_string(monkeypatch, key, value):
 
 @pytest.mark.parametrize("value", [1.5, -0.1, True, "0.9"])
 def test_min_confidence_is_validated_by_core(monkeypatch, value):
-    """The bounds belong to `laya.confidence`, so serve must report core's own message.
+    """The bounds belong to `laya_multimodal.confidence`, so serve must report core's own message.
 
     Comparing against the `ValueError` core raises for the same value is what keeps the accepted
     range from drifting: a restated `[0.0, 1.0]` check here would pass CI on the day core widened
     it and start rejecting requests the abstention gate would have honoured.
     """
-    from laya.confidence import check_min_confidence
+    from laya_multimodal.confidence import check_min_confidence
 
     try:
         check_min_confidence(value)
@@ -2993,7 +2993,7 @@ def test_an_unknown_task_gets_cores_answer_not_a_500(monkeypatch):
     reports as a 422 carrying its message. Listing the accepted tasks in `serve` instead would be
     a second registry to keep in step -- the failure mode #544 and #638 removed elsewhere.
     """
-    from laya.router import normalise_name
+    from laya_multimodal.router import normalise_name
 
     class RoutingRouter(BudgetRouter):
         def predict(self, state, questions, model=None, **kwargs):
@@ -3016,7 +3016,7 @@ def test_an_unknown_task_gets_cores_answer_not_a_500(monkeypatch):
 def test_a_hook_control_is_refused_not_dropped(monkeypatch, key):
     """All five used to be read into the body and ignored, so a client got a silent no.
 
-    `laya.integrations.langchain::_reject_remote_hooks` already refuses the same five on a node
+    `laya_multimodal.integrations.langchain::_reject_remote_hooks` already refuses the same five on a node
     with a `base_url`, on the grounds that a hook runs in the server's process. The endpoint now
     says that itself instead of answering as though the control had been honoured.
     """
@@ -3152,7 +3152,7 @@ def test_batch_call_controls_are_exactly_predict_batch_kwargs_or_refusal():
     to the batch path -- a caller cannot shorten the deadline on which the operator's own hooks
     execute.
     """
-    from laya.router import Router
+    from laya_multimodal.router import Router
 
     taken = set(inspect.signature(Router.predict_batch).parameters) - {"self", "requests"}
     declared = (set(BATCH_BODY_CALL_CONTROLS) | set(BODY_REFUSALS)
@@ -3474,7 +3474,7 @@ def test_health_without_an_api_key_is_unchanged(monkeypatch):
 
 def _health_return_keys():
     """The keys `health()` hands back, read out of its own `return` statement."""
-    path = os.path.join(ROOT, "laya", "serve.py")
+    path = os.path.join(ROOT, "laya_multimodal", "serve.py")
     with open(path, encoding="utf-8") as handle:
         tree = ast.parse(handle.read(), filename=path)
     for node in ast.walk(tree):
@@ -3483,7 +3483,7 @@ def _health_return_keys():
                 if isinstance(stmt, ast.Return) and isinstance(stmt.value, ast.Dict):
                     return node, [k.value for k in stmt.value.keys
                                   if isinstance(k, ast.Constant) and isinstance(k.value, str)]
-    raise AssertionError("no `def health()` returning a dict literal in laya/serve.py")
+    raise AssertionError("no `def health()` returning a dict literal in laya_multimodal/serve.py")
 
 
 def test_http_api_page_documents_exactly_the_health_fields():
@@ -3526,7 +3526,7 @@ def test_http_api_page_documents_exactly_the_health_fields():
 
     # `device` is a device label, not the configuration word: the labels come from the only function
     # that can produce one when nothing is resident.
-    dev_path = os.path.join(ROOT, "laya", "mcp", "device.py")
+    dev_path = os.path.join(ROOT, "laya_multimodal", "mcp", "device.py")
     with open(dev_path, encoding="utf-8") as handle:
         dev_tree = ast.parse(handle.read(), filename=dev_path)
     labels = set()
@@ -3613,14 +3613,14 @@ def _decision_response_site(rel):
 
 def _route_decision_keys():
     """Every keyword some `RouteDecision(...)` is built with, across all of `_route`'s branches."""
-    path = os.path.join(ROOT, "laya", "router.py")
+    path = os.path.join(ROOT, "laya_multimodal", "router.py")
     with open(path, encoding="utf-8") as handle:
         tree = ast.parse(handle.read(), filename=path)
     keys = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "RouteDecision":
             keys.update(kw.arg for kw in node.keywords if kw.arg)
-    assert keys, "no RouteDecision(...) call with keywords in laya/router.py; retarget this"
+    assert keys, "no RouteDecision(...) call with keywords in laya_multimodal/router.py; retarget this"
     return sorted(keys)
 
 
@@ -3676,8 +3676,8 @@ def _answer_literal_keys(rel):
 
 
 def _gate_written_keys():
-    """Every key the abstention gate writes onto an answer, from `laya/confidence.py` itself."""
-    path = os.path.join(ROOT, "laya", "confidence.py")
+    """Every key the abstention gate writes onto an answer, from `laya_multimodal/confidence.py` itself."""
+    path = os.path.join(ROOT, "laya_multimodal", "confidence.py")
     with open(path, encoding="utf-8") as handle:
         tree = ast.parse(handle.read(), filename=path)
     written = set()
@@ -3970,7 +3970,7 @@ def test_a_restarted_app_still_queues_concurrent_requests(monkeypatch):
 
 # -------------------------------- docs/typescript-sdk.md must list the keys the /health handler returns
 # The SDK page's contract sentence used to say "public `/health` returns `status`, `loaded`,
-# and `device`" while `laya/serve.py`'s authorized branch returns seven keys -- `status`,
+# and `device`" while `laya_multimodal/serve.py`'s authorized branch returns seven keys -- `status`,
 # `loaded`, `revisions`, `device`, `device_is_preference`, `checkpoint_devices`, and
 # `cpu_fallbacks` -- and the unauthenticated branch returns only `LIVENESS_ONLY = {"status":
 # "ok"}`. Two docs (#811 gated `docs/http-api.md`, and README:103 advertises the CPU-fallback
@@ -4007,8 +4007,8 @@ def _serve_health_return_keys():
     a `**name` spread contributes the keys of the dict `name` was assigned -- that is how the two
     conditional idle fields reach the response, and reading the return dict's own keys missed them.
     """
-    with open(os.path.join(ROOT, "laya", "serve.py"), encoding="utf-8") as handle:
-        tree = ast.parse(handle.read(), filename="laya/serve.py")
+    with open(os.path.join(ROOT, "laya_multimodal", "serve.py"), encoding="utf-8") as handle:
+        tree = ast.parse(handle.read(), filename="laya_multimodal/serve.py")
     module_dicts = {}
     for node in tree.body:
         if isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict):
@@ -4039,7 +4039,7 @@ def _serve_health_return_keys():
                     keys.update(local_dicts.get(value.id, ()))
                     keys.update(module_dicts.get(value.id, ()))
             return keys
-    raise AssertionError("no `health` handler found in laya/serve.py -- gate is checking a moved symbol")
+    raise AssertionError("no `health` handler found in laya_multimodal/serve.py -- gate is checking a moved symbol")
 
 
 def _ts_sdk_health_claim_keys():
@@ -4065,7 +4065,7 @@ def _ts_sdk_health_claim_keys():
 
 
 def test_ts_sdk_health_claim_matches_the_handler():
-    """The SDK page must name exactly the keys `laya/serve.py`'s `health` handler returns."""
+    """The SDK page must name exactly the keys `laya_multimodal/serve.py`'s `health` handler returns."""
     assert "returns `status`, `loaded`, and `device`" in TS_SDK_OLD_CLAIM, (
         "the pre-fix literal must itself carry the wrong key set, otherwise this ban is vacuous")
     # Sanity-check the AST extraction: the shipped code returns seven keys on the authorized branch
@@ -4084,7 +4084,7 @@ def test_ts_sdk_health_claim_matches_the_handler():
         "handler before re-pinning either side.")
     documented = _ts_sdk_health_claim_keys()
     assert documented == handler_keys, (
-        "docs/typescript-sdk.md's /health sentence names %s, but `laya/serve.py`'s `health` "
+        "docs/typescript-sdk.md's /health sentence names %s, but `laya_multimodal/serve.py`'s `health` "
         "handler returns %s. Any drift here misleads a caller who reads only the SDK page." % (
             sorted(documented), sorted(handler_keys)))
 
@@ -4101,7 +4101,7 @@ def test_ts_sdk_health_claim_drops_the_three_key_version():
     banned = "returns `status`, `loaded`, and `device`"
     assert banned not in page, (
         "docs/typescript-sdk.md again says `/health` returns only `status`, `loaded`, and "
-        "`device`. `laya/serve.py`'s authorized branch has seven keys and the unauthenticated "
+        "`device`. `laya_multimodal/serve.py`'s authorized branch has seven keys and the unauthenticated "
         "branch has one; if either shape has since changed, update this ban's literal too.")
 
 
@@ -4126,7 +4126,7 @@ def test_jev_strict_projection_page_names_the_projected_keys():
     import re
     from pathlib import Path
 
-    from laya.serve import _project_jev_strict
+    from laya_multimodal.serve import _project_jev_strict
 
     fixture = {
         "model": "laya-rl-agent",
@@ -4167,14 +4167,14 @@ def test_jev_strict_projection_page_names_the_projected_keys():
     assert "noul only" not in page, "pre-fix 'noul only' wording is still on the page"
 
 # Serving a fine-tune today means rebuilding the package: `Router` has grown
-# `register` / `models=`, but `laya-serve` reads its whole configuration from the
+# `register` / `models=`, but `laya-multimodal-serve` reads its whole configuration from the
 # environment, so an operator with a local checkpoint had no way to reach either.
 # LAYA_EXTRA_MODELS is the JSON-object form of `Router(models=...)`, parsed once
 # at startup; the request handlers then resolve `model` against the Router's own
 # registry rather than the built-in table, so a registered name pins its
 # checkpoint the same way `english` does.
 def test_extra_models_option_parses_the_json_object(monkeypatch):
-    from laya.serve import _extra_models_option
+    from laya_multimodal.serve import _extra_models_option
 
     # Unset and blank are "not asked for", like every other option here.
     monkeypatch.delenv("LAYA_EXTRA_MODELS", raising=False)
@@ -4195,7 +4195,7 @@ def test_extra_models_option_parses_the_json_object(monkeypatch):
 
 
 def test_extra_models_option_refuses_a_malformed_value(monkeypatch):
-    from laya.serve import _extra_models_option
+    from laya_multimodal.serve import _extra_models_option
 
     # The fail-closed rule is `_default_model_option`'s: a checkpoint silently
     # absent from the registry would auto-route its traffic to a different one,
@@ -4248,7 +4248,7 @@ def test_extra_models_refuse_the_names_router_refuses(monkeypatch):
         assert "checkpoint name" in str(raised.value), name
 
     # And a default that names nothing registered is still fatal, unchanged.
-    from laya.serve import build_router
+    from laya_multimodal.serve import build_router
 
     monkeypatch.setenv("LAYA_PRELOAD", "0")
     monkeypatch.setenv("LAYA_EXTRA_MODELS", '{"my-ckpt": "/tmp/ckpt"}')
@@ -4435,7 +4435,7 @@ def test_http_route_refuses_non_boolean_explain_before_dispatch(monkeypatch, bad
 
 @pytest.mark.parametrize("diagnostic", [None, {"stage": "operator", "reason": "hook replacement", "source": None}])
 def test_http_route_observes_the_final_hook_decision_once(monkeypatch, diagnostic):
-    from laya import BaseHook, Router
+    from laya_multimodal import BaseHook, Router
 
     class ReplaceRoute(BaseHook):
         def on_route(self, ctx):
@@ -4469,7 +4469,7 @@ def test_http_route_observes_the_final_hook_decision_once(monkeypatch, diagnosti
 @pytest.mark.parametrize("control", [{"model": "multimodal"}, {"task": "multimodal"},
                                      {"lang": "de"}, {"lang_guess": "de"}])
 def test_http_route_explicit_controls_match_core_and_have_null_diagnostic(monkeypatch, control):
-    from laya import Router
+    from laya_multimodal import Router
 
     monkeypatch.delenv("LAYA_API_KEY", raising=False)
     router = Router()
@@ -4482,7 +4482,7 @@ def test_http_route_explicit_controls_match_core_and_have_null_diagnostic(monkey
 
 
 def test_http_route_uses_server_defaults_and_registered_models(monkeypatch):
-    from laya import Router
+    from laya_multimodal import Router
 
     monkeypatch.delenv("LAYA_API_KEY", raising=False)
     router = Router(default="multimodal", models={"private": "/tmp/operator-checkpoint"})
@@ -4500,7 +4500,7 @@ def test_http_route_uses_server_defaults_and_registered_models(monkeypatch):
 
 @pytest.mark.parametrize("control", [{}, {"task": None, "lang": None, "lang_guess": None}])
 def test_http_route_omitted_or_null_controls_inherit_router_hints(monkeypatch, control):
-    from laya import Router
+    from laya_multimodal import Router
 
     monkeypatch.delenv("LAYA_API_KEY", raising=False)
     router = Router(default="multimodal", lang_guess="de")
@@ -4594,7 +4594,7 @@ def test_http_route_internal_failure_is_sanitized_not_retried(monkeypatch, caplo
     monkeypatch.delenv("LAYA_API_KEY", raising=False)
     fake = BrokenRouter()
     with TestClient(create_app(fake), raise_server_exceptions=False) as client:
-        with caplog.at_level(logging.ERROR, logger="laya.serve"):
+        with caplog.at_level(logging.ERROR, logger="laya_multimodal.serve"):
             response = client.post("/v1/route", json={**_ROUTE_REQ, "explain": True})
     assert response.status_code == 500, response.text
     assert response.json() == {"detail": "routing failed"}
@@ -4687,7 +4687,7 @@ def test_http_route_admission_covers_routing_and_is_reusable(monkeypatch):
 def test_http_route_and_prediction_share_worker_without_blocking_health(monkeypatch):
     import threading
     import httpx
-    import laya.serve as serve
+    import laya_multimodal.serve as serve
 
     class BlockingRoute(DiagnosticRouter):
         def __init__(self):
@@ -4755,7 +4755,7 @@ def test_http_route_and_prediction_share_worker_without_blocking_health(monkeypa
 @pytest.mark.parametrize("fail", [False, True])
 def test_http_route_does_not_reset_the_inference_idle_clock(monkeypatch, fail):
     import time
-    import laya.serve as serve
+    import laya_multimodal.serve as serve
 
     clock = [100.0]
     monkeypatch.setattr(serve, "time", SimpleNamespace(monotonic=lambda: clock[0], perf_counter=time.perf_counter))
@@ -4788,7 +4788,7 @@ def test_http_route_finishing_or_cancelled_does_not_postpone_idle_unload(monkeyp
     import threading
     import time
     import httpx
-    import laya.serve as serve
+    import laya_multimodal.serve as serve
 
     clock = [100.0]
     monkeypatch.setattr(serve, "time", SimpleNamespace(monotonic=lambda: clock[0], perf_counter=time.perf_counter))
@@ -4889,7 +4889,7 @@ def test_http_route_validation_and_failure_release_admission(monkeypatch, caplog
     with TestClient(create_app(fake)) as client:
         rejected = client.post("/v1/route", json={**_ROUTE_REQ, "state": "invalid task"})
         assert rejected.status_code == 422 and "bad-task" in rejected.json()["detail"]
-        with caplog.at_level(logging.ERROR, logger="laya.serve"):
+        with caplog.at_level(logging.ERROR, logger="laya_multimodal.serve"):
             failed = client.post("/v1/route", json={**_ROUTE_REQ, "state": "broken hook"})
         assert failed.status_code == 500 and "private hook error" not in failed.text
         assert client.post("/v1/route", json=_ROUTE_REQ).status_code == 200

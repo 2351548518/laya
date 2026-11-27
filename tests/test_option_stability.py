@@ -10,7 +10,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from laya.hooks import (  # noqa: E402
+from laya_multimodal.hooks import (  # noqa: E402
     ALL_VARIANTS,
     OptionStabilityHook,
     PredictContext,

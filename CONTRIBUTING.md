@@ -11,7 +11,7 @@ in the user's own process or on their own hardware, with no dependency on a host
 external API. A feature that only works against a hosted backend is out of scope for the core
 package; it belongs in a separate integration or a community project.
 
-Keep reusable multimodal code in `laya/`, `scripts/multimodal/` and `configs/multimodal/`.
+Keep reusable multimodal code in `laya_multimodal/`, `scripts/multimodal/` and `configs/multimodal/`.
 Store source-specific preparation, intermediate outputs and experiment logs under `_local/`.
 
 ## Ways to contribute
@@ -28,8 +28,8 @@ Use Python 3.11 or newer for the native runtime. Install the extras for the code
 
 ```bash
 python -m pip install -e '.[multimodal,serve,mcp,langchain]' pytest httpx ruff
-ruff check laya/ --select=E9,F63,F7,F82,F401,F811 --line-length=120
-python -m compileall -q laya/ tests/
+ruff check laya_multimodal/ --select=E9,F63,F7,F82,F401,F811 --line-length=120
+python -m compileall -q laya_multimodal/ tests/
 python scripts/test_suites.py
 ```
 
@@ -39,12 +39,17 @@ media preprocessing or decision decoding.
 
 ## Documentation
 
-Describe the command or API the user should call and the checkpoint it needs.
-Build the documentation before submitting changes.
+Describe the command or API the reader should call and the checkpoint it needs. English pages
+live under `docs/`, with corresponding Simplified Chinese pages under `docs/zh-CN/`.
+Update both versions when an example, interface or metric changes. Keep shared v6 images,
+configuration and sample indexes in `docs/project-readme/assets/`.
+
+Build and check the documentation before submitting changes.
 
 ```bash
 python -m pip install -r requirements-docs.txt
 zensical build --strict --clean
+python tests/test_packaging.py
 ```
 
 ## Style
@@ -100,7 +105,7 @@ Use the issue templates and include:
 
 - What you expected and what you got.
 - A minimal reproduction, ideally a short script.
-- Your Laya version (`python -c "import laya; print(laya.__version__)"`), Python version, OS, and
+- Your Laya version (`python -c "import laya_multimodal; print(laya_multimodal.__version__)"`), Python version, OS, and
   device (CPU, CUDA or MPS).
 
 ## Reviews

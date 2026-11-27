@@ -1,5 +1,7 @@
 # Native multimodal decisions
 
+**English** · [简体中文](zh-CN/multimodal.md)
+
 `MultimodalAgent` turns text and native media into typed answers. The backbone processes the
 input, and the candidate scorer or single-box head reads its hidden states. Each question uses
 one backbone forward pass and returns zero generated tokens.
@@ -33,9 +35,9 @@ checkpoint. Training data, model weights and local run outputs are not shipped i
 Ask two questions about the same image with the downloaded checkpoint.
 
 ```python
-import laya
+import laya_multimodal
 
-agent = laya.MultimodalAgent("models/jev-multimodal-qwen3.5-4b", device="cpu")
+agent = laya_multimodal.MultimodalAgent("models/jev-multimodal-qwen3.5-4b", device="cpu")
 questions = {
     "action": {
         "type": "choice", "instructions": "Choose the next action.",
@@ -69,15 +71,15 @@ commands from the repository root. [Native example](https://github.com/235154851
 
 ## From input to answer
 
-`MultimodalAgent` in `laya/multimodal.py` passes the rendered question and its input to the
+`MultimodalAgent` in `laya_multimodal/multimodal.py` passes the rendered question and its input to the
 backbone's processor. For `choice`, `noul` and `score`, `candidate_positions` identifies the
 candidate marker tokens after the processor inserts media tokens. `CandidateScorer` in
-`laya/multimodal_readout.py` projects and compares each marker's hidden state with the final
+`laya_multimodal/multimodal_readout.py` projects and compares each marker's hidden state with the final
 question state. A softmax turns the resulting logits into probabilities. Probabilities of 0.2
 for `continue` and 0.8 for `inspect` yield `choice="inspect"`. The same probabilities over
 levels 0 and 1 yield `score=0.8`.
 
-For a `box` question, `GroundingHead` in `laya/grounding.py` projects the final valid hidden
+For a `box` question, `GroundingHead` in `laya_multimodal/grounding.py` projects the final valid hidden
 state to one normalized box. Its quality score estimates the intersection over union (IoU)
 between the predicted box and the target.
 
@@ -86,12 +88,12 @@ between the predicted box and the target.
 Pass the trained checkpoint to `Router` to enable the native inference path.
 
 ```python
-router = laya.Router(multimodal="models/jev-multimodal-qwen3.5-4b", device="cpu")
+router = laya_multimodal.Router(multimodal="models/jev-multimodal-qwen3.5-4b", device="cpu")
 result = router.predict("Current scene", questions, image="scene.jpg")
 ```
 
 For the HTTP server, install `.[multimodal,serve]`, set `LAYA_MULTIMODAL_MODEL` to the same
-checkpoint and start `laya-serve`. Use `POST /v1/systemone` for text and image questions.
+checkpoint and start `laya-multimodal-serve`. Use `POST /v1/systemone` for text and image questions.
 The `assets` map places pictures in the state, instructions or criteria. Set
 `"model": "multimodal"` for native text decisions. Use `POST /v1/multimodal` for inline audio
 and video file bytes. The configured backbone determines which modalities and video audio
@@ -152,88 +154,15 @@ records into a padded micro-batch. A single input can run independently up to `m
 
 ## Head warmup and LoRA training
 
-The joint trainer is `laya.train.finetune_grounding`. It supports `head`, `lora` and `full` modes.
-Run it with `laya-train`, `laya train` or `python scripts/multimodal/train.py`.
-
-The supplied recipes use a global batch size of 64 records across all GPUs. Each rank packs up
-to four records per microbatch within a budget of 16,384 padded tokens. A microbatch contributes
-in proportion to its share of the global batch before the ranks sum their gradients.
-
-Start with the original local Qwen backbone. This stage initializes the heads using the
-configured seed and trains the readouts while the backbone stays frozen.
-
-```bash
-CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --standalone --nproc_per_node=4 \
-  scripts/multimodal/train.py --model models/Qwen3.5-4B \
-  --data multimodal-data/example/head --out multimodal-runs/example/head \
-  --config configs/multimodal/head.json --visual-only \
-  --require-original-base --allow-unadmitted
-```
-
-Start the LoRA stage from the selected head checkpoint. This run creates new adapters and a
-fresh optimizer.
-
-```bash
-CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --standalone --nproc_per_node=4 \
-  scripts/multimodal/train.py --model multimodal-runs/example/head/best \
-  --data multimodal-data/example/full --out multimodal-runs/example/sft \
-  --config configs/multimodal/sft.json --visual-only --allow-unadmitted
-```
-
-Omit `--visual-only` and select a Gemma 4 backbone to train on audio and video with a
-soundtrack. The Qwen LoRA recipe trains the language adapters, visual merger, and decision
-and box readouts while keeping the visual encoder frozen.
-
-The starter recipes use supervised losses in `laya/train.py`.
-
-- A hard label such as `inspect` gives all cross-entropy weight to that option. A soft target
-  of `[0.2, 0.8]` weights the log probabilities of `continue` and `inspect` by 0.2 and 0.8.
-  The head warmup adds Brier loss and applies ranked probability score (RPS) to ordinal decisions.
-- A box annotation supplies four coordinates. L1 penalizes coordinate errors, generalized IoU
-  (GIoU) penalizes poor overlap, and the quality loss uses the predicted box's IoU with the target.
-
-Candidate readouts project only the selected hidden states in FP32. The LoRA recipe uses gradient checkpointing, length bucketing,
-per-module learning rates, and cosine decay after warmup. Set `activation_offload_min_tokens`
-to offload saved activations to CPU when a micro-batch reaches this many padded tokens.
-Set `balance_ranks` to group compatible admitted lengths and distribute their work across GPUs
-within each optimizer window.
-Set `prefetch_video` to overlap video decoding on the CPU with decision updates.
-Set `fused_adamw` to use PyTorch's fused AdamW optimizer and reduce optimizer-step temporary storage.
-For Qwen3.5, `--qwen-training-delta` reduces the temporary gradients in the PyTorch
-chunk scan during training. The LoRA recipe selects by the harmonic
-mean of the single-box IoU≥0.5 accuracy and decision accuracy averaged across modalities.
-Retention checks can reject a checkpoint that exceeds its allowed development-set regression.
-Set `video_cache_dir` to `null` to disable disk caching and use `video_cache_size` to cap the
-number of decoded clips retained in memory on each rank.
-Set `shuffle_options` in the joint configuration to permute Choice options without a fixed
-order or references to option positions. The loss aligns logits to the original labels and replay
-distributions. Development inference uses one request per decision forward pass by default.
-The recipes allow four compatible image requests per grounding evaluation forward pass.
-Set `distributed_decision_eval` for single-request decision evaluation on all training ranks.
-Each rank keeps requests for the same video clip together, and the primary rank restores the original
-record order before computing metrics.
-For large JSONL splits, the primary rank validates the records and shares the offset index
-with the other ranks.
-
-For recoverable joint training, set `checkpoint_every` to a positive number of optimizer steps.
-The trainer publishes a local optimizer snapshot at that interval, at development evaluation
-points and at the final optimizer step. It keeps the latest two complete snapshots. Resume with
-`--resume RUN_DIRECTORY` and the original model, dataset, optimizer configuration and rank count.
-The snapshot restores AdamW, the current epoch order, the per-rank random states, and the
-best checkpoint selected at that step. Use the same `--deterministic` setting for the original
-training and its continuation when comparing exact updates. Deterministic kernels can cost throughput.
+The joint training command is `laya-multimodal train`. The head stage freezes the original
+backbone and fits the decision and single-box readouts. LoRA starts from the warmup selection
+with a new optimizer and adapters. Use `training_report.json` to find the selected checkpoint.
+[Two-stage commands, losses and memory settings](finetune.md) · [v6 recipe](project-readme/multimodal.md#reproduce)
 
 ### SwanLab reporting
 
-Install `.[multimodal,swanlab]` and add `--swanlab local` to the joint training command to record
-metrics under `OUT/swanlog`. Use `--swanlab online --swanlab-project PROJECT` after authenticating
-to open the account dashboard. Rank zero records the actual loss, gradient norm, optimizer
-learning rates and development metrics. Final evaluation has its own metric group. A continuation
-creates a separate experiment in the same group with the original optimizer step numbers.
-[SwanLab tutorial](project-readme/multimodal.md#swanlab)
-
-Use `laya-train` for the joint v6 recipe. `laya-mm-train` runs native decision distillation
-and reference-KL experiments. Both commands load the same native backbone and decision readout.
+The joint trainer can record metrics locally or online from rank zero.
+[Installation and monitoring](finetune.md#resume-and-monitor) · [SwanLab tutorial](project-readme/multimodal.md#swanlab)
 
 ## Calibration and evaluation
 
@@ -262,7 +191,7 @@ same frame selection are evaluated together, with their results returned in the 
 
 ## Source and local workspace layout
 
-Core runtime and training modules live in `laya/`. Find the portable commands in
+Core runtime and training modules live in `laya_multimodal/`. Find the portable commands in
 `scripts/multimodal/` and starter settings in `configs/multimodal/`. The native multimodal CI
 lane runs the relevant suites on CPU using small local fixtures.
 

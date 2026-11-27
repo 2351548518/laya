@@ -31,13 +31,13 @@ def main():
     parser.add_argument("--out", type=Path, help="write the result to this file")
     args = parser.parse_args()
 
-    import laya
+    import laya_multimodal
     import torch
-    from laya.revisions import default_checkpoint
+    from laya_multimodal.revisions import default_checkpoint
 
     source = args.model or default_checkpoint()
     started = time.perf_counter()
-    agent = laya.load(source, device=args.device)
+    agent = laya_multimodal.load(source, device=args.device)
     load_ms = (time.perf_counter() - started) * 1000
 
     cases = load_cases(args.dataset)
@@ -67,7 +67,7 @@ def main():
             "model": source, "revision": agent.checkpoint_revision, "rung": args.rung,
             "dataset": args.dataset,
             "lang": args.lang,
-            "laya": getattr(laya, "__version__", None), "torch": torch.__version__,
+            "laya": getattr(laya_multimodal, "__version__", None), "torch": torch.__version__,
             "threads": torch.get_num_threads(), "device": str(agent.device),
             "machine": platform.machine(), "system": platform.platform(),
             "omp_num_threads": os.environ.get("OMP_NUM_THREADS"),

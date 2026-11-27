@@ -16,5 +16,5 @@ x-spark: &spark
             capabilities: [gpu]
 
 services:
-  laya: *spark
-  laya-serve: *spark
+  laya-multimodal: *spark
+  laya-multimodal-serve: *spark

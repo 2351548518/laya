@@ -5,7 +5,6 @@ setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
 set "VENV=.venv-mm"
-if /i "%~1"=="--multimodal" shift
 set "PORT=%~1"
 if "%PORT%"=="" set "PORT=8000"
 
@@ -27,7 +26,7 @@ if not exist "%VENV%\Scripts\python.exe" (
     )
     !PYEXE! -m venv "%VENV%" || goto :fail
 )
-if not exist "%VENV%\Scripts\laya-serve.exe" (
+if not exist "%VENV%\Scripts\laya-multimodal-serve.exe" (
     echo [setup] Installing Laya dependencies...
     "%VENV%\Scripts\python.exe" -m pip install -q --upgrade pip || goto :fail
     "%VENV%\Scripts\python.exe" -m pip install -q torch torchvision --index-url "%TORCH_INDEX_URL%" || goto :fail
@@ -39,7 +38,7 @@ set "LAYA_HOST=127.0.0.1"
 set "LAYA_PORT=%PORT%"
 if not defined LAYA_PRELOAD set "LAYA_PRELOAD=0"
 echo Laya media API: http://localhost:%PORT%/v1/multimodal
-"%VENV%\Scripts\python.exe" -m laya.serve
+"%VENV%\Scripts\python.exe" -m laya_multimodal.serve
 exit /b %ERRORLEVEL%
 
 :fail

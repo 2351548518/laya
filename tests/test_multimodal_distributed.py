@@ -13,13 +13,13 @@ pytest.importorskip("PIL")
 pytest.importorskip("scipy")
 pytestmark = pytest.mark.skipif(not dist.is_available() or not dist.is_gloo_available(), reason="needs PyTorch Gloo")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from laya.multimodal_distributed import _atomic_torch_save, distributed_context  # noqa: E402
-from laya.multimodal_distributed import DistributedContext  # noqa: E402
-from laya.train import (  # noqa: E402
+from laya_multimodal.multimodal_distributed import _atomic_torch_save, distributed_context  # noqa: E402
+from laya_multimodal.multimodal_distributed import DistributedContext  # noqa: E402
+from laya_multimodal.train import (  # noqa: E402
     GroundingTrainConfig, _evaluate_development, _shared_indexed_rows, finetune_grounding,
 )
-from laya.grounding import GroundingHead  # noqa: E402
-from laya.multimodal_train import MultimodalTrainConfig, finetune_multimodal, load_rows  # noqa: E402
+from laya_multimodal.grounding import GroundingHead  # noqa: E402
+from laya_multimodal.multimodal_train import MultimodalTrainConfig, finetune_multimodal, load_rows  # noqa: E402
 from test_multimodal import Q, tiny_agent  # noqa: E402
 
 
@@ -60,7 +60,7 @@ def _distributed_worker(rank, world, directory):
         assert torch.all(large.grad == 3)
         del large
         held_out = {name + "_data": directory / (name + ".jsonl") for name in ("validation", "test", "selection")}
-        with patch("laya.multimodal_train.load_rows", wraps=load_rows) as loaded:
+        with patch("laya_multimodal.multimodal_train.load_rows", wraps=load_rows) as loaded:
             weight, report = _train_cpu(directory / "train.jsonl", directory / "parallel", held_out=held_out)
         requested = [call.args[0] for call in loaded.call_args_list]
         assert requested == [directory / "train.jsonl"] + (list(held_out.values()) if context.main else [])
@@ -130,7 +130,7 @@ def test_joint_development_and_startup_share_work_without_changing_results(tmp_p
 
 
 def _joint_restart_worker(rank, world, directory):
-    from laya._grounding_checkpoint import resolve_checkpoint, save_checkpoint
+    from laya_multimodal._grounding_checkpoint import resolve_checkpoint, save_checkpoint
 
     torch.set_num_threads(1)
     path = Path(directory)
@@ -173,7 +173,7 @@ def _joint_restart_worker(rank, world, directory):
 
     try:
         expected = train(path / "full")
-        with patch("laya.train.save_checkpoint", side_effect=interrupted):
+        with patch("laya_multimodal.train.save_checkpoint", side_effect=interrupted):
             with pytest.raises(RuntimeError, match="simulated interruption"):
                 train(path / "interrupted")
         saved = resolve_checkpoint(path / "interrupted")

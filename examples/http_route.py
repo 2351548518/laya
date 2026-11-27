@@ -11,8 +11,8 @@ import os
 
 from fastapi.testclient import TestClient
 
-from laya import Router
-from laya.serve import create_app
+from laya_multimodal import Router
+from laya_multimodal.serve import create_app
 
 
 def main():

@@ -23,7 +23,7 @@ import sys
 import time
 from collections import Counter
 
-import laya
+import laya_multimodal
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CSV = os.path.join(HERE, "data", "routing_labels.csv")
@@ -106,10 +106,10 @@ def main():
     print("%d rows: %d to fit, %d held out (%d per team)" % (len(rows), len(fit_rows), len(held), HOLD_OUT_PER_TEAM))
     print("minimum rows fit() accepts for these questions: %d (5 per option of the widest question "
           "for the heads, plus a quarter held out to calibrate on, never fewer than 10)"
-          % laya.VegaAgent.min_rows(QUESTIONS))
+          % laya_multimodal.VegaAgent.min_rows(QUESTIONS))
 
     t0 = time.time()
-    agent = laya.VegaAgent(vegaml=args.reader or True, device=args.device)
+    agent = laya_multimodal.VegaAgent(vegaml=args.reader or True, device=args.device)
     print("loaded %s in %.0fs" % (agent, time.time() - t0))
 
     probe = held[0]
