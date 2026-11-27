@@ -1,8 +1,52 @@
 # 按模态与输出类型查看真实样例
 
-每个有数据的「模态 × 输出类型」组合各取三条 v6 训练记录，共 30 条。代码块展示原始请求与监督目标。媒体路径用示意文件名替换，记录 ID 和行号可在原始 `native/train.jsonl` 中查找。音频参考样例取自 Gemma 训练集。
+v6 的每个有数据的「模态 × 输出类型」组合各取三条训练记录，共 30 条。代码块展示请求与监督目标。媒体路径用示意文件名替换，原始记录可以用 ID 或样例索引定位。音频参考样例取自 Gemma 训练集。
 
-[主说明](multimodal-current.md) · [64 类细任务样例](multimodal-current-examples.md) · [样例索引](assets/examples-index.json)
+## 按输入和答案查找
+
+| 模态 | 本页的题型 | 阅读重点 |
+| --- | --- | --- |
+| [文本](#text-examples) | 单选、是非、评分 | 比较选项键、布尔值和等级索引如何作为标签。 |
+| [图像](#image-examples) | 单选、是非、评分、单框 | 找到图片引用及其文件。单框题再检查四个归一化坐标。 |
+| [视频](#video-examples) | 单选、是非、评分 | 找到视频引用，检查采样帧数和音轨设置。 |
+| [Gemma 音频](#gemma-audio) | 单选、是非、评分 | 对照问题和波形输入，理解音频监督目标。 |
+
+每条样例先读顶部的来源、记录 ID 和行号。展开 `request.questions` 确认题目 ID，再到 `expected` 或 `gold` 找同名键。`expected` 给出参考答案，`gold` 可以保留来源分布。推理结果另从 `answers` 的同名键读取。 [输入与监督说明](multimodal-current.md#input-to-model) · [运行推理](multimodal.md#python-inference)
+
+<a name="read-original-row"></a>
+
+## 用索引打开一条真实记录
+
+如果本机有完整 v6，下面的命令用附录索引查第一张单框图像。先核对 v6 清单的训练文件标识，再按 `byte_offset` 跳到该行。用二进制模式打开文件以使偏移量与索引一致。
+
+```bash
+python - <<'PY'
+import json
+from pathlib import Path
+
+data = Path("multimodal-data/open-jev-omni-qwen-filtered-v6/native")
+index_path = Path("docs/project-readme/assets/examples-index.json")
+index = json.loads(index_path.read_text(encoding="utf-8"))
+manifest = json.loads((data.parent / "manifest.json").read_text(encoding="utf-8"))
+assert manifest["native_splits"]["train"]["sha256"] == index["train_sha256"]
+entry = next(row for row in index["io"] if row["modality"] == "image" and row["type"] == "box")
+with (data / "train.jsonl").open("rb") as stream:
+    stream.seek(entry["byte_offset"])
+    record = json.loads(stream.readline())
+assert record["id"] == entry["id"]
+qid = entry["question_id"]
+print("Row:", entry["line_number"], "Source:", entry["source"])
+print(json.dumps(record["request"]["questions"][qid], ensure_ascii=False, indent=2))
+targets = {key: record[key][qid] for key in ("expected", "gold") if qid in record.get(key, {})}
+print(json.dumps(targets, ensure_ascii=False, indent=2))
+for part, path in record.get("media_files", {}).items():
+    print(part, (data / path).resolve())
+PY
+```
+
+预期会看到第 928,181 行，来源为 `jxu124/refcocoplus`，题目是 `ground`，描述为 `black turban`。用输出的图片路径打开照片，再按照 `left`、`top`、`right`、`bottom` 检查标注位置。想看另一组时，将 `index["io"]` 换成 `index["tasks"]`，用 `modality` 和 `task` 筛选。全部示例可用 CPU 脚本一次核验。 [样例索引](assets/examples-index.json) · [核验命令](multimodal.md#cpu-walkthrough) · [细任务查找](multimodal-current-examples.md)
+
+<a name="text-examples"></a>
 
 ## 文本
 
@@ -232,6 +276,8 @@
   }
 }
 ```
+
+<a name="image-examples"></a>
 
 ## 图像
 
@@ -721,6 +767,8 @@
   }
 }
 ```
+
+<a name="video-examples"></a>
 
 ## 视频
 

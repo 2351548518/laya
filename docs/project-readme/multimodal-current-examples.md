@@ -2,7 +2,15 @@
 
 以下各节按模态列出所有任务，每个任务展示三个 v6 训练样本。数量和占比分母是该模态的训练记录数。输入和标签为原记录摘录，省略号表示截断。这些摘录用于查看监督信号，完整请求可按样例索引读取。
 
-[主说明](multimodal-current.md) · [完整请求示例](multimodal-current-io-examples.md) · [样例索引](assets/examples-index.json)
+## 怎样查一个任务
+
+先选 [文本 31 类](#text-tasks)、[图像 21 类](#image-tasks) 或 [视频 12 类](#video-tasks)。已知任务名时，可在本页搜索它的键，例如 `invoke_or_respond`、`single_box_grounding` 或 `video_temporal_consistency_decision`。同一个键可以出现在不同模态，例如文本和图像各有一个 `recovery_decision`，查索引时需要同时指定模态。
+
+每个小节先给训练记录数和模态内占比，再展示三个来源、题目、状态与监督目标。以通用文本选择为例，`184,473 ÷ 662,661 ≈ 27.84%`。比较两个模态在全量中的占比时，使用主说明的全量统计表。
+
+想知道某个任务的标签是如何提供给模型的，可以在本页找有代表性的题目，再打开对应的完整请求。需要检查原始字段和图片时，用本地索引里的 `id` 和 `byte_offset` 定位记录。 [全量配比](multimodal-current.md) · [读取原始记录](multimodal-current-io-examples.md#read-original-row) · [样例索引](assets/examples-index.json)
+
+<a name="text-tasks"></a>
 
 ## 文本
 
@@ -440,6 +448,8 @@
   输入 Route the request under this fixed quality policy: use Mixtral when its expected reference-relative quality is at least…。状态 {&quot;user_prompt&quot;: &quot;explain how borax helps do a better job with washing clothes&quot;, &quot;available…。
   监督目标 <code>mixtral</code>。
 
+<a name="image-tasks"></a>
+
 ## 图像
 
 ### 单框定位 · `single_box_grounding`
@@ -735,6 +745,8 @@
 - `google-research/android_control:native-action` · `android-control:2345:2:scroll-direction` · `choice`。
   输入 The next Android action is scroll. Given the goal, completed actions and current screenshot, select its direction.。状态 {&quot;goal&quot;: &quot; Compare the prices of Realme11 Pro 5G at different retailers in Amazon app&quot;, &quot;c…。
   监督目标 <code>down</code>。
+
+<a name="video-tasks"></a>
 
 ## 视频
 

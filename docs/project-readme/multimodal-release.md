@@ -1,19 +1,30 @@
-# 模型导出与发布
+# 从训练检查点到部署模型
 
-## 检查点与版本
+先用原生检查点跑通推理，再合并 LoRA。需要 llama.cpp 或移动端部署时，从合并权重生成 GGUF，最后在相同输入上复测。 [教程首页](index.md) · [原生推理](multimodal.md#python-inference)
+
+<a name="native-checkpoint"></a>
+
+## 选择检查点和版本
 
 | 对象 | 位置 | 用途 |
 | --- | --- | --- |
-| v6 本地推理检查点 | `multimodal-runs/qwen4b-v6-fresh/sft/best` | 用当前选中的 LoRA 和头部评测、推理或导出 |
+| v6 本地推理检查点 | `multimodal-runs/qwen4b-v6-fresh/sft/best` | 用选中的 LoRA 和头部评测、推理或导出。 |
+| v6 完成后的校准检查点 | 校准命令的 `--out`，通常为 `final/` | 部署使用经过验证的概率校准参数。 |
 | v6 本地优化器快照 | `sft/checkpoint_latest.json` 指向的目录 | 恢复原训练 |
 | v1 原生发布 | [jev-multimodal-qwen3.5-4b](https://huggingface.co/ZeeoRe/jev-multimodal-qwen3.5-4b) | 已合并的 Safetensors |
 | v1 GGUF 发布 | [jev-multimodal-qwen3.5-4b-GGUF](https://huggingface.co/ZeeoRe/jev-multimodal-qwen3.5-4b-GGUF) | 分开的语言权重和视觉投影文件 |
 
-本文的已发布量化结果对应 v1 final。v6 记录的是本地训练协议与检查点。需要判断 v6 当前能力时，参照同一开发集的[检查点对照](multimodal-current.md#matched-development)。
+打开原生检查点的 `multimodal_config.json`，先看 `mode` 和 `backbone`。`lora` 模式从 `backbone` 所指位置读取原始权重，再叠加适配器和任务头。`full` 模式带有完整权重，可直接提供给 Python 推理和 GGUF 转换。已有本地 v1 发布目录 `models/releases/jev-multimodal-qwen3.5-4b/native` 时，可直接拿它做推理。首次下载可使用下面的路径，再把该目录作为第二步推理的 `checkpoint`。
+
+```bash
+hf download ZeeoRe/jev-multimodal-qwen3.5-4b --local-dir models/jev-multimodal-qwen3.5-4b
+```
+
+量化表对应 v1 final。评估 v6 的实际表现请使用本地检查点和同一评测分片。 [已核验的同集结果](multimodal-current.md#matched-development)
 
 ## 合并 LoRA
 
-导出器加载指定 LoRA 检查点和原始基座，将语言适配器合入骨干，并保留视觉 merger、候选评分头、单框定位头、处理器和校准字段。源目录的 `multimodal_config.json` 会记录架构、基座和模式。合并目录应是新的本地路径。
+选定一个固定的 v6 LoRA 检查点。导出器读取原始基座，把语言适配器合入骨干，并保存视觉 merger、候选评分头、单框定位头、处理器和校准参数。合并目录使用新的路径。
 
 ```bash
 checkpoint=multimodal-runs/qwen4b-v6-fresh/sft/best
@@ -22,9 +33,27 @@ release=multimodal-runs/qwen4b-v6-export
 python scripts/multimodal/export.py \
   --checkpoint "$checkpoint" --out "$release/merged" \
   --base-id Qwen/Qwen3.5-4B --device cpu
+
+(cd "$release/merged" && sha256sum -c SHA256SUMS)
+python verify/multimodal_smoke_test.py "$release/merged" --device cpu
 ```
 
-可以用 `--fixtures` 传入本地 JSON 夹具，每项包含 `id`、`state`、`questions`，逐项检查合并前后的选项概率、坐标和质量分。结构和重载检查通过后，输出目录才能作为可部署模型使用。 [本地导出说明](https://github.com/2351548518/laya/blob/4f7e045725adf8c7c7067dfc404de1e54f68b05b/scripts/multimodal/README.md#export-checkpoints)
+合并后先读 `merge-verification.json` 的 `export_mode`、`status` 和 `fixtures`。`export_mode` 为 `full`，`weights_only` 表示通过了保存和重载检查。若需要比较合并前后的预测，准备一份合成输入 JSON，在导出命令中加 `--fixtures path/to/fixtures.json`。可以把第二步生成的测试图用于单框夹具。
+
+```json
+[
+  {
+    "id": "synthetic-square",
+    "state": {"image": "_local/project-readme-tutorial/scene.png"},
+    "questions": {
+      "color": {"type": "noul", "instructions": "Is the square red?"},
+      "target": {"type": "box", "instructions": "the red square"}
+    }
+  }
+]
+```
+
+提供夹具时，检查 `fixtures[].deltas` 中的概率差、坐标差和质量分差。通过时 `status` 为 `passed`。冒烟测试检查输出结构，完整评测则使用同一组带标签输入。 [本地导出说明](https://github.com/2351548518/laya/blob/4f7e045725adf8c7c7067dfc404de1e54f68b05b/scripts/multimodal/README.md#export-checkpoints) · [评测方法](multimodal.md#evaluate)
 
 ## 导出 GGUF 并量化
 
@@ -44,7 +73,9 @@ python scripts/multimodal/quantize_gguf.py \
   --variants Q4_K_M Q4_0 Q3_K_M
 ```
 
-语言量化以 BF16 导出为输入。默认保留 FP32 决策和定位张量。显式传 `--head-quantization Q8_0` 等参数可以量化三个头部矩阵，偏置和归一化张量保留 FP32。转换程序检查结构与张量类型。部署验证还需在目标运行时复测概率、目标框、准确率和实际占用。 [量化脚本](https://github.com/2351548518/laya/blob/4f7e045725adf8c7c7067dfc404de1e54f68b05b/scripts/multimodal/quantize_gguf.py)
+转换后在 `gguf/` 中确认生成 `*-BF16.gguf` 和 `mmproj-BF16.gguf`，再用这组 BF16 输入执行量化。打开 `quantized/quantization-verification.json` 查看每个输出文件的张量类型。默认保留 FP32 决策和定位张量。显式传 `--head-quantization Q8_0` 等参数可以量化三个头部矩阵，偏置和归一化张量保留 FP32。 [量化脚本](https://github.com/2351548518/laya/blob/4f7e045725adf8c7c7067dfc404de1e54f68b05b/scripts/multimodal/quantize_gguf.py)
+
+部署到目标运行时，先用语言 GGUF 做文本请求，再在加载匹配的 `mmproj` 后做图像定位与视频决策。校验答案字段后，复测概率、准确率、单框 IoU 和设备实际占用。部署性能比较需固定模型对、上下文和输入。 [启动 llama.cpp-jev 服务](../multimodal-release.md#run-the-decision-server)
 
 ## v1 的已发布量化对照
 
@@ -60,5 +91,7 @@ python scripts/multimodal/quantize_gguf.py \
 | IQ3_XXS / SSM8 | 2.150 GiB | 10,496 | 72.11% | 72.85% | — |
 | IQ2_XS / SSM4 | 1.840 GiB | 744 | 71.41% | 75.58% | 75.92% |
 | Q1_0，体积实验 | 0.624 GiB | 744 | 2.96% | 2.98% | — |
+
+读表时先找准备部署的文件大小，再看同一测试集上的 H。比如 Q4_K_M 的 FP32 头版本是 2.902 GiB，WebM 修复后 H 为 77.83%。IQ2_XS / SSM4 是 1.840 GiB，同一轮复测为 75.92%。这两行展示了减少存储时的准确率变化。空白的复测栏表示该配置没有表内的 WebM 修复后结果。
 
 手机接入应同时确认所用模型、视觉投影文件、运行时版本和当前长度预算。Android 和 iPhone 的应用接入示例及修复重跑记录由已发布模型卡维护。 [正式发布说明](../multimodal-release.md) · [手机接入](https://huggingface.co/ZeeoRe/jev-multimodal-qwen3.5-4b-GGUF/blob/main/mobile/README.md)
