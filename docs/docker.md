@@ -372,7 +372,7 @@ These apply to the `laya-serve` service only.
 | `LAYA_ROOT_PATH` | (empty) | public URL prefix for FastAPI when behind a reverse proxy; the proxy should strip it before forwarding |
 | `LAYA_MAX_TOKEN_BUDGET` | `8192` | cap on per-request `max_len` and `head_max_len` overrides |
 | `LAYA_MAX_BATCH_TOKENS` | `131072` | tokens one `/v1/systemone/batch` forward pass may collate (`states` × questions × row width); a larger batch is split into several passes, not refused |
-| `LAYA_JEV_STRICT` | `0` | `1` serves the strict Jev wire contract (no root `routing`, no per-answer `action` / `answer_confidence`, reduced `usage`) for strict Jev clients |
+| `LAYA_JEV_STRICT` | `1` for single requests, `0` for batch | `1` serves the System One response format. `0` enables the extended Laya text response. Image requests always use the System One response format |
 | `LAYA_TOURNAMENT_GROUP` | `0` | answer a `choice` with more options than this by elimination in groups of this size (2 to 100), on `/v1/systemone`, and raise its option cap from 100 to 255. See [Large choices](http-api.md#large-choices-laya_tournament_group). Unset, or outside 2 to 100, is off |
 | `LAYA_SHA256_DIGESTS` | (none) | JSON digests checked before a checkpoint is parsed: `{artifact: digest}` for every checkpoint, or `{model: {artifact: digest}}` per checkpoint. See [Security](security.md) |
 

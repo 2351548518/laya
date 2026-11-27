@@ -231,6 +231,11 @@ def _env_bool(name: str, default: bool) -> bool:
     return v.strip().lower() in ("1", "true", "yes", "on")
 
 
+def _strict_jev_enabled(*, batch: bool = False) -> bool:
+    """Default to the System One contract for single requests and extended fields for batches."""
+    return _env_bool("LAYA_JEV_STRICT", not batch)
+
+
 def _project_jev_strict(result: Dict[str, Any], questions: Optional[Dict] = None) -> Dict[str, Any]:
     """Project System One answers onto the wire contract.
 
@@ -1738,7 +1743,7 @@ def create_app(router: Optional[Any] = None):
                 # Log while `usage` still carries the truncation report. `_project_jev_strict`
                 # drops it, and a strict client then has no other signal (#1425).
                 _warn_state_truncated(result, route="/v1/systemone", model=model, questions=questions)
-                if image_request or _env_bool("LAYA_JEV_STRICT", True):
+                if image_request or _strict_jev_enabled():
                     result = _project_jev_strict(result, questions)
                 else:
                     result = _add_jev_confidence(result)
@@ -1954,7 +1959,7 @@ def create_app(router: Optional[Any] = None):
                 _warn_batch_state_truncated(
                     batch_res.get("results") if isinstance(batch_res, dict) else None,
                     model=model, questions=questions)
-                if _env_bool("LAYA_JEV_STRICT", False):
+                if _strict_jev_enabled(batch=True):
                     batch_res["results"] = [_project_jev_strict(item) for item in batch_res["results"]]
                 else:
                     batch_res["results"] = [_add_jev_confidence(item) for item in batch_res["results"]]
