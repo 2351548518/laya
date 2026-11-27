@@ -1,22 +1,17 @@
 # HTTP API
 
 `POST /v1/systemone` uses the TypeSafe System One format for text, image decisions and
-single-box localization. Set `LAYA_MULTIMODAL_MODEL` to enable images and use a trained
-grounding checkpoint for box answers. Send audio and video file bytes to
-`POST /v1/multimodal`. [TypeSafe API](https://docs.typesafe.ai/api/system-one) ·
+single-box localization. The default is the released Qwen3.5-4B decision checkpoint. Set
+`LAYA_MULTIMODAL_MODEL` to choose another trained checkpoint, such as a Gemma model for
+audio. Send audio and video file bytes to `POST /v1/multimodal`. [TypeSafe API](https://docs.typesafe.ai/api/system-one) ·
 [Media examples](multimodal-clients.md)
 
 The Python HTTP client provides synchronous single, batch and media predictions plus health
 checks. Install it from `sdk/python` in the application environment to keep the inference stack
 on the server. [Python SDK](https://github.com/2351548518/laya/tree/main/sdk/python)
 
-A client that targets `laya-serve` rather than the Jev API exists for PHP:
-[`marcreichel/laya-php`](https://github.com/marcreichel/laya-php) is a Composer SDK (PHP 8.4+)
-that maps a class of enums and attributes onto questions and returns an instance, reads `GET /health`
-for a deploy check, and ships a test fake so callers can unit-test without a running server.
-
 ```bash
-pip install "laya[serve]"
+python -m pip install -e '.[multimodal,serve]'
 laya-serve            # http://0.0.0.0:8000
 ```
 
@@ -34,23 +29,22 @@ Everything is environment variables, so one image serves a laptop dev run and a 
 | `LAYA_PORT` | bind port | `8000` |
 | `LAYA_ROOT_PATH` | public URL prefix when served behind a reverse proxy | empty |
 | `LAYA_DEVICE` | torch device for every checkpoint | auto |
-| `LAYA_MULTIMODAL_MODEL` | native multimodal backbone or trained local checkpoint for `/v1/multimodal` | off |
+| `LAYA_MULTIMODAL_MODEL` | trained native checkpoint directory or Hub ID | released Qwen3.5-4B |
 | `LAYA_PRELOAD` | build the checkpoints at startup, not lazily | `1` |
-| `LAYA_MODELS` | comma-separated checkpoint names to preload | `multimodal` if a native checkpoint is configured, otherwise all classic checkpoints |
+| `LAYA_MODELS` | comma-separated checkpoint names to preload | registered checkpoints, or only `multimodal` when `LAYA_MULTIMODAL_MODEL` is set |
 | `LAYA_THREADS` | cap torch intra-op threads on CPU; keep it <= physical cores -- oversubscribing logical cores is a large regression | torch default |
-| `LAYA_AUTO_TASK` | auto-route to the typed-decisions checkpoint | `0` |
 | `LAYA_IDLE_UNLOAD_SECONDS` | unload resident checkpoints after this many idle seconds; the next request loads its checkpoint again. Zero disables unloading | `0` |
 | `LAYA_MAX_LOADED` | checkpoints kept resident at once; a cap below what routing chooses rebuilds one per switch, and `preload()` raises it to hold whatever it builds | `2` |
 | `LAYA_MAX_TOKEN_BUDGET` | server-side ceiling on the per-request `max_len` and `head_max_len` overrides; a larger value is a `422`. Unparseable or non-positive input logs a warning and falls back | `8192` |
-| `LAYA_DEFAULT_MODEL` | checkpoint a state with no language evidence falls back to; aliases such as `ml` resolve the way core resolves them, and an unresolvable name stops the server at startup | `multilingual` |
-| `LAYA_EXTRA_MODELS` | JSON object `{name: source}` registering extra checkpoints beside the bundled ones: a Hub repo id or local checkpoint directory as a string, or a `["repo", "subfolder"]` pair. Names get the same `model=` pin a built-in does; a malformed value or bad name stops the server at startup | none |
+| `LAYA_DEFAULT_MODEL` | default registered checkpoint. `laya` and `default` resolve to `multimodal` | `multimodal` |
+| `LAYA_EXTRA_MODELS` | JSON object mapping names to local native checkpoint directories or Hub repo IDs | empty |
 | `LAYA_API_KEY` | if set, require `Authorization: Bearer <key>` on every route, and stop serving `/docs`, `/redoc` and `/openapi.json` (FastAPI's own routes, which per-route auth never covered) | none |
 | `LAYA_LOG_LEVEL` | uvicorn log level | `info` |
 | `LAYA_MAX_CONCURRENT` | requests admitted past auth at once; excess gets `503` | `16` |
 | `LAYA_BODY_READ_TIMEOUT` | seconds a request may spend delivering its body before the server answers `408` and releases the admission slot it was holding. Unparseable, non-positive or infinite input falls back | `10` |
 | `LAYA_MAX_BATCH_TOKENS` | tokens one `/v1/systemone/batch` FORWARD PASS may collate (`states` x questions x row width); a larger batch is split into several passes, not refused | `131072` |
 | `LAYA_JEV_STRICT` | select System One response fields with no per-answer `action` / `answer_confidence`. Set to `0` for the extended Laya text response. Image requests always use the System One response format | `1` for single requests, `0` for batch |
-| `LAYA_TOURNAMENT_GROUP` | answer a `choice` with more options than this by elimination, in groups of this size, on `/v1/systemone` and `/v1/systemone/batch`, and raise their option cap from 100 to 255. See [Large choices](#large-choices-laya_tournament_group). Unset, or outside 2 to 100, is off | `0` |
+| `LAYA_TOURNAMENT_GROUP` | answer a `choice` with more options than this by elimination, in groups of this size, on `/v1/systemone` and `/v1/systemone/batch`, and raise their option cap from 100 to 255. See [Large choices](#large-choices-with-laya_tournament_group). Unset, or outside 2 to 100, is off | `0` |
 
 For a deployment published under a prefix such as `/laya`, set `LAYA_ROOT_PATH=/laya`.
 FastAPI uses it when generating OpenAPI and Swagger UI URLs. Configure the reverse proxy to
@@ -67,6 +61,13 @@ not fall by the size of the checkpoint.
 
 ## Endpoints
 
+The default checkpoint answers text on `/v1/systemone` and native media on `/v1/multimodal`.
+Set `LAYA_MULTIMODAL_MODEL` to a local trained checkpoint. Use Gemma 4 for audio.
+
+The extended decision response includes `gate` details when a `min_confidence` policy
+is applied. It records the threshold and the decision on whether to abstain.
+
+
 ### `GET /health`
 
 Liveness is always open (no auth), and stays responsive during inference because the CPU-bound
@@ -78,10 +79,10 @@ the 200, so a healthcheck is unaffected and a wrong bearer is still a 200 rather
 no `LAYA_API_KEY` set, every caller gets the full payload shown here.
 
 ```json
-{"status": "ok", "loaded": ["english", "multilingual"], "revisions": {"english": "...", "multilingual": "..."},
+{"status": "ok", "loaded": ["multimodal"], "revisions": {"multimodal": "..."},
  "device": "cuda", "device_is_preference": false,
- "checkpoint_devices": {"english": "cuda", "multilingual": "cuda"},
- "cpu_fallbacks": {"english": {"count": 0, "last_reason": null}, "multilingual": {"count": 0, "last_reason": null}}}
+ "checkpoint_devices": {"multimodal": "cuda"},
+ "cpu_fallbacks": {"multimodal": {"count": 0, "last_reason": null}}}
 ```
 
 One server's answer, so the blocks agree with each other: every key of `revisions`,
@@ -98,19 +99,15 @@ after an idle unload.
   what `LAYA_PRELOAD=0` leaves the process doing.
 - `revisions` is the artifact revision each resident checkpoint was loaded from, keyed by the same
   names as `loaded`, so a deployment can confirm what it is actually serving.
-- `device` is the device a resident checkpoint really computes on, which is not always what
-  `LAYA_DEVICE` asked for: a checkpoint that wants a GPU it cannot get falls back to CPU silently and
-  still answers correctly. With nothing resident it is the configured preference instead.
-- `device_is_preference` is `true` exactly while nothing is resident, and `false` as soon as the
-  handler can measure. That is the difference between a server reporting its configuration and a
-  server reporting where its work is: one that quietly lost its GPU says `false` with `device`
-  `cpu`, rather than going on answering `cuda`.
+- `device` reports the device of a resident checkpoint. With no checkpoint loaded, it
+  reports the configured preference. Use `LAYA_DEVICE=auto` to select an available device.
+  An explicitly requested CUDA device must be available when the native checkpoint loads.
+- `device_is_preference` is `true` while the service is reporting a preference and
+  `false` when it can report a resident checkpoint's device.
 - `checkpoint_devices` gives the measurement per checkpoint, keyed by the names in `loaded`;
   `device` is the first of those values.
-- `cpu_fallbacks` counts, per resident checkpoint, the requests that exhausted GPU memory and were
-  retried once on CPU: `count` since the process started, and `last_reason` carrying the error text
-  of the latest one. The demotion is scoped to the request that failed, so a checkpoint built on CPU
-  because the GPU was never available is not a fallback and counts `0` here -- that shows in `device`.
+- `cpu_fallbacks` exposes retry counters from backends that report them. The native
+  multimodal backend reports a count of zero and a null reason.
 
 ### `POST /v1/route`
 
@@ -129,8 +126,8 @@ curl -s localhost:8000/v1/route -H 'content-type: application/json' -d '{
 With the default fallback model, this returns:
 
 ```json
-{"model": "multilingual", "repo": "convaiinnovations/laya/multilingual",
- "reason": "Latin script, language not identified and no non-English letters; using default (multilingual)",
+{"model": "multimodal", "repo": "ZeeoRe/jev-multimodal-qwen3.5-4b",
+ "reason": "default native checkpoint",
  "diagnostic": {"stage": "whole_state", "reason": "insufficient_words", "source": null}}
 ```
 
@@ -170,7 +167,6 @@ An injected legacy router without the `explain` parameter still supports omitted
 `explain: true` returns a clear `422`, without silently retrying. As with prediction, a `ValueError`
 returns `422` with its message, including one raised by an operator hook. Other unexpected errors
 are logged server-side and return `500` with `routing failed`.
-There is no batch routing endpoint or SDK routing method in this change.
 
 #### Try a configuration mismatch locally
 
@@ -181,14 +177,9 @@ python -m pip install -e ".[serve]" httpx
 python examples/http_route.py
 ```
 
-The example uses FastAPI's in-process `TestClient` against the real handler. Its local Router
-defaults to `multilingual`, while its injected server Router defaults to `english`. The same short
-state produces identical language diagnostics but different model selections, demonstrating why
-local diagnostics cannot establish a deployment's decision. It also checks the default three-field
-response and an explicit model pin, whose diagnostic is `null`, and verifies that neither Router
-loaded checkpoints. Each response is a snapshot of that request, not a reservation for later
-inference. Injecting the Router keeps the example independent of normal startup preload;
-`httpx` is needed for the test client, not by the routing endpoint.
+The local Router uses `multimodal`, while the injected server Router defaults to a registered
+`support` checkpoint. The example checks both responses, an explicit checkpoint pin and
+the empty resident model lists.
 
 ### `POST /v1/systemone`
 
@@ -216,11 +207,11 @@ curl -s localhost:8000/v1/systemone -H 'content-type: application/json' -d '{
 | `questions` | yes | object keyed by question ID. Use `choice`, `score`, `noul`, or `box` with uploaded images |
 | `model` | no | names a checkpoint; a path or unpublished Hub id is a `422`, anything else is ignored (see below) |
 | `assets` | no | image reference map with inline PNG/JPEG data or multipart file part names |
-| `task` | no | forces a checkpoint by workflow name instead of letting routing decide; an unknown name is a `422` naming it |
-| `lang` | no | a language code (`de`, `en-US`) that skips detection when it names a language; a blank or unrecognised code falls through to detection |
-| `lang_guess` | no | a language code from the client's own identifier, consulted after `lang` and before detection; any non-English code routes to the multilingual checkpoint |
+| `task` | no | select a registered checkpoint by name when `model` is omitted |
+| `lang` | no | optional language metadata for an attached engine |
+| `lang_guess` | no | optional language hint for routing diagnostics |
 | `max_len` | no | total token window for this request, capped by `LAYA_MAX_TOKEN_BUDGET` |
-| `head_max_len` | no | token window the option prompt shares, same cap; see [Widening the Token Budget](langchain.md) for when a question needs it |
+| `head_max_len` | no | reserved for backends that support a separate option budget. Native checkpoints use `max_len` |
 | `min_confidence` | no | abstention threshold: a number in `[0.0, 1.0]`, or a per-bucket map keyed by option-count bucket (`{"choice:3-5": 0.9, "default": 0.4}`) so the threshold can differ by option count; an answer whose `answer_confidence` falls below its own threshold comes back marked `low_confidence`, and the answer itself is kept |
 
 `model`, `task`, `lang`, `lang_guess`, `max_len`, `head_max_len` and `min_confidence` are the
@@ -234,22 +225,15 @@ LangChain node with a `base_url` (`laya.integrations.langchain`), so a chain and
 now get the same answer. Upload images to System One with `assets`. Requests with
 inline `image`, `audio` or `video` fields go to `/v1/multimodal`.
 
-`model` is accepted so a Jev client can keep sending one. The public Hugging Face ids
-(`convaiinnovations/laya-multilingual`, `convaiinnovations/laya-typed-decisions`), the checkpoint
-names (`english`, `multilingual`, `typed-decisions`) and their aliases select a checkpoint, and so
-does every name `LAYA_EXTRA_MODELS` registered on this server's Router -- including a name that
-re-points a built-in, which is how a fine-tune is served under `english` without a code change.
-`convaiinnovations/laya`, and any other value that is not a path or a Hub repo id -- including a
-Jev id like `jev-1` -- means "let the router choose", and the response's `routing` block records
-what was chosen and why. A value that looks like a filesystem path or an unpublished Hub id
-(`/path/to/checkpoint`, `org/repo`, `~/ckpt`, `.\ckpt`) is a `422` on both `/v1/systemone` and
-`/v1/systemone/batch`: this server cannot load it, and answering with another checkpoint would
-hide that. The detail is the same `unknown model` text core raises, plus the reminder to omit
-`model` to let the router choose.
+Use `multimodal`, `laya`, `default`, the released checkpoint ID
+`ZeeoRe/jev-multimodal-qwen3.5-4b`, or a name registered in `LAYA_EXTRA_MODELS`.
+Client model IDs such as `jev-1` select the server's default. Arbitrary paths and
+unregistered Hub repo IDs return HTTP 422. Configure checkpoint sources on the service.
 
 ### Image assets and single-box questions
 
-Send `TypeSafe-Danger-Zone-Images: true` with image or box requests. Put each PNG or JPEG
+Send `TypeSafe-Danger-Zone-Images: true` with image or box requests. Both sides of each
+PNG or JPEG must be between 280 and 1,568 pixels. Put each image
 under a reference in `assets` and use the reference in a string value in `state`,
 `instructions` or `criteria`. Reusing the reference places the image at each occurrence.
 Use an array of image references followed by a text value to place the images before
@@ -275,102 +259,65 @@ request. [SDK examples](multimodal-clients.md#system-one-image-assets)
 
 ### Response
 
-This example uses `LAYA_JEV_STRICT=0`.
+The default single-request response has `model`, `answers` and `usage`. Here is an
+example using the bundled billing request and a native Qwen checkpoint.
 
 ```json
 {
-  "model": "laya-rl-agent",
+  "model": "Qwen/Qwen3.5-4B",
   "answers": {
-    "queue": {"type": "choice", "choice": "billing",
-              "probabilities": {"billing": 0.9519, "tech": 0.0327, "other": 0.0154},
-              "confidence": 0.797, "answer_confidence": 0.9519,
-              "action": {"act_probability": 1.0}, "x_jev_confidence": 0.9278},
-    "urgency": {"type": "score", "score": 1.6994,
-                "legend": {"0": "calm", "1": "firm", "2": "angry", "3": "furious"},
-                "probabilities": {"0": 0.0249, "1": 0.4136, "2": 0.3985, "3": 0.1629},
-                "confidence": 0.1925, "answer_confidence": 0.4136,
-                "action": {"act_probability": 1.0}, "x_jev_confidence": 0.2507}
+    "department": {
+      "type": "choice",
+      "choice": "billing",
+      "confidence": 0.9967,
+      "probabilities": {
+        "billing": 0.9978,
+        "technical": 0.0018,
+        "sales": 0.0004
+      }
+    },
+    "urgency": {
+      "type": "score",
+      "score": 0.9502,
+      "confidence": 0.5125,
+      "probabilities": {
+        "0": 0.1874,
+        "1": 0.675,
+        "2": 0.1376
+      },
+      "legend": {
+        "0": "not urgent",
+        "1": "needs attention soon",
+        "2": "critical deadline or blocking issue"
+      }
+    },
+    "refund_requested": {
+      "type": "noul",
+      "noul": 0.998
+    }
   },
-  "usage": {"input_tokens": 83, "output_tokens": 0, "state_tokens": 12,
-            "state_tokens_dropped": 0, "truncated": false, "truncated_questions": []},
-  "routing": {"model": "english", "repo": "convaiinnovations/laya", "reason": "English Latin text",
-              "detection": {"script": "latin", "script_profile": {"latin": 1.0}, "language": "en",
-                            "is_english": true, "language_undecided": false, "diacritic_rate": 0.0,
-                            "non_latin_fraction": 0.0, "mixed_segment": null},
-              "workflow": null}
+  "usage": {
+    "input_tokens": 286,
+    "output_tokens": 0
+  }
 }
 ```
 
-The sample is one answer this server gave, verbatim: the request above, the cached `english`
-checkpoint on CPU. `answers` and `usage` are the keys Jev clients decode; `model` is the constant
-name of the decision head, and the checkpoint that answered is in `routing`.
+Each answer has the same ID as its question. A `choice` reports the selected option and
+its distribution. A `score` reports the expected level index and a legend. A `noul`
+reports the probability of yes. A `box` reports normalized coordinates and localization
+confidence. Option probabilities are rounded to four decimals. Allow rounding tolerance
+when checking their sum. [Probability precision](questions-and-answers.md#probability-precision)
 
-`probabilities` on `choice` and `score` answers are rounded independently to four decimal places
-and need not sum exactly to 1, just as in the [in-process API](questions-and-answers.md#probability-precision).
-For strict unit-sum validation, allow a rounding tolerance that accounts for the number of options,
-or normalize a copy of the distribution.
+`input_tokens` counts the prepared prompts across the executed questions. Native decisions
+report `output_tokens` as zero. In extended responses, `usage.forward_passes` counts the calls to the backbone,
+and `routing` identifies the checkpoint that answered. `/v1/route` with `explain: true`
+can report language diagnostics.
 
-| answer type | keys |
-|---|---|
-| `choice` | `choice` (the argmax option), `probabilities` per option, `x_jev_confidence` |
-| `score` | `score` (expected level index, may fall between levels), `probabilities` keyed `"0".. "k-1"`, `legend` mapping index to the level text, `x_jev_confidence` |
-| `noul` | `noul`, the probability of the yes option |
-| all | `type` (the discriminator, echoing the question's own type), `confidence`, `answer_confidence`, and `action.act_probability` |
-| gate | `abstention`, `abstention_threshold` and `low_confidence`, written by the abstention gate -- see below |
-
-The gate row is the abstention report (#361), and it is the only way a caller can see that the gate
-it paid for ran. A request that sets `min_confidence` gets it; one that does not gets none of the
-three keys. `abstention` is one of three states, written on **every** answer of a gated request:
-`passed` (its confidence cleared the threshold), `abstained` (it fell below, and `low_confidence` is
-`true` on exactly those answers), or `unevaluated` (the answer carried no usable confidence, so the
-gate could not decide -- reporting that as a pass would be the same lie as reporting it as a flag).
-`abstention_threshold` echoes the threshold those states were measured against, which is what makes a
-batch run with per-class thresholds re-splittable after the fact. With `min_confidence` unset none of
-the three keys appear on any answer: absence is the report, not a fourth state, and it is how a caller
-tells an ungated run from a cleared gate. `min_confidence` of exactly `0.0` *was* set, so states are
-reported, and nothing can fall below it, so every answer reads `passed` -- the echoed `0.0` is what
-distinguishes that from a pass at a real threshold. The answer itself is kept in every state; the gate
-marks, it does not drop.
-
-`usage` reports what the forward pass was built from. How much of a state the model reads is a token
-budget, not a character count, and the budget moves with `max_len`, `head_max_len` and every
-question's own option prompt (#174), so these keys are the only place in the response
-that fact is visible:
-
-| `usage` key | meaning |
-|---|---|
-| `input_tokens` | non-pad tokens of the state's rows -- one row per question, so it grows with the questions rather than being a context length |
-| `output_tokens` | always `0` -- the head answers in one pass, it generates nothing |
-| `state_tokens` | tokens the whole serialized state needs |
-| `state_tokens_dropped` | tokens of it at least one question did not get: the worst case over the questions, since each leaves the state a different room |
-| `truncated` | `true` when that worst case dropped anything |
-| `truncated_questions` | the ids of the questions whose own window was cut, `[]` when none |
-| `options` | present only when some question's options no longer have a token span each: keyed by question id, with `total` (the options that question defines), `distinct` (the spans that reached the sequence) and `tokens_per_option` |
-
-A truncated answer is still an answer -- the head decides on the evidence it was given -- but a
-caller sizing states by character count cannot see the cut anywhere else in the response. When
-`usage.truncated` is true or `state_tokens_dropped` is above zero, the server logs one warning
-for the request with that dropped-token count and the question ids. The warning is written on
-`/v1/systemone` and `/v1/systemone/batch` before `LAYA_JEV_STRICT` projects the payload, so a
-strict response that no longer carries these keys still leaves the cut in the server log. A
-batch logs once, with the indexes of the results that were cut and the dropped-token count of
-each, rather than once per answer.
-
-`routing` records which checkpoint answered and why:
-
-| `routing` key | meaning |
-|---|---|
-| `model` | the checkpoint that answered: `english`, `multilingual` or `typed-decisions` |
-| `repo` | where it was loaded from, as `repo` or `repo/subfolder`. The default server loads all three from the `convaiinnovations/laya` bundle, so `multilingual` and `typed-decisions` report `convaiinnovations/laya/multilingual` and `convaiinnovations/laya/typed-decisions` -- a readable id, not a Hub repo id to fetch with |
-| `reason` | the sentence for the choice, naming the evidence it acted on |
-| `detection` | `laya.lang.analyse()` on the state -- `script`, `script_profile`, `language`, `is_english`, `language_undecided`, `diacritic_rate`, `non_latin_fraction`, `mixed_segment` -- or `null` when the route decided before reading the text |
-| `workflow` | the typed-decisions workflow the question ids match, or `null` |
-
-`detection` is `null` on every path that decides without reading the state: one forced by `model` or
-`task`, one answered by `lang` or `lang_guess`, or one that matched a typed-decisions workflow from
-the question ids. A `lang_guess` leaves no key of its own -- the hint it acted on is named in
-`reason`. The `model` and `task` branches report `workflow` as `null` too, because they answer
-before the question ids are read.
+The extended `gate` fields appear when `min_confidence` is set. `abstention` is
+`passed`, `abstained` or `unevaluated`. The response also includes
+`abstention_threshold` and marks low-confidence answers with `low_confidence: true`.
+The `answer_confidence` used by the gate is the largest decision probability.
 
 ### Confidence: three numbers, not interchangeable
 
@@ -410,128 +357,40 @@ projection retains the batch's Laya confidence values.
 
 Successful responses also carry `Server-Timing: inference;dur=<ms>` and `X-Inference-Time-Ms`.
 
-### Large choices: `LAYA_TOURNAMENT_GROUP`
+### Large choices with `LAYA_TOURNAMENT_GROUP`
 
-One pass reads every option of a `choice` inside one option budget, so past a few dozen options
-they stop getting a token span each (`usage.options` reports when that happens), and past about 100
-the request is refused. Jev accepts up to 255. With `LAYA_TOURNAMENT_GROUP=16`, both decision routes
-answer a choice with more than 16 options the way `laya.predict_tournament` does: the options are
-cut into groups of at most 16, each group is answered in one shared call, and the group winners go
-to a final call. Their option cap becomes 255. A choice of 16 or fewer, and every other question,
-takes the usual path unchanged. The group size is limited to 2 to 100, the one-pass cap, so every
-choice the raised cap newly admits is always narrowed rather than read in one pass it cannot fit.
-A larger group is not a better one: each group is still read in one pass, and one pass loses
-accuracy as its options grow (the measurement below), so keep the group small; 16 is what was
-measured.
+Set a group size from 2 to 100 to score large choices by elimination. Each round passes its
+group winners to the next round. Extended responses include `x_tournament.finalists` and
+`x_tournament.rounds`. Eliminated options have zero probability.
 
-The answer keeps the Jev shape, so the official SDK parses it:
-
-- `probabilities` names every option, in criteria order. The finalists carry the final round's
-  probabilities and an option eliminated in an earlier round carries `0.0`, so `choice` is still
-  the argmax, but the rounded values need not sum exactly to 1;
-- `x_tournament` lists the `finalists` and the number of `rounds`, so a caller can tell an
-  eliminated option from one the final round scored. Under `LAYA_JEV_STRICT` it is not sent;
-- `confidence` and `answer_confidence` are the final round's, over the finalists;
-- `usage.input_tokens` is summed over every call; the other `usage` keys are the final call's.
-
-Narrowing drops an `option_order`, since an order over the full label set no longer fits a group
-(#1062). So a choice that sets one keeps the one-pass path while one pass can read it. Once a
-request has a choice over 100 options, which only the raised cap admits, it is narrowed, and a
-narrowed choice that carried an order reports `x_tournament.option_order_dropped: true`. A label
-that is not a string cannot be mapped back onto the answer: such a choice keeps one pass, and a
-request that has to be narrowed is refused with a `422` naming it.
-
-On `/v1/systemone/batch` the question set is shared, so the decision is made once: a batch with
-nothing to narrow is the single batched pass it has always been, and one with a large choice runs
-the elimination state by state. `batch_size` and `sort_by_length` shape one batched pass, so they
-do not apply on that path; `total_usage` still sums every call.
-
-Measured on the `english` checkpoint (CPU) with one test query per intent from CLINC150 (150
-intents, `random_state=0`), the question listing every intent and the instruction "Which intent does
-this request express?": with the flag off the request is refused (`150 > 100`); with
-`LAYA_TOURNAMENT_GROUP=16` it is answered at 86.7% accuracy (130/150), median 0.77 s per request. On
-50-option subsets of the same queries, the tournament scored 94.0% against 82.7% for one pass. That
-is one dataset and one sample; measure on your own labels before relying on it.
+The tournament acts on each state in a batch and sums the token usage across the rounds.
+When narrowing needs to discard a supplied option order, the extension includes
+`option_order_dropped`. Measure its effect on your own checkpoint and labelled split.
+[Tournament evaluation](evals.md)
 
 ## Limits
 
-Request guardrails are checked before tokenization, so an oversized request costs the server
-nothing but the bytes it read. Every size limit below is a `413`; the `detail` says which limit was
-hit. The last row is the exception: the concurrency cap is an admission limit, not a size one, and
-it answers `503` with `Retry-After: 1`.
+| Limit | Value |
+| --- | --- |
+| Standard JSON body | 2 MiB |
+| System One image upload body | 32 MiB with the image header enabled |
+| Individual System One image file | 16 MiB |
+| Serialized text state | 50,000 characters |
+| Questions per request | 64 |
+| States per batch | 64 |
+| Choice options per question | 100 for regular text requests. The image path, an explicit `model: "multimodal"` on single requests and tournament mode allow up to 255 |
+| Score levels per question | 32 for text and 10 for System One image requests |
+| Total answer options | 512 |
+| Concurrent admitted requests | `LAYA_MAX_CONCURRENT`, default 16 |
 
-| limit | value |
-|---|---|
-| request body | 2 MiB, enforced while streaming -- a chunked or understated `Content-Length` cannot bypass it |
-| `state` | 50,000 characters of the text the model is given -- the string itself for a string state, `json.dumps(state, ensure_ascii=False)` for an object or array |
-| questions per request | 64 |
-| `states` per batch request | 64 |
-| options per `choice` question | 100; 255 with `LAYA_TOURNAMENT_GROUP` set |
-| levels per `score` question | 32 |
-| options across all questions | 512 |
-| concurrent admitted requests (`503`, not `413`) | `LAYA_MAX_CONCURRENT` (16) |
+The serving limits apply before model preprocessing. The checkpoint also limits the total
+prompt length and the options its readout can score. Native requests use `max_len` for the
+input budget. A prompt that exceeds it returns HTTP 422. Shorten the state, media or option
+text to fit, or raise the request budget within `LAYA_MAX_TOKEN_BUDGET`.
 
-`/v1/systemone/batch` is bounded differently, and not by a refusal. It tokenizes each state once per
-question and collates every row into a single tensor, so the field caps multiply: 64 states of 64
-questions is 4096 rows, which every other limit on this page permits. What a row costs is its width,
-and `max_len` is itself a request field, so the cost of a batch is `states x questions x width`.
-
-Rather than refuse a large batch, the endpoint **splits** it: when that product exceeds
-`LAYA_MAX_BATCH_TOKENS` (131,072 by default) it chooses a `batch_size` so each forward pass stays
-inside the budget, and `Router.predict_batch` runs the batch in several passes. Every state is still
-answered and the response is unchanged. A request whose rows already fit is passed no `batch_size` at
-all, so it behaves exactly as before -- which matters because batch shape can move floating-point
-results. A `batch_size` the caller sends may make a pass *smaller* than that plan -- it asked for a shape -- but never larger: the budget is a property of one forward pass, so a value above the plan is capped at it.
-
-At the default, 256 rows go through in one pass -- 64 states of 4 questions, or 8 of 32. Larger
-batches are split, and raising `max_len` makes each pass narrower rather than costing 16 times the
-work. What this does not bound is how long one request occupies the server; that is
-`LAYA_MAX_CONCURRENT` and the single inference worker, and is already true of one `/v1/systemone`
-request over a 50,000-character state.
-
-The option caps are HTTP-only amplification guards -- `MAX_CHOICE_OPTIONS` per question (100, or
-`MAX_TOURNAMENT_CHOICE_OPTIONS` = 255 with `LAYA_TOURNAMENT_GROUP` set) and `MAX_TOTAL_OPTIONS`
-across the request (512). The model's own budget does not refuse a question that is inside them for
-having long option text; it truncates that text. Measured on the `laya` checkpoint (CPU, offline)
-with one choice question of 100 options, each one `opt<i>` plus the same 15-word description: at the
-default `head_max_len=192` the head caps every option at `tokens_per_option=4`, still keeps all 100
-markers in 411 tokens, and `max_len=512` answers it (`input_tokens=423`, the state's 11 tokens
-among them) -- while the response says nothing about the cap. `usage` gains an `options` entry only
-when the cap makes two options share a token span, and the truncation keys it does carry
-(`truncated`, `state_tokens_dropped`) are about the state. What the `422` reports is option *markers*
-running past `max_len`, and because `head_max_len` is spent *out of* `max_len` rather than on top of
-it, raising `head_max_len` is how a caller gets there: the same question at `head_max_len=1024` gives
-each option 10 tokens, the head grows to 1014, and `max_len=512` refuses it with `only 50 of its 100
-option markers fit in max_len=512 with head_max_len=1024 spent on the question; lower head_max_len,
-raise max_len, or use fewer options`, which `max_len=1024` then answers. The message names both
-levers because either can be the fix; `laya/agent.py::_encode_state` keeps a comment recording that
-naming only `head_max_len` "pointed at the wrong knob in both directions".
-
-How many options fit at all is set by that same pair *and* by their text *and* by the question's own
-`instructions`. With no description on the options and a three-token instruction (`Which queue?`), at
-`max_len=512` and `head_max_len=192` the largest single choice question that is not refused carries
-168 options when each label is `T <i>` and 126 when each is `Tickets routed to queue <i>`; at
-`max_len=1024` those become 339 and 254. Each of those four boundaries was met through the public call:
-it answers at the ceiling and refuses one option above it. Change the instruction and they move -- a
-two-token one gives 169, 127, 339 and 255, an eight-token one gives 168, 126, 338 and 254 -- because
-`laya/common.py::build_head` truncates the encoded `choice question: <instructions>` prefix to
-`max(8, opt_budget)` tokens, so the first `[MASK]` lands at position 7, 8 or 10 for those three
-wordings and every marker after it shifts with it. The ceiling stops moving once the instruction
-reaches the cap: the same seventeen-token wording returns the eight-token numbers exactly. The state
-does not move it either -- at `max_len=1024` with the eight-token instruction, 338 options answer and
-339 refuse whether the state is one word or the eleven-token sentence this section has been using.
-Those 126 sentence labels carry a second lesson -- the answered call reports
-`options: {"q": {"total": 126, "distinct": 1, "tokens_per_option": 4}}`, because the 4-token cap left
-every option the same span, so the question could not tell its 126 choices apart, and only a
-collision like that puts `options` in the response. Both default ceilings sit above
-`MAX_CHOICE_OPTIONS=100`, so a one-pass caller meets the count cap first -- a `413`, never a budget
-refusal -- and reaches a budget refusal only by raising `max_len` or `head_max_len` itself, each of
-which is accepted up to `LAYA_MAX_TOKEN_BUDGET`, 8192 by default. (`LAYA_TOURNAMENT_GROUP` raises the
-count cap to 255 but narrows those choices into groups, so they never reach the one-pass budget.) A
-caller comparing this endpoint with another server's stated "maximum N options" therefore has to quote
-the budget it sent, the option text and the instruction, not just N. The [Evaluation harness](evals.md)
-runs the same requests in-process without the HTTP layer, so there the 168/126 ceiling is the one that
-binds.
+`LAYA_MAX_BATCH_TOKENS` guides the HTTP batch chunk size. The native agent prepares each
+state and packs compatible questions within its own token budget.
+[Native model inputs](multimodal.md#local-prediction)
 
 ## Errors
 
@@ -568,17 +427,10 @@ that sends a request head and then stops writing answers `408` and gives the slo
 holding one of the `LAYA_MAX_CONCURRENT` slots -- and so both decision routes -- out of service for
 as long as it keeps the socket open.
 
-## Not (yet) here
+## Batch and media requests
 
-This server speaks one protocol on purpose. There is no OpenAI-compatible endpoint; run several
-questions in one request instead, since they share a single forward pass per question set.
-`POST /v1/systemone/batch` answers one `questions` set over an array of
-`states`. Each state is its own context, which is what a caller needs for one decision per
-record; questions in one `/v1/systemone` request see the whole shared state, including when
-their text names `rows[i]`. It has no section on this page yet -- its request shape is in the
-README's self-hosting section -- and every check above applies to it as it does to
-`POST /v1/systemone`: the same shape `400`s, the same unpaired-surrogate refusal, the same auth,
-admission, size limits, body-control validation and `500` mapping. A state that does not fit
-the token room is truncated the same way, and a batch with any truncated result logs one
-warning for the call. The `laya` CLI and MCP server cover local use -- see the
-[README](https://github.com/NandhaKishorM/laya#readme).
+`POST /v1/systemone/batch` accepts an array of `states` and one shared `questions` object.
+It returns `results` in the input order and sums the token counts in `total_usage`.
+Use `POST /v1/multimodal` for an inline audio or video file. Named PNG and JPEG assets for
+text or single-box decisions use `POST /v1/systemone`.
+[Python, TypeScript and curl examples](multimodal-clients.md)

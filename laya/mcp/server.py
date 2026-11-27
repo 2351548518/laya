@@ -21,15 +21,10 @@ Environment (same meaning as laya.serve where it exists):
                 `device` is the first entry of `loaded` (the least recently used), so
                 `checkpoint_devices` is the field that says where each one actually runs.
   LAYA_PRELOAD  "0" to build the checkpoints lazily instead of at startup (default on)
-  LAYA_MODELS   comma list to preload; MCP default is "english,multilingual" so
-                typed-decisions stays lazy (in laya.serve an empty value preloads all)
-  LAYA_THREADS  cap torch intra-op threads (CPU inference); keep <= physical cores
-  LAYA_AUTO_TASK  "1" lets a request auto-route to the typed-decisions checkpoint
-                  (same as laya.serve). It does not preload it: LAYA_MODELS still
-                  decides what is built at startup.
-  LAYA_DEFAULT_MODEL  the checkpoint a state with no language evidence falls back to
-                  (same as laya.serve, including its aliases); an unset value leaves
-                  it to Router, an unresolvable one is a tool error.
+  LAYA_MODELS   comma-separated checkpoint names to preload; the configured default otherwise
+  LAYA_MULTIMODAL_MODEL  native checkpoint directory or Hub ID for text and media
+  LAYA_THREADS  cap torch intra-op threads for CPU inference
+  LAYA_DEFAULT_MODEL  name of the default registered checkpoint
   LAYA_BASE_URL  answer from a running laya-serve over HTTP; unset keeps models local
   LAYA_REMOTE_TIMEOUT  HTTP timeout in seconds for remote mode (default 300)
   LAYA_USER_AGENT  remote HTTP client identity (default laya/<version>)
@@ -56,7 +51,7 @@ except ImportError as exc:  # mcp extra not installed
 
 # laya.serve only imports os/typing at module level, so reusing its helpers
 # keeps one meaning for LAYA_PRELOAD / LAYA_THREADS / LAYA_DEFAULT_MODEL across the package.
-from laya.serve import _apply_thread_limit, _default_model_option, _env_bool
+from laya.serve import _apply_thread_limit, _default_model_option, _env_bool, _extra_models_option
 
 from .device import env_device
 from .tools import (
@@ -87,62 +82,30 @@ server = MCPServer("laya", version=_LAYA_VERSION)
 _ROUTER: Any = None
 _ROUTER_LOCK = threading.Lock()
 
-# MCP default preload list. laya.serve preloads every checkpoint when LAYA_MODELS
-# is empty; MCP keeps typed-decisions lazy on purpose (it is ~as big as the other
-# two, and auto-routing never selects it).
-_DEFAULT_MODELS = ("english", "multilingual")
-
-# Shared usage guardrails for the decision tools. laya_status reports instead
-# of deciding, so it does not carry them.
 _GUARDRAILS = (
-    "Use for structured decisions only: choice (finite labels), score (ordinal rubric), "
-    "noul (calibrated P(true)). One forward pass ~33ms (GPU) / ~200ms (CPU). "
-    "No text generation, so no hallucination. Do NOT use for open Q&A, summarization, "
-    "rewriting, code, or multi-hop reasoning. Do NOT use for >20-option choice "
-    "questions without narrowing (use laya_shortlist or laya_tournament)."
+    "Returns typed choice, score and noul decisions. Use a shortlist or tournament for "
+    "large choice sets. Text generation is unavailable."
 )
 
-# The `model` argument's contract, spelled out for clients because the tools take a free string.
-# The accepted names are deliberately not listed: that registry belongs to laya.router, it grows
-# with the checkpoints, and a copy here would be a second thing to keep current. An invalid name
-# comes back as an error that lists every accepted one.
 _MODEL_DOC = (
-    " model: null (default), 'auto', or omitted all let the router pick the checkpoint; "
-    "anything else names one, and "
-    "core's aliases and casing are honoured ('en', 'ML', 'laya-multilingual'). The answer's "
-    "routing.model always reports the canonical name."
+    " model: null (default), 'auto', or omitted uses the configured default. "
+    "An explicit value selects a registered checkpoint. "
+    "The aliases laya and default resolve to multimodal."
 )
 
-# The routing overrides and the token budget, spelled out once because the tools take them as free
-# strings and integers. Precedence matters to say plainly: a client that pins a model and also sets
-# a task would otherwise see the task silently ignored (the tool rejects it instead).
 _CONTROLS_DOC = (
-    " task: name a checkpoint by what the work is ('typed_decisions', or any checkpoint name) -- "
-    "refused on a call that also pins model, since the pin would win and the task would be ignored. "
-    "lang: a language code ('de', 'en-US') -- routes non-English text to the multilingual "
-    "checkpoint and selects that checkpoint's per-language calibration. "
-    "lang_guess: a soft language code -- a probable-but-uncertain language that participates in "
-    "routing (checked after lang, before built-in detection) rather than forcing the checkpoint the "
-    "way lang does; like task it only routes, so it is refused on a call that pins model. "
-    "max_len / head_max_len: positive integers overriding the answering token budget for this call "
-    "only -- head_max_len is the option-and-instructions budget, so raise it when a choice question "
-    "has many options and the answers look like the labels blur together. "
-    "min_confidence: a number in [0, 1] -- an answer whose calibrated confidence falls below it is "
-    "flagged 'low_confidence' (and, on laya_decide, its value comes back null), so a caller that "
-    "must not act on a guess can set it. Leave any of them unset to keep the checkpoint's own "
-    "default."
+    " task: select a registered checkpoint when model is unset. "
+    "lang and lang_guess are optional language hints. "
+    "max_len overrides the native input token budget. head_max_len requires a backend "
+    "with a separate option budget. min_confidence marks low-confidence answers."
 )
 
 
-def _models_from_env() -> list[str]:
-    """Preload list from LAYA_MODELS (laya.serve contract: comma list of names).
-
-    Unlike laya.serve, an empty value falls back to english+multilingual instead
-    of "every checkpoint"; see the module docstring.
-    """
+def _models_from_env() -> list[str] | None:
+    """Return the named startup checkpoints, or use the Router's configured list."""
     raw = os.environ.get("LAYA_MODELS", "").strip()
     names = [m.strip() for m in raw.split(",") if m.strip()]
-    return names or list(_DEFAULT_MODELS)
+    return names or None
 
 
 def _remote_base_url() -> str | None:
@@ -162,15 +125,8 @@ def _remote_base_url() -> str | None:
 def _ensure_router() -> Any:
     """Build the Router from the environment, following the laya.serve contract.
 
-    LAYA_DEVICE / LAYA_PRELOAD / LAYA_THREADS / LAYA_AUTO_TASK / LAYA_DEFAULT_MODEL keep the
-    same meaning as in laya.serve (the helpers are reused, not duplicated). The last one
-    differs only in what an unresolvable value costs: serve refuses to start, while a stdio
-    server has no startup to refuse, so the ValueError rides on into the ToolError below.
-    LAYA_MODELS follows the serve comma-list but defaults to english+multilingual here, so
-    typed-decisions stays lazy: LAYA_AUTO_TASK=1 only lets a matching question schema route
-    to it, and it is then loaded on demand. The global is only set once the router is fully
-    built, so a failed preload stays retriable on the next tool call, and construction errors
-    surface as ToolError payloads instead of being swallowed.
+    The local Router uses the same default native checkpoint as the HTTP service.
+    A failed preload can be retried on the next tool call.
     """
     global _ROUTER
     if _ROUTER is not None:
@@ -178,6 +134,13 @@ def _ensure_router() -> Any:
     with _ROUTER_LOCK:
         if _ROUTER is not None:
             return _ROUTER
+        try:
+            extra_models = _extra_models_option()
+            options = dict(_default_model_option(extra_models))
+        except (ValueError, SystemExit) as exc:
+            raise ToolError("internal_error", f"router construction failed: {exc}") from exc
+        if extra_models:
+            options["models"] = extra_models
         base_url = _remote_base_url()
         if base_url:
             # Remote mode: no checkpoint is built here, no torch is imported. The RemoteRouter
@@ -185,8 +148,7 @@ def _ensure_router() -> Any:
             try:
                 from .remote import RemoteRouter
                 router = RemoteRouter(base_url, api_key=os.environ.get("LAYA_API_KEY") or None,
-                                      auto_task_detection=_env_bool("LAYA_AUTO_TASK", False),
-                                      **_default_model_option())
+                                      **options)
             except Exception as exc:
                 raise ToolError("internal_error", f"remote router construction failed: {exc}") from exc
             _ROUTER = router
@@ -197,9 +159,7 @@ def _ensure_router() -> Any:
             raise ToolError("internal_error", f"cannot import laya: {exc}") from exc
         try:
             _apply_thread_limit()
-            router = Router(device=env_device(),
-                            auto_task_detection=_env_bool("LAYA_AUTO_TASK", False),
-                            **_default_model_option())
+            router = Router(device=env_device(), **options)
             if _env_bool("LAYA_PRELOAD", True):
                 router.preload(_models_from_env())
         except Exception as exc:
@@ -262,7 +222,7 @@ def laya_status_tool() -> str:
     name="laya_route",
     description=(
         "Decide which Laya checkpoint would answer, without running a forward pass. "
-        "Use this to explain routing (english vs multilingual vs typed-decisions) to the user. "
+        "Use this to inspect which local checkpoint a request selects. "
         "Passing a laya_predict call's model/task/lang/lang_guess here reproduces the routing block it "
         "reported, without paying for the forward pass; leaving model unset (or 'auto') routes as "
         "normal. explain=true adds the final routing decision's language diagnostic, or null; "
@@ -298,7 +258,7 @@ def laya_route_tool(
 @server.tool(
     name="laya_predict",
     description=(
-        "Answer typed questions (choice/score/noul) over any state in one forward pass. "
+        "Answer typed questions (choice/score/noul) using a native decision checkpoint. "
         "questions: {name: {type: 'choice'|'score'|'noul', instructions: str, criteria?: object|array}}. "
         "For noul, optional labels: {false: str, true: str} changes the model-facing option text. "
         "Any type takes an optional option_order: a permutation of the option indices, slot s showing "
@@ -321,7 +281,7 @@ def laya_predict_tool(
     head_max_len: int | None = None,
     min_confidence: float | None = None,
 ) -> str:
-    """Answer typed questions (choice/score/noul) over any state in one forward pass."""
+    """Answer typed choice, score and noul questions."""
     router = _router_or_error()
     return _wrap(
         laya_predict,
@@ -425,13 +385,10 @@ def laya_route_batch_tool(requests: list, hooks_timeout: float = 0, explain: Str
     name="laya_shortlist",
     description=(
         "Shortlist a many-option choice question to its k most likely labels by embedding "
-        "similarity (mean-pooled from the answering checkpoint's own encoder, so no extra "
-        "model is downloaded), then answer in one forward pass. Use this instead of "
-        "laya_predict when embedding similarity is appropriate for narrowing a large choice. "
+        "similarity using mean-pooled token embeddings from the answering checkpoint, then "
+        "score the retained options. "
         "Returns the answers plus per-question shortlist metadata (kept labels, cosine "
         "scores, k, option count, and whether the question passed through unshortlisted). "
-        "Shortlisting narrows the label set; head_max_len decides how many tokens each kept label "
-        "is read with, so the two together are the fix for a large-criteria question. "
         "A question that narrows cannot keep a caller-supplied option_order: the order covers "
         "every option while the answer covers the kept labels only, so it is dropped rather "
         "than remapped, and each such question is named under option_order_dropped with its "
@@ -478,10 +435,9 @@ def laya_shortlist_tool(
 @server.tool(
     name="laya_tournament",
     description=(
-        "Answer large choice questions by balanced elimination with the decision model, without "
-        "embeddings. group_size: integer at least 2, default 16. All groups share one forward "
-        "pass per round; their winners advance until they fit, then one final pass answers the "
-        "complete request. Small choices and non-choice questions pass through. "
+        "Answer large choice questions by grouped elimination with the decision model. "
+        "group_size is an integer of at least 2 and defaults to 16. Winners advance each round "
+        "until they fit in the final choice. Small choices and other question types pass through. "
         "A missing or out-of-group winner stops the call as internal_error before another pass. "
         "Returns answers, routing, total latency_ms, the answering device when readable, and tournament metadata "
         "per choice: labels (finalists in criteria order), n (original option count), rounds "
@@ -582,7 +538,7 @@ def laya_preset_tool(
 @server.tool(
     name="laya_decide",
     description=(
-        "Answer a JSON-schema-shaped decision in one forward pass and return the decided "
+        "Answer a JSON-schema-shaped decision and return the decided "
         "values: schema is a JSON schema object whose properties are enum choices, booleans "
         "(noul), or integers with integer minimum/maximum (ordinal score); free strings, "
         "arrays and nested objects are rejected by path. Use this instead of laya_predict "
@@ -606,17 +562,14 @@ def laya_decide_tool(state: dict, schema: dict, model: str | None = None,
 @server.tool(
     name="laya_predict_long",
     description=(
-        "Answer typed questions over a state longer than the context window: the state is "
+        "For a backend with windowed inference, answer typed questions over a long state: "
         "scanned in overlapping windows in shared forward passes and aggregated per question "
-        "(strongest window for noul, most-confident window for choice/score). Use this instead "
-        "of laya_predict whenever the state does not fit one window -- laya_predict answers "
-        "from its first window and never reads the rest. Returns the answers, each with the "
+        "(strongest window for noul, most-confident window for choice or score). Returns the answers with the "
         "deciding window's attribution, plus the window count. "
         "window / stride: positive integers sizing the scan (a smaller window isolates a "
         "localized span); unset means the checkpoint budget and 50% overlap. "
         "task: name a checkpoint by what the work is -- refused on a call that also pins model. "
-        "lang: a language code -- routes non-English text and selects that checkpoint's "
-        "per-language calibration. "
+        "lang: an optional language code for the selected backend. "
         + _GUARDRAILS
         + _MODEL_DOC
     ),

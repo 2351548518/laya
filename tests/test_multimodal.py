@@ -369,12 +369,12 @@ def test_ordinal_calibration_guard_rejects_worse_calibration_and_keeps_groups_to
     assert min(guard["fit_n"], guard["check_n"]) == 0 and not guard["accepted"]
 
 
-def test_router_uses_native_media_lane_and_keeps_text_routing():
+def test_router_uses_one_native_checkpoint_for_text_and_media():
     agent = tiny_agent()
     router = Router(multimodal=agent, vega=False)
     assert router.route(None, Q, media="audio").model == "multimodal"
     assert router.route({"image": "local.png"}, Q).model == "multimodal"
-    assert router.route("Please refund the duplicate charge on my invoice.", Q).model == "english"
+    assert router.route("Please refund the duplicate charge on my invoice.", Q).model == "multimodal"
     result = router.predict("context", Q, image=np.zeros((4, 4, 3), np.uint8))
     assert result["routing"]["model"] == "multimodal"
     results = router.predict_batch([{"state": {"image": np.zeros((4, 4, 3), np.uint8)}, "questions": Q}])

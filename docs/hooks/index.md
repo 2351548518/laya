@@ -5,7 +5,7 @@ Hooks let you observe or shape every decision Laya makes, without forking it.
 They are the extension seam for the things every real deployment needs: audit logging, PII
 redaction before inference, caching, metrics, confidence gating, routing overrides, and
 forwarding a decision to an external service. They are **opt-in**: with no hooks configured the
-behaviour of `Agent`, `Router` and `ONNXAgent` is unchanged.
+behaviour of `Agent` and `Router` is unchanged.
 
 They are not only for direct calls. Each [LangChain and LangGraph](../langchain.md) runnable takes
 the same five per-call arguments, so a hook can be attached to one node in a graph rather than to
@@ -30,7 +30,7 @@ import laya
 def log(ctx):
     print(ctx.model, ctx.results[0]["answers"], ctx.elapsed_ms)
 
-agent = laya.load("convaiinnovations/laya", on_predict_end=log)
+agent = laya.load( on_predict_end=log)
 agent.system_one("I was charged twice.", {"urgent": {"type": "noul", "instructions": "Urgent?"}})
 ```
 
@@ -47,7 +47,7 @@ class Audit:
     def on_error(self, ctx):
         print("failed", ctx.run_id, ctx.error)
 
-laya.load("convaiinnovations/laya", hooks=[Audit()])
+laya.load( hooks=[Audit()])
 ```
 
 Hooks can also be added later or scoped to a block:
@@ -117,7 +117,7 @@ There are three ideas.
 
 ## Scope at a glance
 
-| | `Agent` / `ONNXAgent` | `Router` |
+| | `Agent` | `Router` |
 |---|---|---|
 | `on_predict_start` | yes | yes |
 | `on_predict_end` | yes | yes |

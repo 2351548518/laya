@@ -217,9 +217,8 @@ def default_hooks() -> List[Any]:
 def set_default_hooks(hooks=None, on_predict_start=None, on_predict_end=None) -> None:
     """Replace the process-wide default hooks.
 
-    Defaults run before installed and per-call hooks for every `Agent`, `Router` and
-    `ONNXAgent` in the process, so a tracer or metrics hook does not have to be threaded
-    through every construction. Accepts the same arguments as the `hooks=` parameter.
+    Defaults run before installed and per-call hooks for agents and routers in the
+    process. Accepts the same arguments as the `hooks=` parameter.
     """
     normalised = normalise_hooks(hooks, on_predict_start, on_predict_end)
     with _DEFAULT_HOOKS_LOCK:
@@ -350,7 +349,7 @@ class AsyncHook:
             async def on_predict_end(self, ctx):
                 await ship(ctx.results)
 
-        agent = laya.load("convaiinnovations/laya", hooks=[AsyncHook(Remote())])
+        agent = laya.load( hooks=[AsyncHook(Remote())])
 
     Pass `loop` to funnel every coroutine onto a specific loop; otherwise a background loop is
     started on demand when the caller already has one.
@@ -402,9 +401,8 @@ class AsyncHook:
 class HookRegistry:
     """Mixin giving a runtime-mutable hook list.
 
-    `Agent`, `Router` and `ONNXAgent` use it so hooks can be added, removed or scoped after
-    construction. Mutation is guarded by `_hooks_mutex`; a call reads a snapshot of the list,
-    so adding or removing a hook never disturbs a call in flight.
+    Agents and routers can add, remove and scope hooks after construction. A call
+    reads a snapshot of the list under `_hooks_mutex`.
     """
 
     hooks = ()

@@ -109,7 +109,7 @@ def main():
           % laya.VegaAgent.min_rows(QUESTIONS))
 
     t0 = time.time()
-    agent = laya.Agent(vegaml=args.reader or True, device=args.device)
+    agent = laya.VegaAgent(vegaml=args.reader or True, device=args.device)
     print("loaded %s in %.0fs" % (agent, time.time() - t0))
 
     probe = held[0]

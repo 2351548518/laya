@@ -24,115 +24,28 @@ Store source-specific preparation, intermediate outputs and experiment logs unde
 
 ## Development setup
 
-Laya supports Python 3.10 to 3.13. Use a virtual environment so nothing leaks into your system.
+Use Python 3.11 or newer for the native runtime. Install the extras for the code you are testing.
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[mcp]"
-```
-
-Optional extras are declared in `pyproject.toml`: `multimodal`, `serve`, `fast`, `mcp`,
-`structured`, `onnx`, `langchain`, `langgraph`, `llamaindex`, `crewai`, `agno`.
-Install the ones a change needs, for example `pip install -e ".[serve]"`.
-
-If you use [uv](https://docs.astral.sh/uv/), the same setup is below. uv environments come without
-`pip`, so use `uv pip install` wherever this guide says `pip install`.
-
-```bash
-uv venv --python 3.12
-source .venv/bin/activate
-uv pip install -e ".[mcp]"
-```
-
-The server and ONNX paths are exercised by `tests/test_serve.py` and `tests/test_onnx.py`, which
-skip when their extras are not installed -- `tests/test_serve.py` skips every test it has on one
-line of output, so the install decides whether the server checks ran or quietly did not.
-`tests/test_audit_regressions.py` reaches the same server path from five tests that do not skip:
-without the `serve` extra they fail with `ModuleNotFoundError: No module named 'fastapi'`.
-
-## Running the tests
-
-Most suites are plain scripts, so no test runner is required:
-
-```bash
-python tests/test_router.py
-python tests/test_criteria.py
-python tests/test_hooks.py
-python tests/test_hooks_api.py
-```
-
-A handful are pytest based and run under one pytest invocation:
-
-```bash
-python -m pytest tests/test_serve.py tests/test_truncation_direction.py -q
-```
-
-For native runtime changes, install `.[multimodal,serve]` and run the small-backbone checks.
-
-```bash
-python -m pytest -q tests/test_multimodal.py tests/test_grounding.py \
-  tests/test_multimodal_cli.py tests/test_multimodal_export.py
-```
-
-The one list that both the CI `test` job and the release gate run is
-[`scripts/test_suites.py`](scripts/test_suites.py). It keeps two lists because `python tests/<name>.py`
-does not execute a pytest suite -- it defines the test functions and exits 0, having asserted nothing
-(#374): `SCRIPT_SUITES` print their own PASS/FAIL summary and exit non-zero on failure, and
-`PYTEST_SUITES` are collected and run by pytest in a single invocation. Some lanes still name their own
-suites inline under `.github/workflows/`, and `tests/test_packaging.py` fails if a suite ends up in
-neither the shared list nor any workflow.
-
-That list takes the extras the CI `test` job installs, not `mcp` alone: `serve` for `laya.serve`
-and `langchain` for the real `Runnable` base class. Two more are not in any extra -- `pytest`, for
-the `PYTEST_SUITES` half, and `httpx`, which `fastapi.testclient` imports and `serve` does not
-declare (it arrives with `langchain-core` here, which is not a dependency to lean on). Installing
-what that job installs is what makes a local run mean the same thing as the gate:
-
-```bash
-pip install -e ".[mcp,serve,langchain]" pytest httpx
+python -m pip install -e '.[multimodal,serve,mcp,langchain]' pytest httpx ruff
+ruff check laya/ --select=E9,F63,F7,F82,F401,F811 --line-length=120
+python -m compileall -q laya/ tests/
 python scripts/test_suites.py
 ```
 
-With `mcp` alone the list is not green, and what it loses is not all visible in the failures:
-`tests/test_langchain_real_mode.py` fails by design, which is how a lane that runs this list is
-told to install the extra, the five server tests in `tests/test_audit_regressions.py` fail with
-`ModuleNotFoundError`, and `tests/test_serve.py` skips its whole file without failing anything.
-
-The suites that need hardware, a compiler or local weights are not part of the PR `test` job:
-
-- `tests/test_compile_cuda.py` -- needs CUDA; CI installs CPU-only torch.
-- `tests/test_fast.py` -- needs CUDA and the `tilelang` extra.
-- `tests/test_fast_cpu.py` -- needs the `tilelang` extra and a C++ compiler; its CUDA parity checks skip.
-- `tests/test_local_e2e.py` -- expects checkpoints under `~/laya_models`.
-- `tests/test_mcp_local_e2e.py` -- expects checkpoints under `~/laya_models` and the `mcp` extra.
-- `tests/test_onnx.py` -- needs the `onnx` extra; it runs in the ONNX lane of `evals.yml`, not the PR job.
-- `tests/test_server_example.py` -- needs the weights `examples/server.py` loads; it runs in `evals.yml`.
-- `tests/test_guard_document_781.py` -- the historical guardrail check requires the pinned
-  local English checkpoint. Run it as `python tests/test_guard_document_781.py --checkpoint models/laya`.
-
-Before opening a pull request, run the lint and compile checks the CI runs:
-
-```bash
-ruff check laya/ --select=E9,F63,F7,F82,F401,F811 --line-length=120
-python -m compileall -q laya/ tests/
-```
+The shared suite exercises native CPU fixtures, the serving API and training resumes.
+Run a real checkpoint with `verify/multimodal_smoke_test.py` when changing model loading,
+media preprocessing or decision decoding.
 
 ## Documentation
 
-The site at [nandhakishorm.github.io/laya](https://nandhakishorm.github.io/laya/) builds from
-`docs/` with Zensical, and its API reference builds from the docstrings in `laya/`. A new page
-appears under Guides without a config change; to put it somewhere else, add it to
-[`docs/.nav.yml`](docs/.nav.yml). For a docs or docstring change, build the site the way the CI
-does:
+Describe the command or API the user should call and the checkpoint it needs.
+Build the documentation before submitting changes.
 
 ```bash
-pip install -r requirements-docs.txt
+python -m pip install -r requirements-docs.txt
 zensical build --strict --clean
 ```
-
-The output must have no `griffe:` lines. Those are docstring problems, such as a parameter the
-signature does not have, and the CI fails on them.
 
 ## Style
 
@@ -188,7 +101,7 @@ Use the issue templates and include:
 - What you expected and what you got.
 - A minimal reproduction, ideally a short script.
 - Your Laya version (`python -c "import laya; print(laya.__version__)"`), Python version, OS, and
-  device or backend (CPU, CUDA, MPS, ONNX).
+  device (CPU, CUDA or MPS).
 
 ## Reviews
 

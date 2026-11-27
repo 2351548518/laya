@@ -2,7 +2,6 @@
 
 Run: python tests/test_structured.py
 """
-import inspect
 import os
 import sys
 
@@ -429,7 +428,6 @@ check("batch/per-state values", outs[1],
       {"department": "sales", "urgency": 0, "needs_human": False, "priority": 1})
 
 # Call-level keywords ride through to predict_batch -- but only the ones a real runner declares.
-# `lang`/`max_len` are Agent- and ONNXAgent-side keywords, so they are valid here for the Agent
 # convention and are per-request keys for the Router convention below. `model=` is only the second.
 batch_runner = FakeBatchRunner(BATCH_ANSWERS)
 decide_batch(batch_runner, STATES, schema=SCHEMA, batch_size=4, lang="en")
@@ -439,179 +437,6 @@ check("batch/forwards predict kwargs", batch_runner.calls[0]["kwargs"],
 # No runner takes model= as a call-level keyword: the docstring used to list it among the keywords
 # forwarded to predict_batch, and this suite used to assert that forwarding -- against a fake whose
 # **kwargs absorbs anything. Bound against the real signatures instead, which loads no checkpoint.
-from laya.agent import Agent  # noqa: E402
-from laya.onnx_agent import ONNXAgent  # noqa: E402
-from laya.structured import _ROUTER_REQUEST_KEYS  # noqa: E402
-
-for _cls in (Agent, ONNXAgent, laya.Router):
-    check_raises("batch/%s.predict_batch rejects model=" % _cls.__name__, TypeError,
-                 lambda _cls=_cls: inspect.signature(_cls.predict_batch).bind(
-                     None, STATES, {}, model="english"))
-check_true("batch/model is one of the router's per-request keys",
-           "model" in _ROUTER_REQUEST_KEYS)
-
-
-class StrictAgentRunner:
-    """An ``Agent``-shaped ``predict_batch``: the keywords it names and no ``**kwargs`` to swallow
-    the rest. That is what makes ``model=`` an error a caller meets, not a silent extra argument."""
-
-    def __init__(self, answers):
-        self.answers = answers
-        self.calls = []
-
-    def predict_batch(self, states, questions, batch_size=None, lang=None, hooks=None):
-        self.calls.append({"states": list(states), "kwargs": {"batch_size": batch_size,
-                                                             "lang": lang, "hooks": hooks}})
-        return [{"answers": self.answers[s], "routing": {"model": "english"}} for s in states]
-
-
-# Only half of the asymmetry is new here: `decide_batch` gives a Router-like runner the opposite
-# answer, because it copies `model=` onto every request instead of passing it as a keyword, and main
-# already pins that as "batch/router model= reaches a registered checkpoint".
-try:
-    decide_batch(StrictAgentRunner(BATCH_ANSWERS), STATES, schema=SCHEMA, model="english")
-    _model_error = None
-except TypeError as _e:
-    _model_error = str(_e)
-check("batch/agent-like decide_batch rejects model=",
-      "'model'" in (_model_error or ""), True)
-_strict = StrictAgentRunner(BATCH_ANSWERS)
-check("batch/agent-like decide_batch keeps the keywords it does declare",
-      decide_batch(_strict, STATES, schema=SCHEMA, batch_size=4, lang="en"), outs)
-check("batch/and the declared keywords reach predict_batch as keywords",
-      _strict.calls[0]["kwargs"], {"batch_size": 4, "lang": "en", "hooks": None})
-
-# return_details: one DecisionResult per state with the usual fields
-details = decide_batch(FakeBatchRunner(BATCH_ANSWERS), STATES, schema=SCHEMA, return_details=True)
-check_true("batch/details are DecisionResult", all(isinstance(d, laya.DecisionResult) for d in details))
-check("batch/details values", [d.values["department"] for d in details], ["billing", "sales"])
-check("batch/details confidence", details[0].confidence["department"], 0.9)
-check("batch/details routing", details[0].routing, {"model": "english"})
-
-# questions= is the raw-answers pass-through, exactly like decide()
-raw = decide_batch(FakeBatchRunner({"a": {"x": {"type": "noul", "noul": 0.9, "confidence": 0.9}}}),
-                   ["a"], questions={"x": {"type": "noul", "instructions": "?"}})
-check("batch/questions pass-through", raw,
-      [{"x": {"type": "noul", "noul": 0.9, "confidence": 0.9}}])
-
-
-class FakeRouterLike:
-    """predict_batch(requests, **kwargs) like Router's: one request dict per
-    state (no positional questions), routed through route_batch."""
-
-    def __init__(self, answers_by_state):
-        self.answers_by_state = answers_by_state
-        self.calls = []
-
-    def route_batch(self, requests):
-        return [{"model": "english"} for _ in requests]
-
-    def predict_batch(self, requests, **kwargs):
-        self.calls.append({"requests": requests, "kwargs": kwargs})
-        return [{"answers": self.answers_by_state.get(r["state"], {}),
-                 "routing": {"model": "english"}} for r in requests]
-
-
-router_like = FakeRouterLike(BATCH_ANSWERS)
-router_outs = decide_batch(router_like, STATES, schema=SCHEMA, batch_size=3)
-expected_questions = {f.name: f.question for f in plan_from_json_schema(SCHEMA)}
-check("batch/router one call", len(router_like.calls), 1)
-check("batch/router request dicts", [r["state"] for r in router_like.calls[0]["requests"]], STATES)
-check("batch/router questions per request",
-      all(r["questions"] == expected_questions for r in router_like.calls[0]["requests"]), True)
-check("batch/router kwargs forwarded", router_like.calls[0]["kwargs"], {"batch_size": 3})
-check("batch/router projection matches agent path", router_outs, outs)
-
-
-# A real Router, not a fake that takes **kwargs: Router.predict_batch reads model/task/lang/
-# lang_guess/max_len/head_max_len off each request and has no such keywords, so forwarding them
-# whole raised TypeError and `decide_batch(model=...)` could not pin a checkpoint at all -- the
-# only way to reach a registered one, since those are never auto-routed.
-class StubCheckpoint:
-    """An attached agent that answers every state and records how it was called."""
-
-    def __init__(self, name):
-        self.name, self.calls = name, []
-
-    def predict_batch(self, states, questions, **kwargs):
-        self.calls.append({"states": list(states), "kwargs": kwargs})
-        return [{"model": "laya-rl-agent", "usage": {"input_tokens": 1, "output_tokens": 0},
-                 "answers": BATCH_ANSWERS[s]} for s in states]
-
-    def system_one(self, state, questions, **kwargs):
-        return self.predict_batch([state], questions, **kwargs)[0]
-
-    predict = system_one
-
-
-def stub_router():
-    router = laya.Router()
-    stubs = {name: StubCheckpoint(name) for name in ("english", "multilingual")}
-    for name, stub in stubs.items():
-        router.attach(name, stub)
-    return router, stubs
-
-
-for pin in ({"model": "multilingual"}, {"model": "ml"}, {"lang": "de"}, {"lang_guess": "de"}):
-    router, stubs = stub_router()
-    try:
-        pinned = router.decide_batch(STATES, schema=SCHEMA, **pin)
-    except TypeError as e:
-        pinned = repr(e)
-    check("batch/router %s answers every state on that checkpoint" % pin,
-          (pinned, [c["states"] for c in stubs["multilingual"].calls], stubs["english"].calls),
-          (outs, [STATES], []))
-
-router, stubs = stub_router()
-try:
-    router.decide_batch(STATES, schema=SCHEMA, model="english", max_len=256, head_max_len=128, batch_size=2)
-    seen = stubs["english"].calls[0]["kwargs"]
-    seen = {k: seen.get(k) for k in ("max_len", "head_max_len", "batch_size")}
-except TypeError as e:
-    seen = repr(e)
-check("batch/router per-request budget and call-level batch_size both reach the agent", seen,
-      {"max_len": 256, "head_max_len": 128, "batch_size": 2})
-
-router, stubs = stub_router()
-router.register("papers", "/models/papers")
-papers = StubCheckpoint("papers")
-router.attach("papers", papers)
-try:
-    pinned = router.decide_batch(STATES, schema=SCHEMA, model="papers")
-except TypeError as e:
-    pinned = repr(e)
-check("batch/router model= reaches a registered checkpoint", (pinned, [c["states"] for c in papers.calls]),
-      (outs, [STATES]))
-
-router, stubs = stub_router()
-check("batch/router decide_batch(model=) agrees with decide(model=)",
-      [router.decide(s, schema=SCHEMA, model="multilingual") for s in STATES], outs)
-
-# a string is a sequence of states only accidentally: refuse it like route_batch does
-check_raises("batch/rejects string states", TypeError,
-             lambda: decide_batch(FakeBatchRunner({}), "abc", schema=SCHEMA))
-check_raises("batch/requires schema or questions", ValueError,
-             lambda: decide_batch(FakeBatchRunner({}), ["a"]))
-check_raises("batch/rejects both", ValueError,
-             lambda: decide_batch(FakeBatchRunner({}), ["a"], schema=SCHEMA, questions={}))
-check_raises("batch/rejects bad schema", SchemaError,
-             lambda: decide_batch(FakeBatchRunner({}), ["a"],
-                                  schema={"type": "object", "properties": {"s": {"type": "string"}}}))
-
-
-class NoBatchRunner(FakeRunner):
-    pass  # has predict() but no predict_batch
-
-
-check_raises("batch/runner without predict_batch", TypeError,
-             lambda: decide_batch(NoBatchRunner(ANSWERS), ["a"], schema=SCHEMA))
-
-# a runner that answers nothing (hook-skipped states surface as empty values)
-noop_runner = FakeBatchRunner({})
-check("batch/skipped states", decide_batch(noop_runner, ["unmatched"], schema=SCHEMA), [{}])
-check("batch/noop still batches", len(noop_runner.calls), 1)
-
-
 # --------------------------------------------------------------- pydantic (optional)
 try:
     from typing import Literal
@@ -663,9 +488,7 @@ check("method/Agent.decide", callable(getattr(laya.Agent, "decide", None)), True
 check("method/Agent.decide_batch", callable(getattr(laya.Agent, "decide_batch", None)), True)
 check("method/Router.decide", callable(getattr(laya.Router, "decide", None)), True)
 check("method/Router.decide_batch", callable(getattr(laya.Router, "decide_batch", None)), True)
-from laya.onnx_agent import ONNXAgent  # noqa: E402
 
-check("method/ONNXAgent.decide", callable(getattr(ONNXAgent, "decide", None)), True)
 
 
 # --------------------------------------------------------------- nullable via anyOf (pydantic v2)

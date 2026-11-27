@@ -276,7 +276,7 @@ check("floor/an integer below the shipped floor still fits",
 # 'choice:11+': 1.0}, which accepts 0 of 480 answers; 0.10 fits {'choice:2': 0.97,
 # 'choice:11+': 0.55}, which accepts 240 of them with 0 errors among the accepted; 1.0 fits
 # {'choice:2': 0.85, 'choice:11+': 0.33}, which accepts all 480 at 156 errors (32.5%). Either map is
-# something `check_min_confidence` accepts and `laya.train` writes into a checkpoint, so the caller
+# something `check_min_confidence` accepts, so the caller
 # never heard about the coercion. `TrainConfig` refuses the same bool one call earlier, on its way
 # into this function; this is that arm, on the public surface.
 for _bad, _coerces in ((True, 1.0), (False, 0.0)):
@@ -370,14 +370,6 @@ check_true("doc/the producer says to pass no gate rather than an empty map",
            "Pass no gate in that case" in _fit_doc, _fit_doc)
 check_true("doc/the producer does not leave the promise standing alone",
            "accept directly -- with one exception" in _fit_doc, _fit_doc)
-# The prose points at `laya.train` as the caller that already does the right thing. Read its text
-# instead of importing it, so this suite stays weight-free (`tests/test_calibrate.py` reads source
-# text the same way for its `load/` checks).
-with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir,
-                       "laya", "train.py"), encoding="utf-8") as _train:
-    _train_src = _train.read()
-check_true("doc/the pointer into `laya.train` names a guard that is really there",
-           "if abstention_thresholds:" in _train_src, "no such guard in laya/train.py")
 # `_option_bucket` must read the one vocabulary list, not keep a second copy of the type names.
 _bucket_src = inspect.getsource(confidence_module._option_bucket)
 check_true("vocabulary/_option_bucket reads BUCKET_QTYPES",
@@ -453,7 +445,6 @@ check("binning/no map leaves the fit unchanged",
 # seed 2's cut is the bin value 5/6 = 0.83333..., the runtime reports that bin as 0.8333, and the
 # whole bin abstains. Gated through the real decoder, the fitted cut must keep the coverage and
 # error the fitter judged it on.
-from laya.agent import Agent  # noqa: E402
 
 _rng = np.random.default_rng(2)
 _round_records = []
@@ -469,31 +460,7 @@ _round_bmap = fit_binning_map(_round_records, _temps, _tbo)
 _round_cut = fit_abstention_thresholds(_round_records, _temps, _tbo, binning_map=_round_bmap,
                                        target_error=0.10)["choice:11+"]
 
-_dec = Agent.__new__(Agent)
-_dec.temperature, _dec.temperature_by_options, _dec.lang_temperatures = list(_temps), {}, {}
-_dec.binning_map = _round_bmap
-_round_ids = ["q%d" % i for i in range(len(_round_records))]
-_q = Agent._to_internal({"type": "choice", "instructions": "?", "criteria": ["o%d" % i for i in range(12)]})
-_decoded = _dec._decode_answers(np.asarray([z for _, z, _, _ in _round_records], dtype=np.float64),
-                                np.zeros((len(_round_records), 2)), [{"markers": list(range(12))}] * len(_round_ids),
-                                _round_ids, {qid: _q for qid in _round_ids}, 0)
-_round_results = [{"answers": _decoded}]
-apply_confidence_gate(_round_results, {"choice:11+": _round_cut})
 
-_fit_acc = _gate_acc = _gate_wrong = 0
-for qid, (_qt, z, t, k) in zip(_round_ids, _round_records):
-    p = np.exp(np.asarray(z) - max(z))
-    p = p / p.sum()
-    _fit_acc += apply_binning_map(float(p.max()), "choice:11+", _round_bmap) >= _round_cut
-    if _decoded[qid]["abstention"] == GATE_PASSED:
-        _gate_acc += 1
-        _gate_wrong += int(int(p.argmax()) != int(np.argmax(t)))
-
-check_true("rounding/the cut is a value the runtime can report", round(_round_cut, 4) == _round_cut,
-           "cut=%r" % (_round_cut,))
-check("rounding/the gate keeps every answer of the cut bin", _gate_acc, _fit_acc)
-check_true("rounding/the gate holds the target error", _gate_acc > 0 and _gate_wrong / _gate_acc <= 0.10,
-           "accepted=%d wrong=%d" % (_gate_acc, _gate_wrong))
 print("\n%d passed, %d failed" % (len(PASS), len(FAIL)))
 for f in FAIL:
     print("  FAIL " + f)

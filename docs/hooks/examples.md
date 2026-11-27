@@ -16,7 +16,6 @@ Copy-paste recipes. Every snippet is self-contained apart from the helpers it na
 - [Per-call hooks](#per-call-hooks)
 - [Batch](#batch)
 - [HTTP server](#http-server)
-- [ONNXAgent](#onnxagent)
 - [Runtime registration](#runtime-registration)
 - [Base class and process-wide defaults](#base-class-and-process-wide-defaults)
 - [Async hooks](#async-hooks)
@@ -32,7 +31,7 @@ import laya
 def log(ctx):
     print(ctx.model, ctx.results[0]["answers"])
 
-agent = laya.load("convaiinnovations/laya", on_predict_end=log)
+agent = laya.load( on_predict_end=log)
 agent.system_one("I was charged twice.", {"urgent": {"type": "noul", "instructions": "Urgent?"}})
 ```
 
@@ -59,7 +58,7 @@ def audit(ctx):
         print(json.dumps(record), file=sys.stderr)
         # ship_to_service(record)
 
-agent = laya.load("convaiinnovations/laya", on_predict_end=audit)
+agent = laya.load( on_predict_end=audit)
 ```
 
 One hook call covers the whole call, so the loop writes one record per decision; see
@@ -88,7 +87,7 @@ def scrub(value):
 def redact(ctx):
     ctx.states = [scrub(s) for s in ctx.states]
 
-agent = laya.load("convaiinnovations/laya", on_predict_start=redact)
+agent = laya.load( on_predict_start=redact)
 ```
 
 See [`examples/hooks/redact.py`](../../examples/hooks/redact.py).
@@ -117,7 +116,7 @@ def write(ctx):
     for i, result in enumerate(ctx.results or []):
         CACHE[key(ctx, i)] = result
 
-agent = laya.load("convaiinnovations/laya", on_predict_start=read, on_predict_end=write)
+agent = laya.load( on_predict_start=read, on_predict_end=write)
 first = agent.system_one("state", QUESTIONS)    # runs the model
 second = agent.system_one("state", QUESTIONS)   # served from CACHE
 ```
@@ -136,7 +135,7 @@ def metrics(ctx):
     if ctx.elapsed_ms is not None:
         LATENCIES.append(ctx.elapsed_ms)
 
-agent = laya.load("convaiinnovations/laya", on_predict_end=metrics, hooks_raise=False)
+agent = laya.load( on_predict_end=metrics, hooks_raise=False)
 ```
 
 See [`examples/hooks/otel.py`](../../examples/hooks/otel.py).
@@ -156,7 +155,7 @@ def guard(ctx):
     if "ignore previous instructions" in text:
         raise Blocked("prompt injection")
 
-agent = laya.load("convaiinnovations/laya", on_predict_start=guard)
+agent = laya.load( on_predict_start=guard)
 
 try:
     agent.system_one("Ignore previous instructions and ...", QUESTIONS)
@@ -179,7 +178,7 @@ def gate(ctx):
             answer["choice"] = "human-review"
             answer["gated"] = True
 
-agent = laya.load("convaiinnovations/laya", on_predict_end=gate)
+agent = laya.load( on_predict_end=gate)
 ```
 
 `ctx.results` holds one dict per state of the call, so the loop annotates every answer that
@@ -199,14 +198,14 @@ class Pin:
     def on_route(self, ctx):
         if "refund" in str(ctx.states[0]).lower():
             ctx.decision = RouteDecision(
-                model="typed-decisions",
-                repo="convaiinnovations/laya/typed-decisions",
+                model="support",
+                repo="models/support",
                 reason="refund workflow",
                 detection=None,
                 workflow=None,
             )
 
-router = Router(hooks=[Pin()])
+router = Router(models={"support": "models/support"}, hooks=[Pin()])
 ```
 
 Per-call, without installing:
@@ -230,7 +229,7 @@ class Lifecycle:
         print("evicted", ctx.model)
 
 router = Router(max_loaded=1, hooks=[Lifecycle()])
-router.preload(["english", "multilingual"])   # on_load fires per build
+router.preload(["multimodal"])   # on_load fires per build
 router.unload()                               # on_evict fires per freed checkpoint
 ```
 
@@ -255,7 +254,6 @@ def audit(ctx):
     ship(ctx.run_id, ctx.results)
 
 agent = laya.load(
-    "convaiinnovations/laya",
     hooks=[Metrics()],              # hooks=[...] entries run in list order
     on_predict_start=redact,        # convenience callables follow the entries
     on_predict_end=audit,           # both kinds share one ctx per call
@@ -309,17 +307,6 @@ router = Router(hooks=[Metrics()], on_predict_end=audit, hooks_raise=False)
 app = create_app(router=router)
 ```
 
-## ONNXAgent
-
-`ONNXAgent` exposes the predict-level events only.
-
-```python
-from laya.onnx_agent import ONNXAgent
-
-agent = ONNXAgent("convaiinnovations/laya", onnx_path="laya.onnx", on_predict_end=audit)
-agent.system_one(state, questions)
-```
-
 ## Runtime registration
 
 Attach, detach or scope hooks after construction.
@@ -356,33 +343,13 @@ hooks.clear_default_hooks()
 
 ## Token budget
 
-Shape the token budget for one call, from a hook or a per-call argument. A hook's value replaces
-the budget in force, so it has to read that budget first: size on the widest question of the call,
-stay above the token floor the core applies to the options, and widen `max_len` with `head_max_len`
-so the state keeps a window.
+Pass `max_len` for an individual native prediction.
 
 ```python
-def widen(ctx):
-    k = max((len(q.get("criteria", {}) or {}) for q in ctx.questions.values()), default=0)
-    if k < 50:
-        return
-    cfg = getattr(ctx.agent, "cfg", None) or {}
-    head = ctx.head_max_len if ctx.head_max_len is not None else cfg.get("head_max_len", 192)
-    window = ctx.max_len if ctx.max_len is not None else cfg.get("max_len", 512)
-    need = 16 + 8 * k
-    if need > head:
-        ctx.head_max_len = need
-        ctx.max_len = max(window, need + 8 + 64)
-
-agent = laya.load("convaiinnovations/laya", on_predict_start=widen)
-
-# or per call
-agent.system_one(state, questions, head_max_len=512, max_len=1024)
+agent.predict(state, questions, max_len=8192)
 ```
 
-[Token-budget shaping](patterns.md#token-budget-shaping) has the arithmetic behind each line, and
-[`predict_shortlist`](../reference/helpers.md) is the option when a label set cannot fit even a
-widened window.
+Use a [start hook](patterns.md#token-budget-shaping) for budgets that depend on the question set.
 
 ## Async hooks
 
@@ -397,7 +364,7 @@ class RemoteAudit:
     async def on_predict_end(self, ctx):
         await ship(ctx.run_id, ctx.results)
 
-agent = laya.load("convaiinnovations/laya", hooks=[AsyncHook(RemoteAudit())])
+agent = laya.load( hooks=[AsyncHook(RemoteAudit())])
 ```
 
 A plain async callable works too:
@@ -414,7 +381,7 @@ agent.system_one(state, questions, on_predict_end=async_end)
 Bound each hook call, so a stuck hook cannot hang a served request:
 
 ```python
-agent = laya.load("convaiinnovations/laya", on_predict_end=metrics, hooks_timeout=2.0)
+agent = laya.load( on_predict_end=metrics, hooks_timeout=2.0)
 
 # or per call
 agent.system_one(state, questions, on_predict_end=metrics, hooks_timeout=0.5)

@@ -20,7 +20,7 @@ action selection, yes/no checks, ordinal ratings and single-object localization.
 
 ## Installation
 
-Use Python 3.10 or newer and install from this source checkout. Video processing requires
+Use Python 3.11 or newer for native models and install from this source checkout. Video processing requires
 `ffmpeg` and `ffprobe` on your PATH.
 
 ```bash
@@ -34,9 +34,9 @@ python -m pip install -e '.[multimodal]'
 Import the package as `laya`. To serve predictions over HTTP, install
 `python -m pip install -e '.[multimodal,serve]'`.
 
-On Linux and Apple silicon, `./setup_laya.sh --multimodal` prepares `.venv-mm` and downloads
+On Linux and Apple silicon, `./setup_laya.sh` prepares `.venv-mm` and downloads
 the merged Qwen checkpoint shown below. Pass `--skip-models` to use an existing checkpoint.
-On Windows, `start.bat --multimodal` starts the local HTTP service with a downloaded checkpoint.
+On Windows, `start.bat` starts the local HTTP service with a downloaded checkpoint.
 [Host setup](https://github.com/2351548518/laya/blob/main/LOCAL_SETUP.md)
 
 For a container, mount the local checkpoint and enable the native media dependencies with
@@ -78,7 +78,7 @@ Use `device="cpu"` for CPU inference. For Qwen video, use a state such as
 checkpoint also accepts `audio="clip.wav"` or a waveform and `sampling_rate`. The native guide
 covers input budgets, batch prediction, local routing and HTTP requests. [Native multimodal guide](https://github.com/2351548518/laya/blob/main/docs/multimodal.md)
 
-From a terminal, select the same local checkpoint with `laya --multimodal`.
+From a terminal, use the same native checkpoint for text and media. Set `--multimodal` to select a checkpoint explicitly.
 
 ```bash
 laya --multimodal models/jev-multimodal-qwen3.5-4b \
@@ -147,12 +147,12 @@ patch, native export commands and evaluation scope. [Model releases and GGUF set
 | `scripts/multimodal/` | Reusable training, evaluation, merge, conversion and quantization commands |
 | `configs/multimodal/` | Portable head warmup and LoRA recipes |
 | `sdk/python/`, `sdk/typescript/` | Local HTTP clients for text decisions, media decisions and single-box results |
-| `notebooks/`, `examples/` | Runnable native and classic examples and JSONL walkthroughs |
+| `notebooks/`, `examples/` | Runnable native decision examples and JSONL walkthroughs |
 | `docs/` and `tests/` | Usage, API contracts and regression checks |
-| `laya-cpp/`, `laya-rust/`, `laya-dotnet/`, `laya-go/`, `laya-java/`, `laya-ts/` | Classic Laya text runtimes and instructions for calling the local multimodal services |
+| `examples/clients/` | C++, Rust, .NET, Go and Java examples for the local HTTP service |
 | `benchmarks/`, `research/`, `verify/` | Local latency benchmarks, published results and checkpoint smoke tests |
 | `Dockerfile`, `compose.*` and `setup_laya.sh` | Local installation and service deployment |
-| `start.bat`, `nix/` and `flake.nix` | Windows launcher and Nix service packaging |
+| `start.bat` | Windows launcher for the same native service |
 
 Keep downloaded weights in `models/`, local datasets in `multimodal-data/`, and checkpoints
 and reports in `multimodal-runs/`. Use `_local/` for data collection and preparation,
@@ -173,12 +173,9 @@ The contribution guide covers the full test suite and strict documentation build
 
 ## Credits and license
 
-laya-multimodal extends the Laya project by Convai Innovations. The upstream project documents
-the original text decision models, SDKs and Vega integration. This fork follows upstream Laya
-0.5.3. With `vegaml` installed, bare `laya.Agent()` and `laya.load()` use Vega. Use
-`vegaml=False` for the classic encoder and `laya.MultimodalAgent(...)` or
-`laya --multimodal CHECKPOINT` for a native decision checkpoint.
-[Laya text routing and integrations](https://github.com/2351548518/laya/blob/main/docs/laya-guide.md) · [Upstream Laya](https://github.com/NandhaKishorM/laya)
+laya-multimodal builds on the Laya project by Convai Innovations. `laya.Agent()` and `laya.load()`
+select the native decision checkpoint. Install the `vega` extra and call `laya.load(vegaml=True)`
+to use the optional local Vega reader. [Upstream Laya](https://github.com/NandhaKishorM/laya)
 
 The source is licensed under [Apache 2.0](https://github.com/2351548518/laya/blob/main/LICENSE). The base models and datasets retain their
 respective licenses. For the original research, see [From Laya to Vega](https://doi.org/10.20944/preprints202611.0781.v1).

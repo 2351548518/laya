@@ -1,113 +1,11 @@
-"""Seed before fresh heads; full-omni Gemma and explicit visual-only Qwen training."""
-import argparse
-from contextlib import nullcontext
-from dataclasses import fields
-import json
-import os
+"""Run the packaged native multimodal training command from a checkout."""
+
 from pathlib import Path
 import sys
 
-import torch
-
-sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
-from laya.grounding_train import GroundingTrainConfig,finetune_grounding
-from laya.multimodal import MultimodalAgent
-from laya.multimodal_data import read_records
-from laya.multimodal_distributed import distributed_context
-from laya._qwen_training import qwen_training_delta
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from laya.train_cli import main, validate_visual_training as validate_visual_training
 
 
-def _visual_row_validator(model, max_len, require_admission):
-    # Never silently drop the audio part of a trajectory to make a VLM fit.
-    expected_processor=Path(model).resolve();verified_processors=set()
-
-    def validate(split, row):
-        state=row['state']
-        if isinstance(state,dict) and (state.get('audio') is not None or
-                (state.get('video') is not None and state.get('video_audio') is not False)):
-            raise ValueError('Qwen3.5 requires an admitted visual-only view; audio cannot be discarded: '+str(row.get('id')))
-        admission=row.get('training_admission',{})
-        if not isinstance(admission,dict):
-            raise ValueError('training_admission must be an object')
-        admitted=admission.get('processor')
-        if split == 'train' and not admitted and require_admission:
-            raise ValueError('Qwen3.5 training requires native processor admission for every training row')
-        if admitted and admitted not in verified_processors:
-            if Path(admitted).resolve()!=expected_processor:
-                raise ValueError('Training view was admitted using a different backbone processor: '+str(admitted))
-            verified_processors.add(admitted)
-        if max_len is not None and admitted and admission.get('max_len')!=max_len:
-            raise ValueError('Native admission and training context budgets must match')
-    return validate
-
-
-def validate_visual_training(root, model, max_len=None, require_admission=True, *, train_split='train'):
-    validate = _visual_row_validator(model, max_len, require_admission)
-    for split in (train_split, 'dev', 'decision_dev'):
-        for row in read_records(root/(split+'.jsonl'), verify_media=False):
-            validate('train' if split == train_split else split, row)
-
-
-def main():
-    parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--model',required=True);parser.add_argument('--data',required=True)
-    parser.add_argument('--out',required=True);parser.add_argument('--config',required=True)
-    parser.add_argument('--train-split', choices=['train', 'warmup'], default='train')
-    parser.add_argument('--require-original-base',action='store_true')
-    parser.add_argument('--visual-only',action='store_true')
-    parser.add_argument('--allow-unadmitted',action='store_true',
-        help='Allow local JSONL without stored processor receipts; native media and context checks still apply')
-    parser.add_argument('--qwen-training-delta', action='store_true',
-        help='Use the local PyTorch chunk scan for Qwen3.5 gradient computation')
-    parser.add_argument('--resume', help='Run directory or optimizer snapshot to resume with the original model and data')
-    parser.add_argument('--deterministic', action='store_true', help='Use deterministic PyTorch training operations')
-    parser.add_argument('--text-attention',choices=['sdpa','flex_attention'],default='sdpa');args=parser.parse_args()
-    if args.deterministic:
-        os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
-        torch.use_deterministic_algorithms(True)
-    values=json.loads(Path(args.config).read_text())
-    if set(values)-{field.name for field in fields(GroundingTrainConfig)}:raise ValueError('unknown training fields')
-    config=GroundingTrainConfig(**values);config.validate();ctx=distributed_context()
-    checkpoint=Path(args.model)/'multimodal_config.json'
-    saved=json.loads(checkpoint.read_text()) if checkpoint.exists() else {}
-    source=saved.get('backbone',args.model)
-    model_type=json.loads((Path(source)/'config.json').read_text())['model_type']
-    if model_type not in {'gemma4','qwen3_5'}:raise ValueError('joint training requires Gemma 4 or Qwen3.5')
-    if args.visual_only!=(model_type=='qwen3_5'):
-        raise ValueError('Qwen3.5 requires --visual-only; Gemma4 keeps the full-omni recipe')
-    if args.qwen_training_delta and model_type!='qwen3_5':
-        raise ValueError('--qwen-training-delta requires Qwen3.5')
-    root=Path(args.data)
-    row_validator = (_visual_row_validator(source, config.max_len, not args.allow_unadmitted)
-                     if args.visual_only else None)
-    if args.require_original_base:
-        if (Path(args.model)/'multimodal_config.json').exists() or (Path(args.model)/'adapter_config.json').exists():
-            raise ValueError('fresh-base training must not load a decision checkpoint or adapter')
-    # Model construction precedes finetune_grounding's own seed reset.
-    torch.manual_seed(config.seed)
-    agent=MultimodalAgent(args.model,device=ctx.device,max_len=config.max_len,frames=4,
-        max_audio_seconds=30.,use_audio_in_video=not args.visual_only,readout='candidate',prompt_version='v2',grounding_slots=1)
-    agent._training_variant = {"text_attention": args.text_attention, "qwen_training_delta": args.qwen_training_delta,
-                               "deterministic": torch.are_deterministic_algorithms_enabled()}
-    if args.text_attention!='sdpa':
-        if model_type!='gemma4':raise ValueError('Experimental text attention currently validated for Gemma only')
-        agent.model.set_attn_implementation({'':'sdpa','text_config':args.text_attention,'vision_config':'sdpa','audio_config':'eager'})
-    base=agent.model.get_base_model() if hasattr(agent.model,'peft_config') else agent.model
-    if base.grounding_head.architecture!='single-v1':raise ValueError('expected compact single-box head')
-    if args.require_original_base and hasattr(agent.model,'peft_config'):raise ValueError('inherited adapters forbidden')
-    if ctx.main:
-        out=Path(args.out);out.mkdir(parents=True,exist_ok=True)
-        (out/'initialization.json').write_text(json.dumps({'model':str(Path(args.model).resolve()),
-            'seed_before_head_construction':config.seed,'original_base':args.require_original_base,
-            'readout':agent.readout,'prompt_version':agent.prompt_version,'grounding_architecture':'single-v1',
-            'inherited_adapters':hasattr(agent.model,'peft_config'),
-            'fresh_optimizer':args.resume is None,'world_size':ctx.world_size,'text_attention':args.text_attention,
-            'qwen_training_delta':args.qwen_training_delta,'deterministic':agent._training_variant["deterministic"]},
-            indent=2)+'\n')
-    with qwen_training_delta() if args.qwen_training_delta else nullcontext():
-        finetune_grounding(root/(args.train_split+'.jsonl'),root/'dev.jsonl',args.out,model=args.model,
-            decision_dev_data=root/'decision_dev.jsonl',config=config,agent=agent,row_validator=row_validator,
-            resume_from=args.resume)
-
-
-if __name__=='__main__':main()
+if __name__ == "__main__":
+    main()

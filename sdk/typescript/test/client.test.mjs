@@ -44,7 +44,9 @@ test('health accepts the liveness-only answer a locked-down server gives an anon
   assert.deepEqual(await client.health(), { status: 'ok' });
 
   // the detail is still validated whenever the server does send it
-  const bad = new Laya({ fetch: async () => json({ status: 'ok', loaded: ['nope'], device: 'cpu' }) });
+  const resident = new Laya({ fetch: async () => json({ status: 'ok', loaded: ['multimodal', 'support'] }) });
+  assert.deepEqual((await resident.health()).loaded, ['multimodal', 'support']);
+  const bad = new Laya({ fetch: async () => json({ status: 'ok', loaded: [null], device: 'cpu' }) });
   await assert.rejects(bad.health(), LayaResponseError);
   const badDevice = new Laya({ fetch: async () => json({ status: 'ok', device: 7 }) });
   await assert.rejects(badDevice.health(), LayaResponseError);

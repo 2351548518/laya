@@ -90,6 +90,7 @@ For in-process text and media inference with the same native checkpoint, use
 Use `predict_image_assets` in Python or `predictImageAssets` in TypeScript when a decision
 references one or more named images in the state, instructions or criteria. Both methods
 attach `TypeSafe-Danger-Zone-Images: true` and return named answers with token counts.
+Each PNG or JPEG must measure between 280 and 1,568 pixels on each side.
 
 ```python
 import base64
@@ -135,5 +136,7 @@ curl -fsS http://127.0.0.1:8000/v1/multimodal \
 ```
 
 Send `Authorization: Bearer …` when server authentication is configured. For a text decision
-using the same checkpoint, send `state`, `questions` and `"model": "multimodal"` to
+using the same checkpoint, send `state` and `questions` to
 `POST /v1/systemone`. [HTTP API](http-api.md)
+
+[C++, .NET, Go, Java and Rust examples](https://github.com/2351548518/laya/tree/main/examples/clients)

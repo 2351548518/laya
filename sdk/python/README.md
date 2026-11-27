@@ -189,7 +189,7 @@ regular files and directories within the extraction directory. The verifier
 refuses to extract on older Python builds without `tarfile.data_filter`; this
 requirement applies to the verification tool, not the installed client's runtime.
 
-For live integration, supply a Python with `laya[serve]` dependencies installed:
+For live integration, supply a Python with `laya[multimodal,serve]` dependencies installed:
 
 ```bash
 python sdk/python/tests/verify_package.py sdk/python/dist --server-python /path/to/server/python
@@ -197,8 +197,7 @@ python sdk/python/tests/verify_package.py sdk/python/dist --server-python /path/
 
 A tiny offline checkpoint exercises actual HTTP inference. The client process
 has only the SDK installed. This verifies transport and inference parity, not
-pretrained model quality. CI exercises the current server and the 0.4.7 fixture;
-version compatibility is determined by those checks, not by a version handshake.
+pretrained model quality. CI exercises the native service.
 
 ## Publishing
 

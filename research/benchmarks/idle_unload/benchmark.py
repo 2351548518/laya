@@ -38,8 +38,8 @@ def memory():
 
 def make_router(checkpoint):
     from laya.router import Router
-    router = Router(models={"english": str(checkpoint)}, device="mps")
-    router.preload(["english"])
+    router = Router(multimodal=checkpoint, device="mps")
+    router.preload(["multimodal"])
     return router
 
 
@@ -75,7 +75,7 @@ def idle_benchmark(args):
         assert bool(router.loaded) != enabled
         reloaded_answers, next_ms = predict()
         assert answers == reloaded_answers, "reload changed the answer"
-        assert router.loaded == ["english"]
+        assert router.loaded == ["multimodal"]
         result = {"mode": args.mode, "load_seconds": round(load_seconds, 3),
                   "warm_ms": round(warm_ms, 3), "next_request_ms": round(next_ms, 3),
                   "resident": resident, "after_idle": after_idle, "after_next_request": memory(),

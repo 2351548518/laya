@@ -1,176 +1,40 @@
-"""Fine-tune a Laya checkpoint on typed decisions: one training loop the scripts can share.
+"""Train native typed decisions and single-box grounding on one shared backbone."""
+from __future__ import annotations
 
-The notebook, the Apple Silicon script and `research/scripts/finetune_single_device.py` each
-carry their own copy of the same loop. This module is that loop once, with two additions the
-copies do not have:
-
-- **A choice of objective.** `loss="rlcd"` (the default) is the notebook's objective: a
-  GRPO-style term over noisy logit samples rewarded by `proper_reward`, plus soft
-  cross-entropy against the target distribution. `loss="soft-ce"` trains on the soft
-  cross-entropy alone; #741 measured no gain from the extra term on the typed-decisions split.
-- **Option-order augmentation (opt-in).** The scripts always present options in the order the
-  question lists them, so the model can learn a position prior: the 20-option order-flip rate in
-  `BENCHMARKS.md` and #131 are both that symptom. Each epoch, items of the types named in
-  `shuffle_options` (for example `("choice",)`) are re-encoded with a random `option_order` -- the same path inference
-  uses -- and the target is permuted with them, so slot `s` is trained on option
-  `option_order[s]`.
-
-Calibration goes through `laya.calibrate.fit_temperature_map`, so a fine-tuned checkpoint is
-fitted with the same clamp and buckets the runtime applies instead of a local copy of the
-fitter. `calibration_report` says per question type what that fit rests on, and `finetune` warns
-when it rests on too little: a short run can otherwise save a checkpoint whose temperatures never
-moved from 1.0, and nothing but the numbers would show it. It also warns when predictions have
-collapsed to the class prior -- a near-constant logit (or calibration CE stuck at ln K) that
-looks like a finished run on an unlearnable task, but is often just too few updates on a small
-dataset (#963).
-
-Items keep the question and the tokenized state rather than a finished sequence, because a
-shuffled epoch needs to rebuild the head. States are tokenized once per row and shared by
-every question on it.
-
-No new dependency: torch, transformers and safetensors are already required by the package.
-"""
+from dataclasses import asdict, dataclass
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
+from array import array
+import hashlib
 import json
 import math
 import os
+from pathlib import Path
 import random
-import warnings
-from dataclasses import asdict, dataclass
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+import time
+from typing import Any, Dict, List
 
 import torch
+from torch import distributed as dist
+from torch.nn import functional as F
 
-from .calibrate import MIN_TYPE_N, fit_abstention_thresholds, fit_temperature_map
-from .common import (
-    OPTION_LAYOUTS,
-    QTYPE_NAMES,
-    QTYPES,
-    TEMP_MAX,
-    TEMP_MIN,
-    build_head,
-    build_model,
-    build_sequence,
-    collate_items,
-    ece_score,
-    encode_text,
-    proper_reward,
-    render_options,
-    serialize_state,
-    temp_bucket,
-    uses_parallel_layout,
-)
-
-LOSSES = ("soft-ce", "rlcd")
-# Below this many calibration items of a type, a fitted temperature is reported as resting on
-# little evidence. MIN_TYPE_N (laya.calibrate) is the floor below which it is not fitted at all.
-CALIB_WARN_N = 50
-# Mean within-row logit range below this is the silent collapse to a constant (usually
-# the class prior) measured in #963: 0.01 on a collapsed head vs 0.62 untuned.
-COLLAPSE_LOGIT_RANGE = 0.05
-# Calibration mean cross-entropy within this relative distance of ln K is the other
-# collapse signal from #963 (training CE stuck at ln 4). The reported training loss is
-# not used: the default `rlcd` objective is not cross-entropy.
-COLLAPSE_CE_REL = 0.02
-_MASKED = -1e4
-
-
-@dataclass
-class TrainConfig:
-    """Training knobs. The defaults train the way the published notebook does.
-
-    The notebook's effective batch of 64 is 8 per micro-batch x 2 GPUs x 4 accumulation steps;
-    on one device that is `micro_batch=8, grad_accum=8`.
-
-    `max_len` / `head_max_len` default to the checkpoint's own config. Whatever is used is
-    written into the saved config, so inference sees the same budgets training did.
-    `amp` defaults to on for CUDA only; `gradient_checkpointing` defaults to following `amp`.
-    `option_layout` defaults to the checkpoint's own (`"sequential"` for every published one);
-    `"parallel"` trains on `common.parallel_layout` and is written into the saved config.
-    """
-
-    epochs: int = 4
-    micro_batch: int = 8
-    grad_accum: int = 8
-    encoder_lr: float = 2.5e-5
-    head_lr: float = 1e-4
-    min_lr: float = 1e-6
-    weight_decay: float = 0.01
-    grad_clip: float = 1.0
-    loss: str = "rlcd"
-    rl_samples: int = 4
-    sigma_start: float = 0.4
-    sigma_end: float = 0.1
-    w_sph: float = 0.75
-    w_rps: float = 1.0
-    shuffle_options: Tuple[str, ...] = ()
-    option_layout: Optional[str] = None
-    freeze_encoder: bool = False
-    calib_max: int = 400
-    calib_frac: float = 0.1
-    calib_seed: int = 20260922
-    seed: int = 0
-    max_len: Optional[int] = None
-    head_max_len: Optional[int] = None
-    amp: Optional[bool] = None
-    gradient_checkpointing: Optional[bool] = None
-    log_every: int = 100
-    label_smoothing: float = 0.0
-    text_column: str = "text"
-    label_column: str = "label"
-    question_id: str = "label"
-    instructions: Optional[str] = None
-    eval_data: Optional[str] = None
-    target_error: float = 0.10
-    min_abstain_n: int = 10
-
-    def validate(self) -> None:
-        if self.loss not in LOSSES:
-            raise ValueError("loss must be one of %s, got %r" % (", ".join(LOSSES), self.loss))
-        unknown = sorted(set(self.shuffle_options) - set(QTYPES))
-        if unknown:
-            raise ValueError("shuffle_options names unknown question type(s): %s" % ", ".join(unknown))
-        if self.option_layout is not None and self.option_layout not in OPTION_LAYOUTS:
-            raise ValueError("option_layout must be one of %s, got %r"
-                             % (", ".join(OPTION_LAYOUTS), self.option_layout))
-        for name in ("epochs", "micro_batch", "grad_accum", "rl_samples"):
-            value = getattr(self, name)
-            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-                raise ValueError("%s must be a positive integer, got %r" % (name, value))
-        if not 0.0 <= self.calib_frac < 1.0:
-            raise ValueError("calib_frac must be in [0, 1), got %r" % (self.calib_frac,))
-        if isinstance(self.label_smoothing, bool) or not (0.0 <= self.label_smoothing < 1.0):
-            raise ValueError("label_smoothing must be in [0, 1), got %r" % (self.label_smoothing,))
-        if isinstance(self.target_error, bool) or not (0.0 <= self.target_error <= 1.0):
-            raise ValueError("target_error must be in [0, 1], got %r" % (self.target_error,))
-        if isinstance(self.min_abstain_n, bool) or not isinstance(self.min_abstain_n, int) or self.min_abstain_n < 1:
-            raise ValueError("min_abstain_n must be a positive integer, got %r" % (self.min_abstain_n,))
-        if self.eval_data is not None and not isinstance(self.eval_data, str):
-            raise ValueError("eval_data must be a string path, got %r" % (self.eval_data,))
-
-
-# ------------------------------------------------------------------------------------- data
-
-def to_internal(qid: Any, question: Dict[str, Any]) -> Dict[str, Any]:
-    """The question as inference sees it: `Agent._check_question` then `Agent._to_internal`.
-
-    Training on any other rendering would teach the model option texts it never sees at
-    inference -- a list-form choice, custom noul `labels`, a non-string instruction.
-    """
-    from .agent import Agent
-
-    Agent._check_question(qid, question)
-    q = Agent._to_internal(question)
-    q.pop("option_order", None)    # training draws its own order per epoch
-    return q
+from ._grounding_checkpoint import load_checkpoint, save_checkpoint
+from .common import render_options
+from .evals import file_fingerprint
+from .grounding import box_iou, crowd_overlap, grounding_loss, validate_boxes
+from .multimodal import MultimodalAgent, _active_head, _is_adapter_model
+from .multimodal_data import can_shuffle_choice, collate_multimodal_inputs, normalize_record, read_records, record_input, record_modality
+from .multimodal_distributed import distributed_context
+from .multimodal_objectives import learning_rate_factor, optimizer_groups
 
 
 def target_from_gold(q: Dict[str, Any], gold_q: Dict[str, Any]) -> List[float]:
-    """The normalised target distribution for an internal question (`to_internal`), in option order.
+    """Return the normalized target distribution for an internal question, in option order.
 
     `gold_q["probabilities"]` is keyed by choice label, by `"false"`/`"true"` for noul, and by
     the level index as a string for score -- the `{state, questions, gold}` schema in
     `docs/finetune.md`. A choice label that is not a string is also looked up as its JSON key.
-    A row whose probabilities sum to zero becomes uniform, as in the scripts. A negative or
+    A row whose probabilities sum to zero becomes uniform. A negative or
     non-finite probability raises `ValueError`.
     """
     probs = gold_q["probabilities"]
@@ -195,7 +59,7 @@ def target_from_gold(q: Dict[str, Any], gold_q: Dict[str, Any]) -> List[float]:
 
 def target_from_expected(q: Dict[str, Any], expected_val: Any,
                          label_smoothing: float = 0.0) -> List[float]:
-    """The normalised target distribution from a single expected answer, in option order.
+    """Return the normalized target distribution from one expected answer, in option order.
 
     `expected_val` is:
     - a choice label (str or value matching a criterion) for choice questions
@@ -284,1048 +148,922 @@ def target_from_expected(q: Dict[str, Any], expected_val: Any,
     return target
 
 
-def encode_state(tok, state: Any, max_len: int) -> List[int]:
-    """State token ids, capped at `max_len`: no sequence can hold more of the state than that."""
-    text = serialize_state(state).replace(tok.mask_token, " ")
-    return encode_text(tok, text, add_special_tokens=False)["input_ids"][:max_len]
+def decision_target(row, qid, question):
+    """Read the target in canonical option order, preferring soft labels when supplied."""
+    if qid in row.get("gold", {}):
+        return target_from_gold(question, row["gold"][qid])
+    return target_from_expected(question, row["expected"][qid])
 
 
-def make_item(tok, q: Dict[str, Any], target: Sequence[float], state_ids: List[int],
-              head_max_len: int, max_len: Optional[int] = None) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
-    """`(item, None)`, or `(None, reason)` when the question cannot be trained on as written.
-
-    `q` is an internal question (`to_internal`). The reasons are `target_mismatch` (the target
-    does not have one entry per option), `options_collapsed` (the head budget left two options
-    with the same token span, #538) and, when `max_len` is given, `options_beyond_max_len` (the
-    head is longer than `max_len`, so `build_sequence` drops the markers of the last options --
-    the case `Agent` refuses at inference with "only N of its M option markers fit"). Training on
-    any of them would teach the model to tell apart options it cannot see as different, or crash
-    the batch on a target longer than its markers.
-    """
-    k = len(render_options(q))
-    if len(target) != k:
-        return None, "target_mismatch"
-    _ids, markers, stats = build_head(tok, q, head_max_len)
-    if len(markers) != k or stats["options_distinct"] < stats["options"]:
-        return None, "options_collapsed"
-    if max_len is not None and markers and markers[-1] >= max_len:
-        return None, "options_beyond_max_len"
-    return {"q": q, "state_ids": state_ids, "target": [float(v) for v in target],
-            "qtype": QTYPES[q["t"]], "k": k}, None
-
-
-def items_from_rows(tok, rows: Iterable[Dict[str, Any]], max_len: int,
-                    head_max_len: int,
-                    label_smoothing: float = 0.0) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
-    """Items from `{state, questions, gold}` or `{state, questions, expected}` rows; returns `(items, skipped)`.
-
-    `skipped` counts, by reason, questions that were labelled but could not become an item:
-    `empty_text`, `empty_label`, `invalid_question` and `invalid_target` (a `ValueError` from
-    `to_internal`, `target_from_gold` or `target_from_expected`), plus the reasons `make_item`
-    gives. Questions with neither a `gold` nor an `expected` entry are not counted -- the row
-    simply does not label them.
-    """
-    items, skipped = [], {}
-    for row in rows:
-        state = row.get("state")
-        if state is None or (isinstance(state, str) and not state.strip()):
-            skipped["empty_text"] = skipped.get("empty_text", 0) + 1
-            continue
-        state_ids = encode_state(tok, state, max_len)
-        for qid, question in row.get("questions", {}).items():
-            gold_q = row.get("gold", {}).get(qid) if isinstance(row.get("gold"), dict) else None
-            expected_q = row.get("expected", {}).get(qid) if isinstance(row.get("expected"), dict) else None
-            if gold_q is None and expected_q is None:
-                continue
-            reason = None
+def _train_mode(agent, config):
+    agent.model.train()
+    if config.mode != "full":
+        base = agent.model.get_base_model() if _is_adapter_model(agent.model) else agent.model
+        for name in ("model.vision_tower", "model.audio_tower"):
             try:
-                q = to_internal(qid, question)
-            except (ValueError, TypeError, KeyError):
-                reason = "invalid_question"
-            if reason is None:
-                try:
-                    if gold_q is not None:
-                        target = target_from_gold(q, gold_q)
-                    else:
-                        if isinstance(expected_q, str) and not expected_q.strip():
-                            reason = "empty_label"
-                        else:
-                            target = target_from_expected(q, expected_q, label_smoothing=label_smoothing)
-                except (ValueError, TypeError, KeyError):
-                    reason = "invalid_target"
-            if reason is None:
-                item, reason = make_item(tok, q, target, state_ids, head_max_len, max_len)
-            if reason is None:
-                items.append(item)
-            else:
-                skipped[reason] = skipped.get(reason, 0) + 1
-    return items, skipped
+                module = base.get_submodule(name)
+            except AttributeError:
+                continue
+            if module is not None:
+                module.eval()
 
 
-def rows_from_csv(path: str, text_column: str = "text", label_column: str = "label",
-                  question_id: str = "label",
-                  instructions: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Read a CSV file with one labelled column per row into `{state, questions, expected}` rows.
+@dataclass
+class GroundingTrainConfig:
+    """Head warmup or LoRA/full adaptation; evaluation benchmarks are never selection data."""
+    mode: str = "head"
+    epochs: int = 1
+    max_steps: int | None = None
+    global_batch_size: int = 32
+    learning_rate: float = 2e-5
+    head_learning_rate: float = 2e-4
+    lora_rank: int = 16
+    lora_alpha: int = 32
+    lora_targets: str = "attention"
+    slots: int = 1
+    max_len: int = 4096
+    replay_fraction: float = .2
+    replay_kl_weight: float = .1
+    train_readout_in_warmup: bool = False
+    max_decision_regression: float = .05
+    eval_every: int = 500
+    eval_limit: int = 256
+    decision_eval_micro_batch: int = 1
+    grounding_eval_micro_batch: int = 1
+    seed: int = 42
+    micro_batch: int = 4
+    max_micro_tokens: int = 4096
+    decision_ordinal_weight: float = 0.0
+    decision_brier_weight: float = 0.0
+    video_cache_dir: str | None = None
+    selection_metric: str = "joint"
+    include_initial_selection: bool = False
+    quality_matched_only: bool = False
+    retention_tagged_only: bool = False
+    batch_decisions: bool = False
+    max_grounding_regression: float | None = None
+    projector_learning_rate: float | None = None
+    warmup_ratio: float = .05
+    min_lr_ratio: float = .1
+    length_bucketing: bool = False
+    activation_offload_min_tokens: int | None = None
+    video_cache_size: int = 0
+    shuffle_options: bool = False
+    balance_ranks: bool = False
+    prefetch_video: bool = False
+    distributed_decision_eval: bool = False
+    checkpoint_every: int = 0
+    fused_adamw: bool = False
 
-    Discovers distinct labels in `label_column` (preserving order of appearance) and
-    builds a choice question with those labels as a list of criteria to render each option once.
-    Uses `utf-8-sig` encoding so UTF-8 BOM headers from Excel are handled transparently.
-    """
-    import csv
-
-    rows_raw = []
-    with open(path, encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        if reader.fieldnames is None:
-            raise ValueError("%s is an empty CSV file" % (path,))
-        if text_column not in reader.fieldnames:
-            raise ValueError("CSV file %s missing text column %r (available: %r)"
-                             % (path, text_column, reader.fieldnames))
-        if label_column not in reader.fieldnames:
-            raise ValueError("CSV file %s missing label column %r (available: %r)"
-                             % (path, label_column, reader.fieldnames))
-        for r in reader:
-            rows_raw.append(r)
-
-    if not rows_raw:
-        raise ValueError("%s has no rows" % (path,))
-
-    labels = []
-    seen = set()
-    for r in rows_raw:
-        val = r.get(label_column, "").strip()
-        if val and val not in seen:
-            seen.add(val)
-            labels.append(val)
-
-    if len(labels) < 2:
-        raise ValueError("CSV file %s must contain at least 2 distinct labels in %r, found %r"
-                         % (path, label_column, labels))
-
-    instr = instructions or "Classify the input into the correct category."
-    questions = {
-        question_id: {
-            "type": "choice",
-            "instructions": instr,
-            "criteria": labels,
-        }
-    }
-
-    output_rows = []
-    for r in rows_raw:
-        text = r.get(text_column, "")
-        lbl = r.get(label_column, "").strip()
-        output_rows.append({
-            "state": text,
-            "questions": questions,
-            "expected": {question_id: lbl},
-        })
-    return output_rows
-
-
-def read_data(path: str, text_column: str = "text", label_column: str = "label",
-              question_id: str = "label",
-              instructions: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Read training/eval rows from either a JSONL file or a CSV file."""
-    if path.lower().endswith(".csv"):
-        return rows_from_csv(path, text_column=text_column, label_column=label_column,
-                             question_id=question_id, instructions=instructions)
-    return read_jsonl(path)
+    def validate(self):
+        if self.mode not in {"head", "lora", "full"}:
+            raise ValueError("grounding mode must be head, lora or full")
+        if self.lora_targets not in {'qv', 'attention', 'all-linear'}:
+            raise ValueError('invalid grounding LoRA target scope')
+        for key in ("epochs", "global_batch_size", "micro_batch", "max_micro_tokens", "slots", "max_len",
+                    "eval_limit", "lora_rank", "lora_alpha", "decision_eval_micro_batch", "grounding_eval_micro_batch"):
+            value = getattr(self, key)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(key + " must be a positive integer")
+        if self.max_steps is not None and (isinstance(self.max_steps, bool) or not isinstance(self.max_steps, int) or self.max_steps < 1):
+            raise ValueError("max_steps must be positive")
+        value = self.activation_offload_min_tokens
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 1):
+            raise ValueError("activation_offload_min_tokens must be a positive integer or None")
+        if not 0 <= self.replay_fraction < 1 or not math.isfinite(self.replay_fraction):
+            raise ValueError("replay_fraction must lie in [0,1)")
+        if isinstance(self.eval_every, bool) or not isinstance(self.eval_every, int) or self.eval_every < 0:
+            raise ValueError("eval_every must be a nonnegative integer")
+        if type(self.checkpoint_every) is not int or self.checkpoint_every < 0:
+            raise ValueError("checkpoint_every must be a nonnegative integer")
+        if any(isinstance(v, bool) or not math.isfinite(v) or v <= 0 for v in [self.learning_rate, self.head_learning_rate]):
+            raise ValueError("learning rates must be finite and positive")
+        if self.projector_learning_rate is not None and (isinstance(self.projector_learning_rate, bool)
+                or not math.isfinite(self.projector_learning_rate) or self.projector_learning_rate <= 0):
+            raise ValueError('projector_learning_rate must be finite and positive')
+        for key in ('warmup_ratio', 'min_lr_ratio'):
+            value = getattr(self, key)
+            if isinstance(value, bool) or not math.isfinite(value) or not 0 <= value <= 1:
+                raise ValueError(key + ' must lie in [0,1]')
+        if not math.isfinite(self.replay_kl_weight) or self.replay_kl_weight < 0:
+            raise ValueError("replay_kl_weight must be finite and nonnegative")
+        for key in ('decision_ordinal_weight','decision_brier_weight'):
+            value=getattr(self,key)
+            if isinstance(value,bool) or not math.isfinite(value) or value<0:
+                raise ValueError(key+' must be finite and nonnegative')
+        if self.video_cache_dir is not None and (not isinstance(self.video_cache_dir,str) or not self.video_cache_dir):
+            raise ValueError('video_cache_dir must be a nonempty local path or None')
+        if isinstance(self.video_cache_size, bool) or not isinstance(self.video_cache_size, int) or self.video_cache_size < 0:
+            raise ValueError('video_cache_size must be a nonnegative integer')
+        if not isinstance(self.shuffle_options, bool):
+            raise ValueError('shuffle_options must be boolean')
+        if not isinstance(self.balance_ranks, bool):
+            raise ValueError('balance_ranks must be boolean')
+        if not isinstance(self.prefetch_video, bool):
+            raise ValueError('prefetch_video must be boolean')
+        if not isinstance(self.distributed_decision_eval, bool):
+            raise ValueError('distributed_decision_eval must be boolean')
+        if not isinstance(self.fused_adamw, bool):
+            raise ValueError('fused_adamw must be boolean')
+        if self.selection_metric not in {'joint', 'decision_macro', 'harmonic'} or not isinstance(self.include_initial_selection,bool) or not isinstance(self.quality_matched_only,bool):
+            raise ValueError('invalid checkpoint selection configuration')
+        if not isinstance(self.retention_tagged_only,bool):raise ValueError('retention_tagged_only must be boolean')
+        if not isinstance(self.batch_decisions,bool):raise ValueError('batch_decisions must be boolean')
+        if not isinstance(self.length_bucketing,bool):raise ValueError('length_bucketing must be boolean')
+        if self.max_grounding_regression is not None and (isinstance(self.max_grounding_regression,bool) or
+                not math.isfinite(self.max_grounding_regression) or not 0<=self.max_grounding_regression<=1):
+            raise ValueError('max_grounding_regression must lie in [0,1] or be None')
+        if not isinstance(self.train_readout_in_warmup, bool) or not 0 <= self.max_decision_regression <= 1:
+            raise ValueError("invalid readout warmup or decision retention guard")
 
 
-def read_jsonl(path: str) -> List[Dict[str, Any]]:
-    rows = []
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#"):
-                rows.append(json.loads(line))
+def _validate_grounding_row(row):
+    if len(row.get("questions", {})) != 1:
+        raise ValueError("grounding training rows require exactly one question")
+    for qid, qdef in row["questions"].items():
+        MultimodalAgent._check_question(qid, qdef)
+    if qdef["type"] != "box":
+        decision_target(row, qid, MultimodalAgent._to_internal(qdef))
+        if "grounding" in row:
+            raise ValueError("geometric supervision requires a Box question")
+        return
+    if "grounding" not in row:
+        raise ValueError("Box question needs geometric supervision")
+    truth = row["grounding"]
+    validate_boxes(truth["boxes"])
+    validate_boxes(truth.get("ignored", []))
+    if truth["task"] not in {"single", "multiple"}:
+        raise ValueError("unknown geometric supervision task")
+    if truth["task"] == "single" and len(truth["boxes"]) > 1:
+        raise ValueError("an official Box target contains at most one box")
+
+
+def load_grounding_rows(path):
+    rows = list(read_records(path))
+    for row in rows:
+        _validate_grounding_row(row)
+    if not rows:
+        raise ValueError("empty grounding dataset: " + str(path))
     return rows
 
 
-def encode_item(tok, item: Dict[str, Any], max_len: int, head_max_len: int,
-                option_order: Optional[List[int]] = None, parallel: bool = False) -> Dict[str, Any]:
-    """The model input for an item, with options in `option_order` and the target to match.
+class _IndexedGroundingRows:
+    def __init__(self, path, validate_split, *, index=None):
+        self.path = Path(path).resolve()
+        self.offsets = array('Q')
+        if index is None:
+            version, self.sha256 = self._build_index(validate_split)
+        else:
+            version, self.sha256, offsets = index
+            self.offsets.frombytes(offsets)
+        self.stream = self.path.open('rb')
+        self.version = version
+        if self._version(os.fstat(self.stream.fileno())) != self.version:
+            self.stream.close()
+            raise ValueError("training file changed while building or sharing its index: " + str(self.path))
 
-    `build_sequence` puts option `option_order[s]` in slot `s`, so the slot-ordered target is
-    `target[option_order[s]]` -- the inverse of what `unpermute_probs` does at inference.
-    """
-    ids, markers, *layout = build_sequence(tok, None, item["q"], max_len, head_max_len, option_order=option_order,
-                                           state_ids=item["state_ids"], return_layout=parallel)
-    target = item["target"]
-    if option_order is not None:
-        target = [target[i] for i in option_order]
-    encoded = {"ids": ids, "markers": markers, "qtype": item["qtype"], "target": target}
-    if layout:
-        encoded["layout"] = layout[0]
-    return encoded
+    @staticmethod
+    def _version(info):
+        return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
 
+    def _build_index(self, validate_split):
+        offset = 0
+        digest = hashlib.sha256()
+        with self.path.open('rb') as stream:
+            version = self._version(os.fstat(stream.fileno()))
+            for line_number, line in enumerate(stream, 1):
+                digest.update(line)
+                if line.strip() and not line.lstrip().startswith(b"#"):
+                    try:
+                        row = normalize_record(json.loads(line), self.path.parent, verify_media=False)
+                        _validate_grounding_row(row)
+                        validate_split(row)
+                    except (ValueError, KeyError, TypeError) as error:
+                        raise ValueError("%s:%d: %s" % (self.path, line_number, error)) from error
+                    self.offsets.append(offset)
+                offset += len(line)
+            if self._version(os.fstat(stream.fileno())) != version:
+                raise ValueError("training file changed during validation: " + str(self.path))
+        self.offsets.append(offset)
+        if len(self.offsets) == 1:
+            raise ValueError('empty grounding dataset: ' + str(self.path))
+        return version, digest.hexdigest()
 
-def draw_option_order(item: Dict[str, Any], rng: random.Random,
-                      shuffle_types: Sequence[str]) -> Optional[List[int]]:
-    """A random permutation for items whose type is in `shuffle_types`, else None (canonical)."""
-    if item["q"]["t"] not in shuffle_types or item["k"] < 2:
-        return None
-    order = list(range(item["k"]))
-    rng.shuffle(order)
-    return order
+    def share_index(self):
+        return self.version, self.sha256, self.offsets.tobytes()
 
+    def check_unchanged(self):
+        try:
+            path_version = self._version(self.path.stat())
+        except FileNotFoundError:
+            path_version = None
+        if path_version != self.version or self._version(os.fstat(self.stream.fileno())) != self.version:
+            raise ValueError("indexed training file changed during training: " + str(self.path))
 
-def split_calibration(items: Sequence[Any], calib_max: int, calib_frac: float,
-                      seed: int) -> Tuple[List[Any], List[Any]]:
-    """`(train, calibration)`, with the calibration slice taken before any training.
+    def __len__(self):
+        return len(self.offsets) - 1
 
-    Fitting temperatures on items the run has trained on measures the fit, not the calibration
-    (`docs/finetune.md`). The split depends only on `seed` and the item count, so every DDP rank
-    and every rerun hold out the same items.
-    """
-    n_calib = min(calib_max, int(len(items) * calib_frac))
-    order = list(range(len(items)))
-    random.Random(seed).shuffle(order)
-    held = set(order[:n_calib])
-    train = [it for i, it in enumerate(items) if i not in held]
-    calib = [it for i, it in enumerate(items) if i in held]
-    return train, calib
+    def __getitem__(self, index):
+        if index < 0: index += len(self)
+        if not 0 <= index < len(self): raise IndexError(index)
+        start, end = self.offsets[index], self.offsets[index + 1]
+        line = os.pread(self.stream.fileno(), end - start, start).partition(b"\n")[0]
+        return normalize_record(json.loads(line),
+                                self.path.parent, verify_media=False)
 
-
-# ----------------------------------------------------------------------------------- losses
-
-def soft_ce_loss(logits: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-    """Cross-entropy against a target distribution, over each row's own options only."""
-    logp = torch.log_softmax(logits.masked_fill(~mask, _MASKED), -1)
-    return -(target * logp * mask).sum(-1).mean()
-
-
-def rlcd_loss(logits: torch.Tensor, target: torch.Tensor, mask: torch.Tensor, qtype: torch.Tensor,
-              sigma: float, samples: int = 4, w_sph: float = 0.75, w_rps: float = 1.0) -> torch.Tensor:
-    """The notebook objective: a policy-gradient term over noisy logits plus soft cross-entropy.
-
-    Zero-mean Gaussian noise (scaled by `sigma`, projected onto each row's options) is added to
-    detached logits; each sample is rewarded by `proper_reward` against the target, and the
-    normalised advantage weights the Gaussian log-density of the sample.
-    """
-    k = mask.sum(-1, keepdim=True).float()
-    fmask = mask.float()
-    eps = torch.randn((samples,) + logits.shape, device=logits.device) * sigma * fmask
-    eps = (eps - eps.sum(-1, keepdim=True) / k) * fmask
-    z = logits.detach().unsqueeze(0) + eps
-    q = torch.softmax(z.masked_fill(~mask, _MASKED), -1)
-    with torch.no_grad():
-        r = proper_reward(q, target.unsqueeze(0), qtype, fmask, w_sph=w_sph, w_rps=w_rps)
-        adv = r - r.mean(0, keepdim=True)
-        adv = adv / (adv.std() + 1e-6)
-    logp = -(((z - logits.unsqueeze(0)) ** 2) * fmask).sum(-1) / (2 * sigma ** 2)
-    return -(adv * logp).mean() + soft_ce_loss(logits, target, mask)
+    def __iter__(self):
+        self.check_unchanged()
+        for index in range(len(self)):
+            yield self[index]
 
 
-def sigma_at(epoch: int, epochs: int, start: float, end: float) -> float:
-    """Exploration noise for `epoch`, annealed linearly from `start` to `end`."""
-    return start + (end - start) * (epoch / max(1, epochs - 1))
+def _shared_indexed_rows(path, validate_split, ctx):
+    if ctx.world_size == 1:
+        return _IndexedGroundingRows(path, validate_split)
+    payload = rows = None
+    if ctx.main:
+        try:
+            rows = _IndexedGroundingRows(path, validate_split)
+        except (OSError, ValueError) as exc:
+            payload = str(exc), None
+        else:
+            payload = None, rows.share_index()
+    error, index = ctx.broadcast(payload)
+    if error is not None:
+        raise ValueError(error)
+    return rows if ctx.main else _IndexedGroundingRows(path, validate_split, index=index)
 
 
-# ------------------------------------------------------------------------------- checkpoint
-
-def resolve_device(device: Optional[str] = "auto") -> torch.device:
-    if device not in (None, "auto"):
-        return torch.device(device)
-    if torch.cuda.is_available():
-        return torch.device("cuda", 0)
-    if getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
-        return torch.device("mps")
-    if hasattr(torch, "xpu") and torch.xpu.is_available():
-        return torch.device("xpu")
-    return torch.device("cpu")
+def decision_retained(current, baseline, margin):
+    """An improving text score must not hide regression in audio, image or video."""
+    return all(mode in current['by_modality'] and current['by_modality'][mode]['accuracy'] >= values['accuracy'] - margin
+               for mode, values in baseline['by_modality'].items())
 
 
-def resolve_checkpoint_dir(model_id_or_path: str, token: Optional[str] = None) -> str:
-    """Resolve a local path, model alias ('multilingual', 'english') or Hub repo ID to a local directory."""
-    if os.path.isdir(model_id_or_path) and os.path.exists(os.path.join(model_id_or_path, "rl_agent_config.json")):
-        return model_id_or_path
+def checkpoint_score(metrics, selection_metric="joint"):
+    """Score the available geometric tasks and optionally blend in macro decision accuracy."""
+    geometric = []
+    if metrics.get('single_n', 1):
+        geometric.append(metrics['acc_iou50'])
+    if metrics.get('set_n', 1):
+        geometric.append(metrics['set_f1_50'])
+    geometry = sum(geometric) / len(geometric) if geometric else 0.
 
-    if model_id_or_path.startswith(("/", "./", "../")) or os.path.isabs(model_id_or_path):
-        if not os.path.isdir(model_id_or_path):
-            raise FileNotFoundError("Local model path not found: %r" % (model_id_or_path,))
-        return model_id_or_path
-
-    from .router import resolve_model_spec
-    spec = resolve_model_spec(model_id_or_path)
-    subfolder = None
-    if spec is not None:
-        model_id_or_path, subfolder = spec
-
-    from huggingface_hub import snapshot_download
-    prefix = f"{subfolder}/" if subfolder else ""
-    kw = {
-        "token": token or os.environ.get("HF_TOKEN") or None,
-        "allow_patterns": [prefix + name for name in (
-            "rl_agent_config.json", "model.safetensors", "tokenizer/*", "encoder/*",
-        )],
-    }
-    model_dir = snapshot_download(model_id_or_path, **kw)
-    if subfolder:
-        model_dir = os.path.join(model_dir, subfolder)
-    if not os.path.isdir(model_dir) or not os.path.exists(os.path.join(model_dir, "rl_agent_config.json")):
-        raise FileNotFoundError("Checkpoint directory not found for %r (resolved to %r)"
-                                % (model_id_or_path, model_dir))
-    return model_dir
+    decisions = metrics.get('decisions')
+    if selection_metric in ('decision_macro', 'harmonic') and (not decisions or not decisions['by_modality']):
+        raise ValueError(selection_metric + ' selection requires decision development data')
+    if selection_metric not in ('joint', 'decision_macro', 'harmonic'):
+        raise ValueError('unknown checkpoint selection metric')
+    if not decisions:
+        return geometry
+    modalities = decisions['by_modality']
+    macro_accuracy = sum(values['accuracy'] for values in modalities.values()) / len(modalities)
+    if selection_metric == 'harmonic':
+        if not geometric:
+            raise ValueError('harmonic selection requires geometry development data')
+        return 2 * geometry * macro_accuracy / (geometry + macro_accuracy) if geometry + macro_accuracy else 0.
+    return macro_accuracy if selection_metric == 'decision_macro' else (geometry + macro_accuracy) / 2
 
 
-def load_checkpoint(model_dir: str):
-    """`(model, tokenizer, cfg)` from a local checkpoint directory or Hub ID, model on CPU in fp32."""
-    from safetensors.torch import load_file
-    from transformers import AutoTokenizer
-
-    from .agent import _fix_tokenizer_config
-
-    model_dir = resolve_checkpoint_dir(model_dir)
-    _fix_tokenizer_config(model_dir)
-    with open(os.path.join(model_dir, "rl_agent_config.json"), encoding="utf-8") as f:
-        cfg = json.load(f)
-    tok = AutoTokenizer.from_pretrained(os.path.join(model_dir, "tokenizer"))
-    model = build_model(cfg, encoder_dir=os.path.join(model_dir, "encoder"))
-    model.load_state_dict(load_file(os.path.join(model_dir, "model.safetensors")), strict=True)
-    return model.float(), tok, cfg
+def grounding_retained(current, baseline, margin):
+    """Check retention on the geometric tasks actually present in development data."""
+    keys = []
+    if baseline.get('single_n', 1):
+        keys.append('acc_iou50')
+    if baseline.get('set_n', 1):
+        keys.append('set_f1_50')
+    return all(current[key] >= baseline[key] - margin for key in keys)
 
 
-def save_checkpoint(model, tok, cfg: Dict[str, Any], path: str) -> None:
-    """Write the layout `laya.load` reads: weights in fp16, encoder config, tokenizer, config."""
-    from safetensors.torch import save_file
-
-    os.makedirs(path, exist_ok=True)
-    save_file({k: v.detach().half().cpu().contiguous() for k, v in model.state_dict().items()},
-              os.path.join(path, "model.safetensors"))
-    model.encoder.config.save_pretrained(os.path.join(path, "encoder"))
-    tok.save_pretrained(os.path.join(path, "tokenizer"))
-    tmp = os.path.join(path, "rl_agent_config.json.tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=2)
-    os.replace(tmp, os.path.join(path, "rl_agent_config.json"))
+def _decision_development_metrics(rows, records, tagged_only):
+    from .multimodal_train import example_hash, metrics
+    result={'decisions':metrics(records)}
+    if tagged_only:
+        keys={example_hash(row,qid,qdef) for row in rows if row.get('retention_reference')
+              for qid,qdef in row['questions'].items()}
+        selected=[record for record in records if record['example_hash'] in keys]
+        if not selected:raise ValueError('tagged retention requested without reference development decisions')
+        result['retention_decisions']=metrics(selected)
+    return result
 
 
-# ------------------------------------------------------------------------------------ train
+def _decision_eval_shard(agent, rows, rank, world_size):
+    """Keep requests for a shared clip together and balance the decoding work."""
+    from .multimodal_train import _evaluation_video_key
+    groups = {}
+    for index, row in enumerate(rows):
+        key = _evaluation_video_key(agent, row)
+        groups.setdefault(index if key is None else key, []).append((index, row))
 
-def optimizer_updates(n_items: int, micro_batch: int, grad_accum: int, epochs: int) -> int:
-    """Optimizer steps for `n_items` training items.
+    def work(group):
+        return sum(len(row["questions"]) * (3 if record_modality(row) == "video" else 1)
+                   for _, row in group)
 
-    `train_model` calls this, so the count a pre-run diagnostic prints is the number of
-    `optimizer.step()` calls the run performs: one per full accumulation window
-    (`grad_accum` micro-batches), plus one for the final partial window of every epoch, which
-    still steps once even when it holds fewer micro-batches.
-    """
-    if n_items < 1:
-        raise ValueError("n_items must be a positive integer, got %r" % (n_items,))
-    steps_per_epoch = math.ceil(n_items / micro_batch)
-    updates_per_epoch = math.ceil(steps_per_epoch / grad_accum)
-    return updates_per_epoch * epochs
-
-
-def update_budget_message(n_train: int, config: TrainConfig) -> str:
-    """The pre-run optimizer-update budget line, shared by `finetune` startup and `--dry-run`.
-
-    Says "effective batch up to" because the last window of an epoch is often partial, so not
-    every update sees a full `micro_batch x grad_accum` batch.
-    """
-    updates = optimizer_updates(n_train, config.micro_batch, config.grad_accum, config.epochs)
-    return ("optimizer budget: %d train item(s), effective batch up to %d "
-            "(micro_batch %d x grad_accum %d), %d optimizer updates over %d epoch(s)"
-            % (n_train, config.micro_batch * config.grad_accum,
-               config.micro_batch, config.grad_accum, updates, config.epochs))
+    shards = [[] for _ in range(world_size)]
+    totals = [0] * world_size
+    for group in sorted(groups.values(), key=work, reverse=True):
+        worker = min(range(world_size), key=totals.__getitem__)
+        shards[worker].extend(group)
+        totals[worker] += work(group)
+    return sorted(shards[rank])
 
 
-def _forward(model, batch, device, amp: bool, detach_encoder: bool):
-    args = (batch["input_ids"].to(device), batch["attention_mask"].to(device),
-            batch["marker_pos"].to(device), batch["marker_mask"].to(device), batch["qtype"].to(device))
-    kwargs = {"detach_encoder": detach_encoder}
-    if "option_ids" in batch:
-        kwargs.update(position_ids=batch["position_ids"].to(device), option_ids=batch["option_ids"].to(device))
-    if amp:
-        with torch.autocast(device.type, dtype=torch.float16):
-            logits, _act = model(*args, **kwargs)
+def _decision_development_records(agent, rows, config, ctx, sharded):
+    from .multimodal_train import collect_records
+    if not sharded:
+        return collect_records(agent, rows, config.decision_eval_micro_batch, max_micro_tokens=config.max_micro_tokens)
+    shard = _decision_eval_shard(agent, rows, ctx.rank, ctx.world_size)
+    records = collect_records(agent, [row for _, row in shard], 1, max_micro_tokens=config.max_micro_tokens)
+    cursor = 0
+    local = []
+    for index, row in shard:
+        next_cursor = cursor + len(row["questions"])
+        local.append((index, records[cursor:next_cursor]))
+        cursor = next_cursor
+    gathered = [None] * ctx.world_size if ctx.main else None
+    dist.gather_object(local, gathered, dst=0)
+    if ctx.main:
+        ordered = sorted(item for shard_records in gathered for item in shard_records)
+        return [record for _, group in ordered for record in group]
+    return None
+
+
+def _development_retained(current,baseline,margin):
+    return decision_retained(current.get('retention_decisions',current['decisions']),
+        baseline.get('retention_decisions',baseline['decisions']),margin)
+
+
+def _rank_window(window, rank, world_size, config):
+    """Group compatible lengths and distribute estimated work within one optimizer window."""
+    if not config.balance_ranks or world_size == 1:
+        return window[rank::world_size]
+    buckets = {}
+    for index, row in enumerate(window):
+        admission = row.get("training_admission")
+        length = admission.get("tokens") if isinstance(admission, dict) else None
+        if type(length) is not int or length < 1:
+            return window[rank::world_size]
+        modality = record_modality(row)
+        task = row.get("grounding", {}).get("task")
+        buckets.setdefault((modality, task), []).append((length, index))
+
+    groups = []
+    for (modality, task), candidates in buckets.items():
+        limit = config.micro_batch if task is not None or config.batch_decisions else 1
+        batch = []
+        for length, index in sorted(candidates):
+            if batch and (len(batch) >= limit or length * (len(batch) + 1) > config.max_micro_tokens):
+                groups.append((modality, batch))
+                batch = []
+            batch.append((length, index))
+        groups.append((modality, batch))
+
+    def estimated_work(group):
+        modality, batch = group
+        length = batch[-1][0]
+        # Estimate per-record preparation and sequence compute. The true
+        # token limit is checked again after native processing on each rank.
+        return len(batch) * (256 + (512 if modality == "video" else 0) + length + length**2 / 8192)
+
+    assigned = [[] for _ in range(world_size)]
+    load = [0.] * world_size
+    for group in sorted(groups, key=estimated_work, reverse=True):
+        worker = min(range(world_size), key=load.__getitem__)
+        assigned[worker].extend(window[index] for _, index in group[1])
+        load[worker] += estimated_work(group)
+    return assigned[rank]
+
+
+def _geometry_microbatches(agent, rows, config):
+    """Batch same-head image requests while preserving every original target and its weight."""
+    buckets = {}
+    def pack(task, items):
+        examples = [item[1] for item in items]
+        inputs = examples[0] if len(examples) == 1 else collate_multimodal_inputs(
+            examples, getattr(agent.tok, 'pad_token_id', 0) or 0)
+        return [item[0] for item in items], inputs, task == 'multiple'
+    for row in rows:
+        if 'grounding' not in row:
+            continue
+        qid, qdef = next(iter(row['questions'].items()))
+        request, question = record_input(agent, row, qid, qdef)
+        inputs, _, _ = agent._prepare(request, question)
+        task = row['grounding']['task']
+        key = task, tuple(sorted(inputs))
+        items = buckets.setdefault(key, [])
+        length = inputs['input_ids'].shape[-1]
+        longest = max([length] + [entry[1]['input_ids'].shape[-1] for entry in items])
+        if items and (len(items) >= config.micro_batch or longest * (len(items) + 1) > config.max_micro_tokens):
+            buckets[key] = []
+            yield pack(task, items)
+        buckets[key].append((row, inputs))
+    for (task, _fields), items in buckets.items():
+        if items:
+            yield pack(task, items)
+
+
+def _training_question(qdef, option_rng):
+    if option_rng is None or not can_shuffle_choice(qdef):
+        return qdef
+    order = list(range(len(qdef["criteria"])))
+    option_rng.shuffle(order)
+    return {**qdef, "option_order": order}
+
+
+def _decision_microbatches(agent, rows, config, *, option_rng=None):
+    """Pack native decision inputs by media fields and the actual padded token budget."""
+    buckets = {}
+
+    def pack(items):
+        inputs = items[0][1] if len(items) == 1 else collate_multimodal_inputs(
+            [item[1] for item in items], getattr(agent.tok, 'pad_token_id', 0) or 0)
+        return [item[0] for item in items], inputs
+
+    if getattr(config, 'length_bucketing', False):
+        rows = sorted(rows, key=lambda row: row.get('training_admission', {}).get('tokens', 0))
+    with ThreadPoolExecutor(max_workers=1) if config.prefetch_video else nullcontext() as loader:
+        videos = {}
+        if loader is not None:
+            for row in rows:
+                state = row["state"]
+                if (id(row) not in videos and 'grounding' not in row and not row.get('_image_assets')
+                        and isinstance(state, dict) and state.get('video') is not None):
+                    videos[id(row)] = loader.submit(agent._media, agent._input(state))
+        for row in rows:
+            if 'grounding' in row:
+                continue
+            qid, qdef = next(iter(row['questions'].items()))
+            request, question = record_input(agent, row, qid, _training_question(qdef, option_rng))
+            future = videos.get(id(row))
+            inputs, q, _ = (agent._prepare(request, question, load_media=future.result) if future is not None
+                            else agent._prepare(request, question))
+            target = decision_target(row, qid, q)
+            input_fields = tuple(sorted(inputs))
+            items = buckets.setdefault(input_fields, [])
+            lengths = [inputs['input_ids'].shape[-1]] + [item[1]['input_ids'].shape[-1] for item in items]
+            padded_tokens = max(lengths) * (len(items) + 1)
+            if items and (len(items) >= config.micro_batch or padded_tokens > config.max_micro_tokens):
+                buckets[input_fields] = []
+                yield pack(items)
+            buckets[input_fields].append(((row, qid, qdef, q, target), inputs))
+        for items in buckets.values():
+            if items:
+                yield pack(items)
+
+
+def _activation_context(inputs, config):
+    threshold = config.activation_offload_min_tokens
+    if threshold is None or not torch.is_grad_enabled() or inputs['input_ids'].numel() < threshold:
+        return nullcontext()
+    return torch.autograd.graph.save_on_cpu(pin_memory=inputs['input_ids'].device.type == 'cuda')
+
+
+def _decision_batch_loss(agent,chunk,inputs,config):
+    """Use the same per-example CE/RPS/Brier/KL objective as the scalar replay path."""
+    from .common import QTYPES
+    from .multimodal_objectives import decision_loss
+    from .multimodal_train import example_hash
+    width=max(len(item[4]) for item in chunk);raw=agent._logits(inputs,width);aligned=[];targets=[];references=[];accepted=[]
+    for index,(row,qid,qdef,q,values) in enumerate(chunk):
+        k=len(values);logits=raw[index,:k]
+        if q.get('option_order') is not None:
+            logits=logits[torch.argsort(torch.as_tensor(q['option_order'],device=agent.device))]
+        aligned.append(F.pad(logits,(0,width-k),value=-1e4));targets.append(list(values)+[0.]*(width-k))
+        if not config.replay_kl_weight:
+            continue
+        reference=row.get('replay_reference');valid=False
+        if reference is not None:
+            if row.get('replay_reference_identity')!=example_hash(row,qid,qdef):raise ValueError('replay reference input/options changed')
+            if len(reference)!=k:raise ValueError('replay reference option order/size mismatch')
+            valid=int(max(range(k),key=lambda i:reference[i]))==int(max(range(k),key=lambda i:values[i])) and max(reference)>=.5
+        references.append((list(reference) if reference is not None else [0.]*k)+[0.]*(width-k));accepted.append(valid)
+    use_reference = any(accepted)
+    mask=torch.tensor([[i<len(item[4]) for i in range(width)] for item in chunk],device=agent.device)
+    loss,_=decision_loss(torch.stack(aligned),torch.tensor(targets,device=agent.device,dtype=torch.float32),mask,
+        torch.tensor([QTYPES[item[3]['t']] for item in chunk],device=agent.device),
+        ordinal_weight=config.decision_ordinal_weight,brier_weight=config.decision_brier_weight,
+        reference=torch.tensor(references,device=agent.device,dtype=torch.float32) if use_reference else None,
+        reference_mask=torch.tensor(accepted,device=agent.device) if use_reference else None,
+        kl_weight=config.replay_kl_weight)
+    return loss
+
+
+def _grounding_train_mode(agent, config):
+    if config.mode == 'head':
+        agent.model.eval()
+        base = agent.model.get_base_model() if _is_adapter_model(agent.model) else agent.model
+        base.grounding_head.train()
     else:
-        logits, _act = model(*args, **kwargs)
-    return logits.float()
-
-
-def train_model(model, tok, items: Sequence[Dict[str, Any]], config: TrainConfig, device: torch.device,
-                max_len: int, head_max_len: int,
-                on_epoch_end: Optional[Callable[[int, float], None]] = None,
-                parallel: bool = False) -> List[float]:
-    """Train `model` in place on `items`; returns the mean loss of each epoch."""
-    config.validate()
-    if not items:
-        raise ValueError("no training items")
-    amp = (device.type == "cuda") if config.amp is None else bool(config.amp)
-    checkpointing = amp if config.gradient_checkpointing is None else bool(config.gradient_checkpointing)
-
-    if config.freeze_encoder:
-        for p in model.encoder.parameters():
-            p.requires_grad_(False)
-    elif checkpointing and hasattr(model.encoder, "gradient_checkpointing_enable"):
-        model.encoder.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
-    model.head_checkpointing = checkpointing
-    model.to(device).train()
-    if config.freeze_encoder:
-        # A frozen encoder is a fixed feature extractor: dropout in it would only add noise.
-        model.encoder.eval()
-
-    groups = [{"params": [p for n, p in model.named_parameters()
-                          if not n.startswith("encoder.") and p.requires_grad], "lr": config.head_lr}]
-    if not config.freeze_encoder:
-        groups.insert(0, {"params": [p for n, p in model.named_parameters()
-                                     if n.startswith("encoder.") and p.requires_grad], "lr": config.encoder_lr})
-    optimizer = torch.optim.AdamW(groups, weight_decay=config.weight_decay)
-    steps_per_epoch = math.ceil(len(items) / config.micro_batch)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer,
-        T_max=optimizer_updates(len(items), config.micro_batch, config.grad_accum, config.epochs),
-        eta_min=config.min_lr)
-    scaler = torch.amp.GradScaler("cuda") if amp and device.type == "cuda" else None
-
-    torch.manual_seed(config.seed)
-    order_rng = random.Random(config.seed)
-    params = [p for g in groups for p in g["params"]]
-    history = []
-    for epoch in range(config.epochs):
-        epoch_items = list(items)
-        random.Random(config.seed + epoch).shuffle(epoch_items)
-        sigma = sigma_at(epoch, config.epochs, config.sigma_start, config.sigma_end)
-        total, n_steps = 0.0, 0
-        optimizer.zero_grad(set_to_none=True)
-        for start in range(0, len(epoch_items), config.micro_batch):
-            chunk = [encode_item(tok, it, max_len, head_max_len,
-                                 draw_option_order(it, order_rng, config.shuffle_options), parallel)
-                     for it in epoch_items[start:start + config.micro_batch]]
-            batch = collate_items([chunk], tok.pad_token_id)
-            logits = _forward(model, batch, device, amp, config.freeze_encoder)
-            mask = batch["marker_mask"].to(device)
-            target = batch["target"].to(device)
-            if config.loss == "rlcd":
-                loss = rlcd_loss(logits, target, mask, batch["qtype"].to(device), sigma,
-                                 config.rl_samples, config.w_sph, config.w_rps)
-            else:
-                loss = soft_ce_loss(logits, target, mask)
-            window_start = (n_steps // config.grad_accum) * config.grad_accum
-            window_size = min(config.grad_accum, steps_per_epoch - window_start)
-            scaled = loss / window_size
-            if scaler is not None:
-                scaler.scale(scaled).backward()
-            else:
-                scaled.backward()
-            n_steps += 1
-            if n_steps % config.grad_accum == 0 or start + config.micro_batch >= len(epoch_items):
-                if scaler is not None:
-                    scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(params, config.grad_clip)
-                if scaler is not None:
-                    scaler.step(optimizer)
-                    scaler.update()
-                else:
-                    optimizer.step()
-                scheduler.step()
-                optimizer.zero_grad(set_to_none=True)
-            total += loss.item()
-            if config.log_every and n_steps % config.log_every == 0:
-                print("epoch %d/%d step %d loss %.4f" % (epoch + 1, config.epochs, n_steps, loss.item()), flush=True)
-        mean = total / max(1, n_steps)
-        history.append(mean)
-        print("epoch %d/%d mean loss %.4f" % (epoch + 1, config.epochs, mean), flush=True)
-        if on_epoch_end is not None:
-            on_epoch_end(epoch, mean)
-    model.eval()
-    return history
+        # Transformer checkpointing is conditional on training=True. Freeze stochastic
+        # vision/audio towers through the existing native training-mode helper.
+        _train_mode(agent, config)
 
 
 @torch.no_grad()
-def calibration_records(model, tok, items: Sequence[Dict[str, Any]], device: torch.device,
-                        max_len: int, head_max_len: int, batch_size: int = 16, parallel: bool = False):
-    """`(qtype, logits, target, k)` records for `fit_temperature_map`, options in canonical order."""
-    model.eval()
-    records = []
-    for start in range(0, len(items), batch_size):
-        chunk = items[start:start + batch_size]
-        batch = collate_items([[encode_item(tok, it, max_len, head_max_len, parallel=parallel) for it in chunk]],
-                              tok.pad_token_id)
-        logits = _forward(model, batch, device, amp=False, detach_encoder=False).cpu().numpy()
-        for row, it in zip(logits, chunk):
-            records.append((it["qtype"], row[:it["k"]], it["target"], it["k"]))
-    return records
-
-
-def calibration_report(records: Sequence[Tuple[int, Any, Any, int]],
-                       temperature: Sequence[float]) -> Dict[str, Dict[str, Any]]:
-    """Per question type: how many calibration items there were, what was fitted, and what to doubt.
-
-    `records` are the `calibration_records` the temperatures were fitted on, and `temperature`
-    the per-type scalars `fit_temperature_map` returned. Each type gets `items`, `temperature`,
-    `accuracy` and `mean_confidence` (top probability at the fitted temperature) on the
-    calibration items, and a list of `issues`, empty when nothing looks wrong:
-
-    - fewer than `MIN_TYPE_N` items: the temperature was not fitted and stays 1.0;
-    - fewer than `CALIB_WARN_N` items: it was fitted, on little evidence;
-    - it landed on the `[TEMP_MIN, TEMP_MAX]` clamp;
-    - it came back unchanged at 1.0 although it was fitted, which usually means the items gave
-      the fit nothing to correct -- what a model already certain and right on them produces.
-
-    A type with no calibration items at all has no issues; it was not in the data.
-    """
-    import numpy as np
-
-    by_type: Dict[int, List[Tuple[Any, Any]]] = {qt: [] for qt in QTYPE_NAMES}
-    for qt, logits, target, _k in records:
-        by_type[int(qt)].append((np.asarray(logits, dtype=float), np.asarray(target, dtype=float)))
-    report = {}
-    for qt, name in QTYPE_NAMES.items():
-        pairs, t = by_type[qt], float(temperature[qt])
-        entry: Dict[str, Any] = {"items": len(pairs), "temperature": t, "issues": []}
-        if pairs:
-            right, conf = 0, 0.0
-            for logits, target in pairs:
-                z = logits / t
-                p = np.exp(z - z.max())
-                p /= p.sum()
-                right += int(p.argmax() == target.argmax())
-                conf += float(p.max())
-            entry["accuracy"] = right / len(pairs)
-            entry["mean_confidence"] = conf / len(pairs)
-        n, issues = len(pairs), entry["issues"]
-        if 0 < n < MIN_TYPE_N:
-            issues.append("not fitted: %d calibration items, fewer than %d, so the temperature stays 1.0"
-                          % (n, MIN_TYPE_N))
-        elif n >= MIN_TYPE_N:
-            if n < CALIB_WARN_N:
-                issues.append("fitted on only %d calibration items" % n)
-            if t <= TEMP_MIN or t >= TEMP_MAX:
-                issues.append("the fitted temperature %.3g is on the [%g, %g] clamp" % (t, TEMP_MIN, TEMP_MAX))
-            elif abs(t - 1.0) < 1e-3:
-                issues.append("the fit came back unchanged at 1.0 (accuracy %.2f, mean confidence %.3f on the "
-                              "calibration items), which usually means they gave it nothing to correct; this "
-                              "type's confidences are uncalibrated" % (entry["accuracy"], entry["mean_confidence"]))
-        report[name] = entry
-    return report
-
-
-def evaluate_records(records: Sequence[Tuple[int, Any, Any, int]],
-                     temperature: Optional[Sequence[float]] = None,
-                     temperature_by_options: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
-    """Evaluate loss, accuracy, top-1 confidence, ECE and Brier scores on `records`.
-
-    `records` is a sequence of `(qtype, logits, target, k)` tuples as returned by
-    `calibration_records`. Predictions and confidences are scaled using `temperature` /
-    `temperature_by_options` if provided. Returns overall metrics and per-question-type
-    breakdowns.
-
-    `brier` is the multi-class Brier score over the full probability vector:
-    `mean(sum((p - target)**2))`. `brier_top1` is the binary Brier score of top-1
-    confidence as P(correct): `mean((max(p) - correct)**2)`.
-    """
-    import numpy as np
-
-    if not records:
-        return {
-            "items": 0,
-            "loss": 0.0,
-            "accuracy": 0.0,
-            "mean_confidence": 0.0,
-            "ece": None,
-            "brier": None,
-            "brier_top1": None,
-            "by_type": {},
-        }
-
-    losses: List[float] = []
-    corrects: List[bool] = []
-    confs: List[float] = []
-    briers_mc: List[float] = []
-    briers_top1: List[float] = []
-    by_type: Dict[int, Dict[str, List[Any]]] = {
-        qt: {"losses": [], "corrects": [], "confs": [], "briers_mc": [], "briers_top1": []} for qt in QTYPE_NAMES
-    }
-
-    for qt, logits, target, k in records:
-        z = np.asarray(logits[:k], dtype=float)
-        t = np.asarray(target[:k], dtype=float)
-        bucket = temp_bucket(qt, k)
-        if temperature_by_options and bucket in temperature_by_options:
-            scale = float(temperature_by_options[bucket])
-        elif temperature is not None and isinstance(temperature, (list, tuple)) and qt < len(temperature):
-            scale = float(temperature[qt])
-        elif isinstance(temperature, (int, float)):
-            scale = float(temperature)
-        else:
-            scale = 1.0
-        scale = max(scale, 1e-4)
-        z_scaled = z / scale
-        z_max = np.max(z_scaled)
-        exp_z = np.exp(z_scaled - z_max)
-        sum_exp_z = np.sum(exp_z)
-        p = exp_z / sum_exp_z
-        log_p = z_scaled - z_max - np.log(sum_exp_z)
-        loss = float(-np.sum(t * log_p))
-
-        pred = int(np.argmax(p))
-        gold = int(np.argmax(t))
-        correct = bool(pred == gold)
-        conf = float(np.max(p))
-        b_mc = float(np.sum((p - t) ** 2))
-        b_top1 = float((conf - float(correct)) ** 2)
-
-        losses.append(loss)
-        corrects.append(correct)
-        confs.append(conf)
-        briers_mc.append(b_mc)
-        briers_top1.append(b_top1)
-
-        if qt in by_type:
-            by_type[qt]["losses"].append(loss)
-            by_type[qt]["corrects"].append(correct)
-            by_type[qt]["confs"].append(conf)
-            by_type[qt]["briers_mc"].append(b_mc)
-            by_type[qt]["briers_top1"].append(b_top1)
-
-    total_items = len(records)
-    acc = float(np.mean(corrects)) if corrects else 0.0
-    mean_loss = float(np.mean(losses)) if losses else 0.0
-    mean_conf = float(np.mean(confs)) if confs else 0.0
-    ece_val = float(ece_score(np.asarray(confs, dtype=float), np.asarray(corrects, dtype=bool))) if len(corrects) >= 2 else None
-    brier_val = float(np.mean(briers_mc)) if briers_mc else None
-    brier_top1_val = float(np.mean(briers_top1)) if briers_top1 else None
-
-    by_type_summary = {}
-    for qt, name in QTYPE_NAMES.items():
-        t_losses = by_type[qt]["losses"]
-        t_corrects = by_type[qt]["corrects"]
-        t_confs = by_type[qt]["confs"]
-        t_briers_mc = by_type[qt]["briers_mc"]
-        t_briers_top1 = by_type[qt]["briers_top1"]
-        if t_losses:
-            t_ece = float(ece_score(np.asarray(t_confs, dtype=float), np.asarray(t_corrects, dtype=bool))) if len(t_corrects) >= 2 else None
-            t_brier = float(np.mean(t_briers_mc))
-            t_brier_top1 = float(np.mean(t_briers_top1))
-            by_type_summary[name] = {
-                "items": len(t_losses),
-                "loss": round(float(np.mean(t_losses)), 4),
-                "accuracy": round(float(np.mean(t_corrects)), 4),
-                "mean_confidence": round(float(np.mean(t_confs)), 4),
-                "ece": round(t_ece, 4) if t_ece is not None else None,
-                "brier": round(t_brier, 4) if t_brier is not None else None,
-                "brier_top1": round(t_brier_top1, 4) if t_brier_top1 is not None else None,
-            }
-
-    return {
-        "items": total_items,
-        "loss": round(mean_loss, 4),
-        "accuracy": round(acc, 4),
-        "mean_confidence": round(mean_conf, 4),
-        "ece": round(ece_val, 4) if ece_val is not None else None,
-        "brier": round(brier_val, 4) if brier_val is not None else None,
-        "brier_top1": round(brier_top1_val, 4) if brier_top1_val is not None else None,
-        "by_type": by_type_summary,
-    }
-
-
-def collapse_stats(records: Sequence[Tuple[int, Any, Any, int]]) -> Optional[Dict[str, float]]:
-    """Mean within-row logit range, mean soft-CE and mean ln K on records with k >= 2.
-
-    A 1-option row cannot collapse to a prior, so it is skipped. Empty input, or only
-    1-option rows, returns None.
-    """
-    import numpy as np
-
-    ranges, ces, lnks = [], [], []
-    for _qt, logits, target, k in records:
-        k = int(k)
-        if k < 2:
+def grounding_metrics(agent, rows, limit=256, threshold=.25, *, micro_batch=1, max_micro_tokens=4096):
+    """Held-out single-box accuracy and score-thresholded set precision/recall, not COCO AP."""
+    if micro_batch < 1 or max_micro_tokens < 1:
+        raise ValueError("grounding batch size and token budget must be positive")
+    rng = random.Random(0)
+    chosen = rng.sample(rows, min(len(rows), limit)) if limit else rows
+    stats = {"single_n": 0, "single_iou": 0., "single_iou50": 0, "set_tp": 0, "set_pred": 0,
+             "set_gold": 0, "set_n": 0, "presence_n": 0, "presence_correct": 0}
+    agent.model.eval()
+    for row in chosen:
+        if "grounding" in row:
             continue
-        z = np.asarray(logits, dtype=float).ravel()[:k]
-        t = np.asarray(target, dtype=float).ravel()[:k]
-        mass = float(t.sum())
-        if mass <= 0.0:
+        qid, qdef = next(iter(row["questions"].items()))
+        request, question = record_input(agent, row, qid, qdef)
+        inputs, q, _ = agent._prepare(request, question)
+        target = decision_target(row, qid, q)
+        logits = agent._logits(inputs, len(target))[0]
+        order = q.get('option_order')
+        if order is not None:
+            logits = logits[torch.argsort(torch.as_tensor(order, device=agent.device))]
+        selected = int(logits.argmax())
+        stats["presence_n"] += 1
+        stats["presence_correct"] += int(target[selected] == max(target))
+    config = GroundingTrainConfig(micro_batch=micro_batch, max_micro_tokens=max_micro_tokens)
+    for chunk, inputs, multiple in _geometry_microbatches(agent, chosen, config):
+        out = agent._grounding_outputs(inputs, multiple=multiple)
+        if not multiple:
+            positive = [i for i, row in enumerate(chunk) if row["grounding"]["boxes"]]
+            if positive:
+                truth = validate_boxes([chunk[i]["grounding"]["boxes"][0] for i in positive]).to(agent.device)
+                ious = box_iou(out["boxes"][positive, 0], truth).diag().tolist()
+                stats["single_n"] += len(ious)
+                stats["single_iou"] += sum(ious)
+                stats["single_iou50"] += sum(iou >= .5 for iou in ious)
             continue
-        t = t / mass
-        ranges.append(float(z.max() - z.min()))
-        logp = z - np.logaddexp.reduce(z)
-        ces.append(float(-(t * logp).sum()))
-        lnks.append(math.log(k))
-    if not ranges:
+        for index, row in enumerate(chunk):
+            spec = row["grounding"]
+            truth = validate_boxes(spec["boxes"]).to(agent.device)
+            boxes = out["boxes"][index]
+            stats['set_n'] += 1
+            scores = out["object_logits"][index].sigmoid() * out["quality_logits"][index].sigmoid()
+            predicted = boxes[scores >= threshold]
+            ignore = validate_boxes(spec.get("ignored", [])).to(agent.device)
+            if len(ignore) and len(predicted):
+                overlaps = crowd_overlap(predicted, ignore).max(-1).values >= .5
+                if len(truth):overlaps &= box_iou(predicted, truth).max(-1).values < .5
+                predicted = predicted[~overlaps]
+            stats["set_pred"] += len(predicted); stats["set_gold"] += len(truth)
+            if len(predicted) and len(truth):
+                from scipy.optimize import linear_sum_assignment
+                ious = box_iou(predicted, truth)
+                reward = (ious >= .5).float() * (min(ious.shape) + 1) + ious
+                a, b = linear_sum_assignment(-reward.cpu().numpy())
+                stats["set_tp"] += int((ious[a, b] >= .5).sum())
+    precision = stats["set_tp"] / max(1, stats["set_pred"])
+    recall = stats["set_tp"] / max(1, stats["set_gold"])
+    return {**stats, "miou": stats["single_iou"] / max(1, stats["single_n"]),
+            "acc_iou50": stats["single_iou50"] / max(1, stats["single_n"]),
+            "set_precision50": precision, "set_recall50": recall,
+            "set_f1_50": 2 * precision * recall / max(1e-8, precision + recall),
+            "presence_accuracy": stats["presence_correct"] / max(1, stats["presence_n"]), "evaluated": len(chosen)}
+
+
+def _evaluate_development(agent, geometry_rows, decision_rows, config, ctx):
+    sharded = (config.distributed_decision_eval and bool(decision_rows)
+               and ctx.world_size > 1 and config.decision_eval_micro_batch == 1)
+    if not ctx.main and not sharded:
         return None
-    n = len(ranges)
-    return {
-        "n": float(n),
-        "mean_logit_range": sum(ranges) / n,
-        "mean_ce": sum(ces) / n,
-        "mean_ln_k": sum(lnks) / n,
-    }
+    result = (grounding_metrics(agent, geometry_rows, config.eval_limit,
+                               micro_batch=config.grounding_eval_micro_batch,
+                               max_micro_tokens=config.max_micro_tokens) if ctx.main else None)
+    if decision_rows:
+        records = _decision_development_records(agent, decision_rows, config, ctx, sharded)
+        if ctx.main:
+            result.update(_decision_development_metrics(decision_rows, records, config.retention_tagged_only))
+    return result
 
 
-def prior_collapse_message(records: Sequence[Tuple[int, Any, Any, int]]) -> Optional[str]:
-    """Warning text if calibration logits have collapsed to the class prior, else None.
+def _checkpoint_identity(agent, model, cfg, ctx, total, train_records, train_digest, dev, decisions, replay):
+    origin = Path(model)
+    backbone = Path(getattr(agent, "model_id", model))
+    files = []
+    if backbone.is_dir():
+        for path in sorted(backbone.glob("*.safetensors")):
+            stat = path.stat()
+            files.append([path.name, stat.st_size, stat.st_mtime_ns])
+    config = asdict(cfg)
+    config.pop("checkpoint_every")
+    return {"format": 1, "config": config, "world_size": ctx.world_size, "schedule_steps": total,
+            "train_records": train_records,
+            "origin": str(origin.resolve()) if origin.is_dir() else str(origin),
+            "backbone": str(backbone), "backbone_files": files,
+            "revision": getattr(agent, "revision", None), "dtype": str(agent.dtype),
+            "readout": getattr(agent, "readout", "letter"), "prompt_version": getattr(agent, "prompt_version", "v1"),
+            "execution": getattr(agent, "_training_variant", {}),
+            "data": {"train": train_digest, "dev": file_fingerprint(str(dev)),
+                     "decision_dev": file_fingerprint(str(decisions)) if decisions else None,
+                     "replay": file_fingerprint(str(replay)) if replay else None}}
 
-    The default 4-epoch budget is sized for a few thousand typed decisions. On a few
-    hundred or a thousand labelled rows the head can finish with every option at the
-    same logit -- chance-level, and silent. #963 measured a mean within-row range of
-    0.01 against 0.62 for the untuned checkpoint, and training CE stuck at ln K.
 
-    Fired when the mean within-row logit range is below `COLLAPSE_LOGIT_RANGE`, or when
-    mean soft-CE on the same records is within `COLLAPSE_CE_REL` of mean ln K.
+def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2B-it", replay_data=None,
+                       decision_dev_data=None, config=None, device=None, agent=None, row_validator=None,
+                       resume_from=None, reporter=None):
+    """Train the attached heads and report optimizer and evaluation events on rank zero.
+
+    An optional reporter implements ``start(config, baseline)``,
+    ``training_step(step, loss, elapsed, grad_norm, window_size, learning_rates)``,
+    and ``evaluation(step, report, *, score, selected, final=False)``. The caller owns its lifecycle.
     """
-    stats = collapse_stats(records)
-    if stats is None:
-        return None
-    reasons = []
-    if stats["mean_logit_range"] < COLLAPSE_LOGIT_RANGE:
-        reasons.append("mean within-row logit range %.3g" % stats["mean_logit_range"])
-    mean_ce, mean_lnk = stats["mean_ce"], stats["mean_ln_k"]
-    if mean_lnk > 0.0 and abs(mean_ce - mean_lnk) <= COLLAPSE_CE_REL * mean_lnk:
-        reasons.append("calibration cross-entropy %.3f is within %.0f%% of ln K ~ %.3f"
-                       % (mean_ce, COLLAPSE_CE_REL * 100.0, mean_lnk))
-    if not reasons:
-        return None
-    return ("laya.train: predictions collapsed to the class prior (%s). "
-            "The default epoch budget is often too small on a few hundred or a thousand "
-            "labelled rows. Try more epochs, more data, or another seed."
-            % "; ".join(reasons))
+    cfg = config or GroundingTrainConfig()
+    cfg.validate()
+    ctx = distributed_context()
+    reporter = reporter if ctx.main else None
+    if cfg.selection_metric in ('decision_macro', 'harmonic') and not decision_dev_data:
+        raise ValueError(cfg.selection_metric + ' selection requires decision_dev_data')
+    torch.manual_seed(cfg.seed)
+    dev = load_grounding_rows(dev_data)
+    from .multimodal_train import MultimodalTrainConfig, configure_training, load_rows
+    decision_dev = load_rows(decision_dev_data) if decision_dev_data else []
+    dev_groups = {row["group"] for row in dev if row.get("group") is not None}
+    decision_groups = set()
+    for row in decision_dev:
+        if row_validator is not None:
+            row_validator("decision_dev", row)
+        group = row.get("group")
+        if group is not None:
+            source = None if str(group).startswith(("toolace:", "coco:")) else row.get("source", row.get("dataset"))
+            decision_groups.add((source, group))
 
+    def check_single_box(row):
+        if cfg.slots == 1 and row.get("grounding", {}).get("task") == "multiple":
+            raise ValueError("single-box training requires a single-target view; never relabel multi-object annotations as one box")
 
-def finetune(data: str, model_dir: str, output_dir: str, config: Optional[TrainConfig] = None,
-             device: Optional[str] = "auto") -> Dict[str, Any]:
-    """Preprocess, train, calibrate and save; returns a summary of the run.
+    def validate_split(row):
+        check_single_box(row)
+        if row_validator is not None:
+            row_validator("train", row)
+        group = row.get("group")
+        if group in dev_groups:
+            raise ValueError("grounding train/dev image groups overlap")
+        source = None if str(group).startswith(("toolace:", "coco:")) else row.get("source", row.get("dataset"))
+        if (source, group) in decision_groups:
+            raise ValueError("grounding train/decision development groups overlap: " + str(group))
 
-    `data` is a JSONL file of `{state, questions, gold}` or `{state, questions, expected}` rows,
-    or a CSV file with text and label columns.
-    `model_dir` is a local checkpoint directory -- the layout `laya.load` reads. The result in
-    `output_dir` loads with `laya.load(output_dir)`.
-    """
-    config = config or TrainConfig()
-    config.validate()
-    dev = resolve_device(device)
-    model, tok, cfg = load_checkpoint(model_dir)
-    # The base checkpoint is scored on eval_items before train_model runs, and calibration_records
-    # sends its inputs to `dev`, so the weights have to be there first (CUDA and MPS crash otherwise).
-    model.to(dev)
-    max_len = config.max_len or cfg.get("max_len", 512)
-    head_max_len = config.head_max_len or cfg.get("head_max_len", 192)
-    if config.option_layout is not None:
-        cfg = dict(cfg, option_layout=config.option_layout)
-    parallel = uses_parallel_layout(cfg)
-
-    rows = read_data(data, text_column=config.text_column, label_column=config.label_column,
-                     question_id=config.question_id, instructions=config.instructions)
-    items, skipped = items_from_rows(tok, rows, max_len, head_max_len,
-                                     label_smoothing=config.label_smoothing)
-    if not items:
-        raise ValueError("%s produced no training items (skipped: %r)" % (data, skipped))
-    train_items, calib_items = split_calibration(items, config.calib_max, config.calib_frac, config.calib_seed)
-
-    eval_skipped = {}
-    eval_mode = None
-    is_held_out = False
-    eval_source = None
-    eval_items = []
-    eval_note = None
-
-    if config.eval_data:
-        eval_source = config.eval_data
-        eval_rows = read_data(config.eval_data, text_column=config.text_column, label_column=config.label_column,
-                              question_id=config.question_id, instructions=config.instructions)
-        eval_items, eval_skipped = items_from_rows(tok, eval_rows, max_len, head_max_len, label_smoothing=0.0)
-
-        if not eval_items:
-            eval_mode = None
-            is_held_out = False
-            eval_note = ("Evaluation file %s yielded 0 usable items (skipped: %r); "
-                         "no evaluation performed." % (config.eval_data, eval_skipped))
-            warnings.warn("laya.train: %s" % (eval_note,), RuntimeWarning, stacklevel=2)
-            print("eval items 0 from %s (skipped %r)" % (config.eval_data, eval_skipped), flush=True)
-        else:
-            # Build input signatures from normalized, usable items:
-            # (state token ids, normalized question schema).
-            # Checked separately from targets to detect shared inputs even when labels differ (#967).
-            train_input_sigs = {
-                (tuple(it["state_ids"]), json.dumps(it["q"], sort_keys=True))
-                for it in train_items
-            }
-            calib_input_sigs = {
-                (tuple(it["state_ids"]), json.dumps(it["q"], sort_keys=True))
-                for it in calib_items
-            }
-
-            train_overlap_count = sum(
-                1 for it in eval_items
-                if (tuple(it["state_ids"]), json.dumps(it["q"], sort_keys=True)) in train_input_sigs
-            )
-            calib_overlap_count = sum(
-                1 for it in eval_items
-                if (tuple(it["state_ids"]), json.dumps(it["q"], sort_keys=True)) in calib_input_sigs
-            )
-            total_overlap_count = sum(
-                1 for it in eval_items
-                if (tuple(it["state_ids"]), json.dumps(it["q"], sort_keys=True)) in train_input_sigs
-                or (tuple(it["state_ids"]), json.dumps(it["q"], sort_keys=True)) in calib_input_sigs
-            )
-
-            if total_overlap_count > 0:
-                eval_mode = "overlapping_eval"
-                is_held_out = False
-                if train_overlap_count > 0 and calib_overlap_count > 0:
-                    eval_note = (
-                        "Evaluation set contains inputs that overlap training data (%d) and calibration data (%d) "
-                        "(total %d/%d items); metrics do not reflect strictly independent held-out evaluation."
-                        % (train_overlap_count, calib_overlap_count, total_overlap_count, len(eval_items))
-                    )
-                elif train_overlap_count > 0:
-                    eval_note = (
-                        "Evaluation set contains rows that overlap training data (%d/%d items); "
-                        "metrics do not reflect strictly independent held-out evaluation."
-                        % (train_overlap_count, len(eval_items))
-                    )
-                else:
-                    eval_note = (
-                        "Evaluation set contains inputs that overlap calibration data (%d/%d items); "
-                        "metrics do not reflect strictly independent held-out evaluation."
-                        % (calib_overlap_count, len(eval_items))
-                    )
-                print("eval items %d from %s (skipped %r, %d overlapping training/calibration items)"
-                      % (len(eval_items), config.eval_data, eval_skipped, total_overlap_count), flush=True)
-            else:
-                eval_mode = "held_out"
-                is_held_out = True
-                eval_note = "Metrics reflect independent held-out evaluation."
-                print("eval items %d from %s (skipped %r, 0 overlapping training/calibration items)"
-                      % (len(eval_items), config.eval_data, eval_skipped), flush=True)
-    elif calib_items:
-        eval_items = calib_items
-        eval_source = "calibration_slice"
-        eval_mode = "in_sample_calibration"
-        is_held_out = False
-        eval_note = ("Metrics reflect in-sample calibration fit, not independent held-out evaluation. "
-                     "Provide --eval for held-out validation.")
+    for row in dev:
+        check_single_box(row)
+        if row_validator is not None:
+            row_validator("dev", row)
+    # Share the validated index instead of parsing every JSONL record on every rank.
+    indexed = ctx.broadcast(Path(train_data).stat().st_size >= 128 * 1024**2 if ctx.main else None)
+    if indexed:
+        rows = _shared_indexed_rows(train_data, validate_split, ctx)
     else:
-        eval_items = []
-        eval_source = None
-        eval_mode = None
-        is_held_out = False
-        eval_note = "No evaluation performed (0 calibration items and no --eval set was provided)."
-        warnings.warn("laya.train: dataset has 0 calibration items and no --eval set was provided; "
-                      "skipping evaluation to avoid reporting training fit as generalization.",
-                      RuntimeWarning, stacklevel=2)
-
-    print("train items %d, calibration items %d, eval items %d%s, skipped %r, device %s"
-          % (len(train_items), len(calib_items), len(eval_items),
-             (" (" + str(eval_source) + ")") if eval_source else "", skipped, dev), flush=True)
-    print(update_budget_message(len(train_items), config), flush=True)
-
-    # Evaluate base checkpoint on eval items prior to training
-    before_eval = None
-    if eval_items:
-        base_records = calibration_records(model, tok, eval_items, dev, max_len, head_max_len, parallel=parallel)
-        base_temp = cfg.get("temperature")
-        base_temp_by_options = cfg.get("temperature_by_options")
-        before_eval = evaluate_records(base_records, base_temp, base_temp_by_options)
-
-    def checkpoint_latest(epoch, _loss):
-        save_checkpoint(model, tok, dict(cfg, max_len=max_len, head_max_len=head_max_len),
-                        os.path.join(output_dir, "checkpoint_latest"))
-
-    history = train_model(model, tok, train_items, config, dev, max_len, head_max_len,
-                          on_epoch_end=checkpoint_latest, parallel=parallel)
-
-    records = calibration_records(model, tok, calib_items, dev, max_len, head_max_len, parallel=parallel)
-    collapse_msg = prior_collapse_message(records)
-    if collapse_msg:
-        # Same channel as the weak-calibration notes: a checkpoint that predicts the
-        # class prior for every input otherwise looks like a finished, unlearnable task.
-        warnings.warn(collapse_msg, RuntimeWarning, stacklevel=2)
-    fitted = fit_temperature_map(records)
-    calibration = calibration_report(records, fitted["temperature"])
-    for name, entry in calibration.items():
-        for issue in entry["issues"]:
-            warnings.warn("laya.train: %s calibration: %s" % (name, issue), RuntimeWarning, stacklevel=2)
-
-    try:
-        abstention_thresholds = fit_abstention_thresholds(
-            records,
-            temperature=fitted["temperature"],
-            temperature_by_options=fitted["temperature_by_options"],
-            target_error=config.target_error,
-            min_bucket_n=config.min_abstain_n,
-        )
-    except Exception as e:
-        warnings.warn("laya.train: failed to fit abstention thresholds: %s" % (e,), RuntimeWarning, stacklevel=2)
-        abstention_thresholds = {}
-
-    # Evaluate fine-tuned checkpoint at fitted temperatures
-    after_eval = None
-    comparison = None
-    if eval_items:
-        after_records = calibration_records(model, tok, eval_items, dev, max_len, head_max_len, parallel=parallel)
-        after_eval = evaluate_records(after_records, fitted["temperature"], fitted["temperature_by_options"])
-        comparison = {
-            "delta_accuracy": round(after_eval["accuracy"] - before_eval["accuracy"], 4),
-            "delta_loss": round(after_eval["loss"] - before_eval["loss"], 4),
-            "delta_ece": round(after_eval["ece"] - before_eval["ece"], 4) if (after_eval["ece"] is not None and before_eval["ece"] is not None) else None,
-            "delta_brier": round(after_eval["brier"] - before_eval["brier"], 4) if (after_eval["brier"] is not None and before_eval["brier"] is not None) else None,
-            "delta_brier_top1": round(after_eval["brier_top1"] - before_eval["brier_top1"], 4) if (after_eval["brier_top1"] is not None and before_eval["brier_top1"] is not None) else None,
-            "delta_mean_confidence": round(after_eval["mean_confidence"] - before_eval["mean_confidence"], 4),
-        }
-        if eval_mode == "held_out":
-            print("\n=== Evaluation (before vs after fine-tuning on %d held-out items from %s) ==="
-                  % (len(eval_items), eval_source), flush=True)
-        elif eval_mode == "overlapping_eval":
-            print("\n=== Evaluation (before vs after fine-tuning on %d items from %s; overlaps training data) ==="
-                  % (len(eval_items), eval_source), flush=True)
-        else:
-            print("\n=== Calibration Evidence (in-sample calibration slice, %d items; not held-out) ==="
-                  % (len(eval_items)), flush=True)
-        print("%-22s %-14s %-14s %-14s" % ("Metric", "Before", "After", "Delta"), flush=True)
-        print("-" * 65, flush=True)
-        for metric, key in [("Accuracy", "accuracy"), ("Loss", "loss"), ("ECE", "ece"),
-                            ("Brier (multi-class)", "brier"), ("Brier (top-1)", "brier_top1"),
-                            ("Mean Confidence", "mean_confidence")]:
-            b_val = before_eval.get(key)
-            a_val = after_eval.get(key)
-            d_val = comparison.get("delta_" + key)
-            b_str = "%.4f" % b_val if b_val is not None else "N/A"
-            a_str = "%.4f" % a_val if a_val is not None else "N/A"
-            d_str = ("%+.4f" % d_val) if d_val is not None else "N/A"
-            print("%-22s %-14s %-14s %-14s" % (metric, b_str, a_str, d_str), flush=True)
-        print("-" * 65 + "\n", flush=True)
-
-    if eval_note is None:
-        if eval_mode == "held_out":
-            eval_note = "Metrics reflect independent held-out evaluation."
-        elif eval_mode == "overlapping_eval":
-            eval_note = ("Evaluation set contains rows that overlap training data; "
-                         "metrics do not reflect strictly independent held-out evaluation.")
-        elif eval_mode == "in_sample_calibration":
-            eval_note = ("Metrics reflect in-sample calibration fit, not independent held-out evaluation. "
-                         "Provide --eval for held-out validation.")
-        else:
-            eval_note = "No evaluation performed (0 calibration items and no --eval set was provided)."
-
-    train_report = {
-        "eval_source": eval_source,
-        "eval_mode": eval_mode,
-        "is_held_out": is_held_out,
-        "eval_items": len(eval_items),
-        "note": eval_note,
-        "before": before_eval,
-        "after": after_eval,
-        "comparison": comparison,
-        "calibration": calibration,
-        "abstention_thresholds": abstention_thresholds,
-        "training": asdict(config),
-    }
-
-    out_cfg = dict(cfg, max_len=max_len, head_max_len=head_max_len, fine_tuned=True,
-                   temperature=fitted["temperature"])
-    out_cfg.pop("temperature_by_options", None)
-    if fitted["temperature_by_options"]:
-        out_cfg["temperature_by_options"] = fitted["temperature_by_options"]
-    out_cfg["training"] = dict(out_cfg.get("training") or {}, laya_train=asdict(config),
-                               laya_train_calibration=calibration,
-                               train_report=train_report)
-    if abstention_thresholds:
-        out_cfg["training"]["abstention_thresholds"] = abstention_thresholds
-    save_checkpoint(model, tok, out_cfg, output_dir)
-
-    checkpoint_latest_dir = os.path.join(output_dir, "checkpoint_latest")
-    if os.path.isdir(checkpoint_latest_dir):
-        # Synchronize final calibrated config so checkpoint_latest matches the final artifact
-        tmp_cfg = os.path.join(checkpoint_latest_dir, "rl_agent_config.json.tmp")
-        with open(tmp_cfg, "w", encoding="utf-8") as f:
-            json.dump(out_cfg, f, indent=2)
-        os.replace(tmp_cfg, os.path.join(checkpoint_latest_dir, "rl_agent_config.json"))
-
-    # Save the questions schema alongside the checkpoint for inference reuse
-    sample_questions = {}
-    for r in rows:
-        qs = r.get("questions")
-        if isinstance(qs, dict):
-            for qid, qdef in qs.items():
-                if qid not in sample_questions:
-                    sample_questions[qid] = qdef
-                elif sample_questions[qid] != qdef:
-                    warnings.warn("Conflicting schema detected for question %r across rows; "
-                                  "keeping first seen definition." % (qid,))
-    if sample_questions:
-        for d in (output_dir, checkpoint_latest_dir):
-            if os.path.isdir(d):
-                tmp_path = os.path.join(d, "questions.json.tmp")
-                with open(tmp_path, "w", encoding="utf-8") as f:
-                    json.dump(sample_questions, f, indent=2)
-                os.replace(tmp_path, os.path.join(d, "questions.json"))
-
-    # Save train_report.json beside questions.json and checkpoint
-    for d in (output_dir, checkpoint_latest_dir):
-        if os.path.isdir(d):
-            tmp_report = os.path.join(d, "train_report.json.tmp")
-            with open(tmp_report, "w", encoding="utf-8") as f:
-                json.dump(train_report, f, indent=2)
-            os.replace(tmp_report, os.path.join(d, "train_report.json"))
-
-    return {
-        "train_items": len(train_items),
-        "calibration_items": len(calib_items),
-        "eval_items": len(eval_items),
-        "skipped": skipped,
-        "epoch_loss": history,
-        "temperature": fitted["temperature"],
-        "temperature_by_options": fitted["temperature_by_options"],
-        "n_by_bucket": fitted["n_by_bucket"],
-        "calibration": calibration,
-        "abstention_thresholds": abstention_thresholds,
-        "train_report": train_report,
-        "output_dir": output_dir,
-    }
-
-
-def dry_run(data: str, model_dir: str, config: Optional[TrainConfig] = None) -> Dict[str, Any]:
-    """Inspect dataset and build items without loading model weights; returns dataset stats."""
-    from transformers import AutoTokenizer
-    from .agent import _fix_tokenizer_config
-
-    config = config or TrainConfig()
-    config.validate()
-    resolved_dir = resolve_checkpoint_dir(model_dir)
-    _fix_tokenizer_config(resolved_dir)
-    tok = AutoTokenizer.from_pretrained(os.path.join(resolved_dir, "tokenizer"))
-    with open(os.path.join(resolved_dir, "rl_agent_config.json"), encoding="utf-8") as f:
-        cfg = json.load(f)
-    max_len = config.max_len or cfg.get("max_len", 512)
-    head_max_len = config.head_max_len or cfg.get("head_max_len", 192)
-
-    rows = read_data(data, text_column=config.text_column, label_column=config.label_column,
-                     question_id=config.question_id, instructions=config.instructions)
-    items, skipped = items_from_rows(tok, rows, max_len, head_max_len,
-                                     label_smoothing=config.label_smoothing)
-    # The training budget is set by the post-calibration item count, so split the same way
-    # finetune does rather than report on the raw valid-item count.
-    train_items, calib_items = split_calibration(items, config.calib_max, config.calib_frac, config.calib_seed)
-    summary = {
-        "data": data,
-        "rows_read": len(rows),
-        "valid_items": len(items),
-        "train_items": len(train_items),
-        "calibration_items": len(calib_items),
-        "effective_batch": config.micro_batch * config.grad_accum,
-        "optimizer_updates": optimizer_updates(len(train_items), config.micro_batch,
-                                               config.grad_accum, config.epochs),
-        "skipped": skipped,
-        "max_len": max_len,
-        "head_max_len": head_max_len,
-    }
-    if config.eval_data:
-        eval_rows = read_data(config.eval_data, text_column=config.text_column, label_column=config.label_column,
-                              question_id=config.question_id, instructions=config.instructions)
-        eval_items, eval_skipped = items_from_rows(tok, eval_rows, max_len, head_max_len, label_smoothing=0.0)
-        summary["eval_data"] = config.eval_data
-        summary["eval_rows_read"] = len(eval_rows)
-        summary["eval_valid_items"] = len(eval_items)
-        summary["eval_skipped"] = eval_skipped
-        print("dry-run: eval %d rows read, %d valid items, skipped: %r"
-              % (len(eval_rows), len(eval_items), eval_skipped), flush=True)
-
-    print("dry-run: %d rows read, %d valid items, skipped: %r"
-          % (len(rows), len(items), skipped), flush=True)
-    print("dry-run: " + update_budget_message(len(train_items), config), flush=True)
-    return summary
+        rows = load_grounding_rows(train_data)
+        for row in rows:
+            validate_split(row)
+    agent = agent or MultimodalAgent(model, device=ctx.device if ctx.world_size > 1 else device,
+                                     grounding_slots=cfg.slots, max_len=cfg.max_len)
+    agent.max_len = cfg.max_len
+    agent._video_cache_dir = cfg.video_cache_dir
+    agent._video_cache_size = cfg.video_cache_size
+    base = agent.model.get_base_model() if _is_adapter_model(agent.model) else agent.model
+    if not hasattr(base, "grounding_head"):
+        raise ValueError("grounding architecture must be installed before training")
+    if cfg.slots == 1 and base.grounding_head.architecture != 'single-v1':
+        base.grounding_head = base.grounding_head.to_single()
+        agent.detection_trained = False
+    if base.grounding_head.slots != cfg.slots:
+        raise ValueError('training slots differ from the installed grounding architecture')
+    if cfg.mode == "head":
+        agent.model.requires_grad_(False)
+        readout = base.decision_scorer if getattr(agent, 'readout', 'letter') == 'candidate' else _active_head(agent.model)
+        readout.float().requires_grad_(cfg.train_readout_in_warmup)
+    else:
+        configure_training(agent, MultimodalTrainConfig(mode=cfg.mode, lora_rank=cfg.lora_rank,
+            lora_alpha=cfg.lora_alpha, lora_targets=cfg.lora_targets, train_projectors=agent.model_type == 'gemma4'))
+        base = agent.model.get_base_model() if _is_adapter_model(agent.model) else agent.model
+        if agent.model_type.startswith('qwen') and cfg.mode == 'lora':
+            mergers = [name for name, _ in base.named_modules() if name.endswith('visual.merger')]
+            for name in mergers:
+                base.get_submodule(name).float().requires_grad_(True)
+            agent.native_trainable_modules = sorted(set(getattr(agent, 'native_trainable_modules', [])) | set(mergers))
+    base.grounding_head.float().requires_grad_(True)
+    params = [p for p in agent.model.parameters() if p.requires_grad]
+    optimizer = torch.optim.AdamW(optimizer_groups(agent.model, cfg.learning_rate,
+        cfg.head_learning_rate, cfg.projector_learning_rate), fused=True if cfg.fused_adamw else None)
+    optimizer_summary = [{key: value for key, value in group.items() if key != 'params'} |
+        {'parameters': sum(parameter.numel() for parameter in group['params'])} for group in optimizer.param_groups]
+    ctx.synchronize_parameters(params)
+    replay = []
+    if replay_data:
+        replay = load_rows(replay_data)
+        replay = [r for r in replay if r.get("group") not in dev_groups]
+        if agent.model_type not in {"gemma4", "qwen2_5_omni", "qwen2_5_omni_thinker", "gemma3n"}:
+            replay = [r for r in replay if not (isinstance(r["state"], dict) and r["state"].get("audio") is not None)]
+    rng = random.Random(cfg.seed)
+    option_rng = random.Random(cfg.seed + 1009 * (ctx.rank + 1)) if cfg.shuffle_options else None
+    order = list(range(len(rows)))
+    output = Path(output)
+    output.mkdir(parents=True, exist_ok=True)
+    total = min(cfg.max_steps or 10**12, math.ceil(len(rows) / cfg.global_batch_size) * cfg.epochs)
+    steps, best, history = 0, -1., []
+    first_epoch, first_offset = 0, 0
+    forward_counts = {'geometry': 0, 'decisions': 0}
+    execution = {}
+    train_decisions = cfg.mode != 'head' or cfg.train_readout_in_warmup
+    identity = None
+    if cfg.checkpoint_every or resume_from is not None:
+        train_digest = rows.sha256 if indexed else file_fingerprint(str(train_data))
+        identity = _checkpoint_identity(agent, model, cfg, ctx, total, len(rows), train_digest,
+                                        dev_data, decision_dev_data, replay_data)
+    if resume_from is None:
+        before = _evaluate_development(agent, dev, decision_dev, cfg, ctx)
+        if ctx.main:
+            agent.save(output / 'initial')
+            if cfg.include_initial_selection:
+                best = checkpoint_score(before, cfg.selection_metric)
+                agent.save(output / 'best')
+    else:
+        progress, order = load_checkpoint(resume_from, output, agent, ctx, optimizer, identity, rng, option_rng)
+        steps, first_epoch, first_offset = progress["steps"], progress["epoch"], progress["next_offset"]
+        best, history, before = progress["best"], progress["history"], progress["before"]
+        forward_counts, execution = progress["forward_counts"], progress["execution"]
+        if ctx.main:
+            print("Resumed joint training at optimizer step %d" % steps, flush=True)
+    starting_step = steps
+    if ctx.main:
+        (output / "before.json").write_text(json.dumps(before, indent=2) + "\n")
+    if reporter is not None:
+        reporter.start(dict(asdict(cfg), starting_step=steps, planned_steps=total, world_size=ctx.world_size,
+                            backbone=agent.model_type, train_records=len(rows), box_dev_records=len(dev),
+                            decision_dev_records=len(decision_dev), optimizer_groups=optimizer_summary), before)
+    ctx.barrier()
+    start = time.perf_counter()
+    for epoch in range(first_epoch, cfg.epochs):
+        if steps >= total:
+            break
+        if indexed:
+            rows.check_unchanged()
+        if resume_from is None or epoch != first_epoch:
+            rng.shuffle(order)
+        offset_start = first_offset if epoch == first_epoch else 0
+        for offset in range(offset_start, len(order), cfg.global_batch_size):
+            window = [rows[i] for i in order[offset:offset + cfg.global_batch_size]]
+            window_size = len(window)
+            if replay:
+                replay_count = int(window_size * cfg.replay_fraction)
+                if replay_count:
+                    window[-replay_count:] = rng.choices(replay, k=replay_count)
+            optimizer.zero_grad(set_to_none=True)
+            loss_sum = 0.
+            positive_targets = [0, 0]  # Single-box and set targets, in that order.
+            geometry_forwards, decision_forwards = 0, 0
+            _grounding_train_mode(agent, cfg)
+            if not execution:
+                execution = {'training_mode_during_updates': agent.model.training,
+                    'checkpointed_training_modules': sum(bool(getattr(module, 'gradient_checkpointing', False)
+                        or getattr(module, 'activation_checkpointing', False)) and module.training
+                        for module in agent.model.modules())}
+            local_rows = _rank_window(window, ctx.rank, ctx.world_size, cfg)
+            # Each rank scales by the same optimizer window before gradients are summed.
+            for chunk, inputs, multiple in _geometry_microbatches(agent, local_rows, cfg):
+                with _activation_context(inputs, cfg):
+                    result = agent._grounding_outputs(inputs, multiple=multiple)
+                    geometry_forwards += 1
+                    loss, _ = grounding_loss(result, [row['grounding']['boxes'] for row in chunk], multiple=multiple,
+                        ignored=[row['grounding'].get('ignored', []) for row in chunk],
+                        quality_matched_only=cfg.quality_matched_only)
+                if not torch.isfinite(loss):
+                    raise RuntimeError("nonfinite grounding loss")
+                (loss * len(chunk) / window_size).backward()
+                loss_sum += float(loss.detach()) * len(chunk)
+                positive_targets[int(multiple)] += sum(bool(row['grounding']['boxes']) for row in chunk)
+            for row in local_rows:
+                if cfg.batch_decisions or not train_decisions or 'grounding' in row:
+                    continue
+                qid, qdef = next(iter(row["questions"].items()))
+                request, question = record_input(agent, row, qid, _training_question(qdef, option_rng))
+                inputs, q, _ = agent._prepare(request, question)
+                values = decision_target(row, qid, q)
+                with _activation_context(inputs, cfg):
+                    logits = agent._logits(inputs, len(values))
+                    decision_forwards += 1
+                if q.get('option_order') is not None:
+                    option_order = torch.as_tensor(q['option_order'], device=agent.device)
+                    logits = logits[:, torch.argsort(option_order)]
+                target = torch.tensor(values, device=agent.device)
+                loss = -(target * F.log_softmax(logits[0].float(), -1)).sum()
+                if cfg.decision_ordinal_weight or cfg.decision_brier_weight:
+                    from .common import QTYPES
+                    from .multimodal_objectives import decision_loss
+                    loss,_=decision_loss(logits,target.unsqueeze(0),torch.ones_like(logits,dtype=torch.bool),
+                        torch.tensor([QTYPES[q['t']]],device=agent.device),objective='soft-ce',
+                        ordinal_weight=cfg.decision_ordinal_weight,brier_weight=cfg.decision_brier_weight)
+                if row.get('replay_reference') is not None and cfg.replay_kl_weight:
+                    from .multimodal_train import example_hash
+                    if row.get('replay_reference_identity') != example_hash(row, qid, qdef):
+                        raise ValueError('replay reference input/options changed')
+                    reference = torch.tensor(row['replay_reference'], device=agent.device, dtype=torch.float32)
+                    if reference.shape != target.shape:raise ValueError('replay reference option order/size mismatch')
+                    if int(reference.argmax()) == int(target.argmax()) and float(reference.max()) >= .5:
+                        loss = loss + cfg.replay_kl_weight * F.kl_div(F.log_softmax(logits[0].float(), -1), reference, reduction='sum')
+                if not torch.isfinite(loss):
+                    raise RuntimeError("nonfinite grounding loss")
+                (loss / window_size).backward()
+                loss_sum += float(loss.detach())
+            if cfg.batch_decisions and train_decisions:
+                for chunk, inputs in _decision_microbatches(agent, local_rows, cfg, option_rng=option_rng):
+                    with _activation_context(inputs, cfg):
+                        loss = _decision_batch_loss(agent, chunk, inputs, cfg)
+                        decision_forwards += 1
+                    if not torch.isfinite(loss):
+                        raise RuntimeError('nonfinite decision micro-batch loss')
+                    (loss * len(chunk) / window_size).backward()
+                    loss_sum += float(loss.detach()) * len(chunk)
+            ctx.sum_gradients(params)
+            grad_norm = torch.nn.utils.clip_grad_norm_(params, 1., error_if_nonfinite=True)
+            factor = learning_rate_factor(steps + 1, total, cfg.warmup_ratio, cfg.min_lr_ratio)
+            for group in optimizer.param_groups:
+                group['lr'] = group['base_lr'] * factor
+            optimizer.step()
+            steps += 1
+            reduced = ctx.sum_values([loss_sum, *positive_targets, geometry_forwards, decision_forwards], agent.device)
+            total_loss, single_targets, set_targets, geometry_calls, decision_calls = reduced
+            forward_counts['geometry'] += int(geometry_calls)
+            forward_counts['decisions'] += int(decision_calls)
+            agent.grounding_trained |= bool(single_targets)
+            agent.detection_trained |= bool(set_targets)
+            agent.calibrated = False; agent.modality_calibration = {}; agent.temperature = [1.] * 3; agent.temperature_by_options = {}
+            agent.ordinal_calibration = {}
+            log_step = steps == starting_step + 1 or steps % 10 == 0
+            if ctx.main and (log_step or (reporter is not None and steps == total)):
+                elapsed = time.perf_counter() - start
+                loss = total_loss / window_size
+                if log_step:
+                    print('grounding step=%d loss=%.5f elapsed=%.1fs ranks=%d' %
+                          (steps, loss, elapsed, ctx.world_size), flush=True)
+                if reporter is not None:
+                    rates = {group['name']: group['lr'] for group in optimizer.param_groups}
+                    reporter.training_step(steps, loss, elapsed, float(grad_norm.detach()), window_size, rates)
+            evaluated = cfg.eval_every and steps % cfg.eval_every == 0
+            if evaluated:
+                metrics = _evaluate_development(agent, dev, decision_dev, cfg, ctx)
+                if ctx.main:
+                    record = dict(step=steps, **metrics)
+                    history.append(record)
+                    score = checkpoint_score(metrics, cfg.selection_metric)
+                    decision_ok = True
+                    if decision_dev:
+                        decision_ok = _development_retained(metrics, before, cfg.max_decision_regression)
+                        record['decision_retention_passed'] = decision_ok
+                    geometry_ok = cfg.max_grounding_regression is None or grounding_retained(
+                        metrics, before, cfg.max_grounding_regression)
+                    record['grounding_retention_passed'] = geometry_ok
+                    print('GROUNDING DEV', json.dumps(record), flush=True)
+                    selected = decision_ok and geometry_ok and score > best
+                    if selected:
+                        best = score
+                        agent.save(output / 'best')
+                    if reporter is not None:
+                        reporter.evaluation(steps, record, score=score, selected=selected)
+                ctx.barrier()
+            if cfg.checkpoint_every and (steps % cfg.checkpoint_every == 0 or steps == total or evaluated):
+                if indexed:
+                    rows.check_unchanged()
+                progress = {"identity": identity, "steps": steps, "epoch": epoch, "next_offset": offset + window_size,
+                            "best": best, "history": history, "before": before, "forward_counts": forward_counts,
+                            "execution": execution, "grounding_trained": agent.grounding_trained,
+                            "detection_trained": agent.detection_trained}
+                save_checkpoint(output, agent, ctx, optimizer, progress, order, rng, option_rng)
+            if steps >= total:
+                break
+        if steps >= total:
+            break
+    after = _evaluate_development(agent, dev, decision_dev, cfg, ctx)
+    if ctx.main:
+        agent.save(output / 'last')
+        decision_ok = not decision_dev or _development_retained(after, before, cfg.max_decision_regression)
+        geometry_ok = cfg.max_grounding_regression is None or grounding_retained(
+            after, before, cfg.max_grounding_regression)
+        accepted = decision_ok and geometry_ok
+        final_score = checkpoint_score(after, cfg.selection_metric)
+        selected = accepted and final_score > best
+        if selected:
+            best = final_score
+            agent.save(output / 'best')
+        if indexed:
+            rows.check_unchanged()
+        train_sha256 = identity["data"]["train"] if identity is not None else (
+            rows.sha256 if indexed else file_fingerprint(str(train_data)))
+        report = {'status': 'complete', 'steps': steps, 'config': asdict(cfg), 'train_records': len(rows),
+            'dev_records': len(dev), 'before': before, 'after': after, 'selection_history': history,
+            'world_size': ctx.world_size, 'train_sha256': train_sha256,
+            'training_data_access': 'indexed_jsonl' if isinstance(rows, _IndexedGroundingRows) else 'in_memory',
+            'forward_passes': forward_counts, 'execution': execution, 'optimizer_groups': optimizer_summary,
+            'checkpoint': str(output / ('best' if best >= 0 or accepted else 'initial')),
+            'final_decision_retention_passed': decision_ok,'final_grounding_retention_passed':geometry_ok,
+            'note': 'Development selection only; native benchmark results are separate. Failed decision or geometric retention falls back to the unchanged initial checkpoint.'}
+        if cfg.checkpoint_every or resume_from is not None:
+            report["resume"] = {"starting_step": starting_step,
+                                "latest": str(output / "checkpoint_latest.json") if cfg.checkpoint_every else None}
+        (output / 'training_report.json').write_text(json.dumps(report, indent=2) + '\n')
+        if reporter is not None:
+            metrics = dict(after, decision_retention_passed=decision_ok, grounding_retention_passed=geometry_ok)
+            reporter.evaluation(steps, metrics, score=final_score, selected=selected, final=True)
+    ctx.barrier()
+    return agent

@@ -97,7 +97,8 @@ class MainEntryTests(unittest.TestCase):
                 check.main()
         self.assertEqual(caught.exception.code, 2)
         self.assertIn("usage", stderr.getvalue())
-        self.assertIn("cu128", stderr.getvalue())
+        self.assertIn("cu126", stderr.getvalue())
+        self.assertIn("cu130", stderr.getvalue())
 
     def test_missing_torch_is_reported_by_name(self):
         with patch.object(check, "repair_cusparselt"):   # never touch a real env in a unit test

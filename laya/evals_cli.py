@@ -3,7 +3,7 @@
 Exit codes: 0 on success, 1 when a threshold or a baseline tolerance fails, 2 on a usage error.
 
     laya-evals validate research/evals/fixture.jsonl
-    laya-evals run research/evals/fixture.jsonl --model english --min-accuracy 0.8 --max-ece 0.1
+    laya-evals run research/evals/fixture.jsonl --model multimodal --min-accuracy 0.8 --max-ece 0.1
     laya-evals run data.jsonl --baseline baseline.json --tolerance choice_accuracy=0.02 --json out.json
     laya-evals run data.jsonl --score-within 0.25 --min score_within_0.25=0.9
 
@@ -44,49 +44,6 @@ class RouterRunner:
             kwargs["min_confidence"] = min_confidence
         return self.router.predict_batch(requests, **kwargs)
 
-
-class OnnxRunner:
-    """Adapt a single-checkpoint `ONNXAgent` to the harness, like `RouterRunner` does for a Router.
-
-    The agent serves one checkpoint, so a per-example `model` that names a different one is an
-    error rather than a silent no-op: the report would otherwise claim to score a fleet it never
-    ran. `predict_batch` delegates to the agent when it has one and falls back to one predict per
-    state otherwise, so the harness's batching path works on every ONNXAgent build.
-    """
-
-    def __init__(self, agent: Any):
-        self.agent = agent
-
-    def _check_model(self, model: Optional[str]) -> None:
-        if model is not None and model != self.agent.model_id:
-            raise EvalError(
-                "the ONNX runner serves only %r, but this example asks for %r; "
-                "run them separately or drop --onnx" % (self.agent.model_id, model))
-
-    def predict(self, state: Any, questions: Dict[str, Any], model: Optional[str] = None,
-                min_confidence: Optional[float] = None) -> Dict[str, Any]:
-        self._check_model(model)
-        if min_confidence is not None:
-            return self.agent.predict(state, questions, min_confidence=min_confidence)
-        return self.agent.predict(state, questions)
-
-    def predict_batch(self, states: Sequence[Any], questions: Dict[str, Any],
-                      model: Optional[str] = None, batch_size: Optional[int] = None,
-                      sort_by_length: bool = False,
-                      min_confidence: Optional[float] = None) -> List[Dict[str, Any]]:
-        self._check_model(model)
-        agent_batch = getattr(self.agent, "predict_batch", None)
-        extra = {}
-        if min_confidence is not None:
-            extra["min_confidence"] = min_confidence
-        if agent_batch is not None:
-            if sort_by_length:
-                # Asked for, so it has to reach the agent's own grouping. The per-state fallback
-                # below cannot honour it: there is no batch to reorder.
-                return agent_batch(list(states), questions, batch_size=batch_size,
-                                   sort_by_length=True, **extra)
-            return agent_batch(list(states), questions, batch_size=batch_size, **extra)
-        return [self.agent.predict(state, questions, **extra) for state in states]
 
 
 def _parse_pairs(pairs: Optional[Sequence[str]]) -> Dict[str, float]:
@@ -198,13 +155,9 @@ def _build_parser() -> argparse.ArgumentParser:
                      help="labelled JSONL file; each row carries a state, the questions to answer "
                           "on it, and the expected answer per question id")
     run.add_argument("--model", help="force a checkpoint instead of auto-routing")
+    run.add_argument("--checkpoint", help="local native checkpoint directory or Hub ID")
     run.add_argument("--device", help="torch device, e.g. cpu or cuda")
-    run.add_argument("--onnx", metavar="PATH",
-                     help="evaluate an ONNX export through ONNXAgent instead of the torch Router; "
-                          "--model then names the checkpoint directory or Hub id the export came "
-                          "from (default convaiinnovations/laya)")
-    run.add_argument("--calibration", metavar="PATH",
-                     help="path to a JSON calibration map for ONNXAgent (requires --onnx)")
+
     run.add_argument("--revision", action="append", metavar="SHA | NAME=SHA",
                      help="pin the checkpoint commit: a bare SHA applies to every checkpoint this "
                           "run loads, NAME=SHA pins one (repeatable). Unpinned runs fetch the "
@@ -273,7 +226,7 @@ def _build_parser() -> argparse.ArgumentParser:
                                   help="read-only evidence inspection over a checkpoint config and an eval report",
                                   epilog="example: laya-evals evidence --checkpoint ./my-checkpoint --report report.json")
     evidence_cmd.add_argument("--checkpoint", required=True,
-                              help="checkpoint directory containing rl_agent_config.json")
+                              help="checkpoint directory containing multimodal_config.json")
     evidence_cmd.add_argument("--report", default=None,
                               help="an existing laya-evals report JSON")
 
@@ -399,75 +352,38 @@ def _cmd_run(args) -> int:
             example.model = args.model
     extra = _score_within(args.score_within)  # before the checkpoint loads: a bad flag is cheap
     revision, revisions = _parse_revisions(args.revision)
-    router = None
-    if args.onnx:
-        from .onnx_agent import ONNXAgent
-        # The export was produced from one checkpoint; --model names it (the ONNXAgent load
-        # needs its config and tokenizer), so the default is the english bundle repo. A bare
-        # --revision pins that checkpoint's config and tokenizer download.
-        if revisions:
-            raise EvalError("--revision NAME=SHA needs the Router; with --onnx pass one bare SHA")
-        agent = ONNXAgent(args.model or "convaiinnovations/laya", onnx_path=args.onnx,
-                          revision=revision, calibration=args.calibration)
-        runner: Any = OnnxRunner(agent)
-    else:
-        if args.calibration:
-            raise EvalError("--calibration requires --onnx; for the torch Router calibrate via fit_temperatures")
-        import laya
-        try:
-            pins: Dict[str, Any] = {}
-            if revision is not None:
-                pins["revision"] = revision
-            if revisions:
-                pins["revisions"] = revisions
-            router = laya.Router(device=args.device, preload=False, **pins)
-            # `--model` is not a constructor argument: it is stamped onto every row and resolved by
-            # the first row itself. Resolving it here asks the Router that will answer, so the
-            # checkpoint names this run can serve are the names it accepts.
-            if args.model:
-                router.resolve(args.model)
-        except ValueError as exc:
-            # `Router` already rejects a checkpoint name it does not know -- normalising case,
-            # surrounding spaces and aliases on the way -- with the option list in the message, for
-            # a `--revision` pin at construction and for `--model` just above. This only turns that
-            # into `laya-evals: unknown model 'englishg'; choose one of …` instead of a traceback,
-            # so a mistyped checkpoint fails as a usage error and never starts a download. Left to
-            # the row, `--model` raised inside `evaluate`, where its ValueError escaped as exit 1 --
-            # the code that means a threshold or baseline failed.
-            raise EvalError(str(exc)) from exc
-        runner = RouterRunner(router)
+    import laya
+    options = {}
+    if revision is not None:
+        options["revision"] = revision
+    if revisions:
+        options["revisions"] = revisions
+    if args.checkpoint:
+        options["multimodal"] = args.checkpoint
+    try:
+        router = laya.Router(device=args.device, preload=False, **options)
+        if args.model:
+            router.resolve(args.model)
+    except ValueError as exc:
+        raise EvalError(str(exc)) from exc
+    runner = RouterRunner(router)
     config = {"dataset": args.dataset, "model": args.model, "device": args.device,
               # The path above is the name, not the data. Hashing the bytes here is what makes
               # a committed baseline reviewable: the dataset can be edited in place, moved or
               # refetched under the same name, and a reviewer comparing two reports needs the
               # report -- not a file mtime -- to say so.
               "dataset_sha256": evals.file_fingerprint(args.dataset)}
+    if args.checkpoint:
+        config["checkpoint"] = args.checkpoint
     if policy:
         config["gate_policy"] = policy
-    if args.onnx:
-        config["onnx"] = args.onnx
-        if args.calibration:
-            config["calibration"] = args.calibration
     if extra:
         config["score_within"] = [evaluator.tolerance for evaluator in extra]
     report = evals.evaluate(runner, dataset, evaluators=evals.default_evaluators() + extra,
                             batch_size=args.batch_size, on_error=args.on_error, config=config,
                             sort_by_length=args.sort_by_length,
                             min_confidence=args.min_confidence)
-    # Which commit answered belongs in the artifact a baseline is, and it can only be read after
-    # the run: `preload=False` means no checkpoint is resident before the first row.
-    # `loaded_revisions` reports the commit each resident agent came from -- the pin when there is
-    # one, the commit the default branch resolved to when there is not, None for a local path.
-    # The ONNX arm answers from one checkpoint and `ONNXAgent` resolves the same fact for it
-    # (`self.revision`, `laya/onnx_agent.py`), so the block is written there too: `--revision`
-    # promises "the report records the commit that answered either way", and a `revisions` block
-    # that only ever appears on the torch path does not keep it -- nor does the config table in
-    # `docs/evals.md`, which documents `revisions` for every `run`.
-    if args.onnx:
-        revisions = {agent.model_id: getattr(agent, "revision", None)}
-    else:
-        revisions = getattr(router, "loaded_revisions", {})
-    report.config = dict(report.config, revisions=revisions)
+    report.config = dict(report.config, revisions=getattr(router, "loaded_revisions", {}))
 
     if extra:
         _warn_no_value(extra, report)

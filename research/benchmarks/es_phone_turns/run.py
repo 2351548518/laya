@@ -1,6 +1,6 @@
 """Runs the frozen cases against one Laya checkpoint and archives every decision.
 
-    python run.py --model convaiinnovations/laya-multilingual --rung es_criteria
+    python run.py --model ./local-checkpoint --rung es_criteria
 """
 import argparse
 import json
@@ -22,21 +22,22 @@ def load_cases(dataset):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", default="convaiinnovations/laya-multilingual")
-    parser.add_argument("--subfolder", default=None)
+    parser.add_argument("--model", help="trained native checkpoint directory or Hub ID")
+    parser.add_argument("--device", default="cpu")
     parser.add_argument("--rung", default="es_criteria", choices=sorted(prompts.RUNGS))
     parser.add_argument("--dataset", default="cases", choices=sorted(prompts.MENUS))
     parser.add_argument("--lang", default="es")
     parser.add_argument("--tag", default=None, help="suffix for the result file")
-    parser.add_argument("--calibration", default=None)
+    parser.add_argument("--out", type=Path, help="write the result to this file")
     args = parser.parse_args()
 
     import laya
     import torch
+    from laya.revisions import default_checkpoint
 
+    source = args.model or default_checkpoint()
     started = time.perf_counter()
-    agent = laya.load(args.model, subfolder=args.subfolder, device="cpu",
-                      calibration=args.calibration)
+    agent = laya.load(source, device=args.device)
     load_ms = (time.perf_counter() - started) * 1000
 
     cases = load_cases(args.dataset)
@@ -63,11 +64,11 @@ def main():
 
     report = {
         "meta": {
-            "model": args.model, "subfolder": args.subfolder, "rung": args.rung,
+            "model": source, "revision": agent.checkpoint_revision, "rung": args.rung,
             "dataset": args.dataset,
-            "lang": args.lang, "calibration": args.calibration,
+            "lang": args.lang,
             "laya": getattr(laya, "__version__", None), "torch": torch.__version__,
-            "threads": torch.get_num_threads(), "device": "cpu",
+            "threads": torch.get_num_threads(), "device": str(agent.device),
             "machine": platform.machine(), "system": platform.platform(),
             "omp_num_threads": os.environ.get("OMP_NUM_THREADS"),
             "load_ms": load_ms,
@@ -76,9 +77,8 @@ def main():
         "records": records,
     }
 
-    name = args.tag or (
-        args.model.rstrip("/").split("/")[-1] + (f"-{args.subfolder}" if args.subfolder else ""))
-    out = HERE / "results" / f"{name}__{args.dataset}__{args.rung}.json"
+    name = args.tag or Path(source).name
+    out = args.out or HERE / "results" / f"{name}__{args.dataset}__{args.rung}.json"
     out.write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
 
     s = report["summary"]

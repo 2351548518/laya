@@ -1,27 +1,27 @@
 # CrewAI Integration
 
-Laya provides sub-35ms, non-autoregressive decision components for **CrewAI** multi-agent crews (single-question latency measured at **32.8 ms** with `laya-multilingual` and **39.5 ms** with `laya` on a Tesla T4 GPU; 193–464 ms on CPU):
+Use locally hosted native decisions with CrewAI crews.
 
-* **`LayaCrewRouter`**: Sub-35ms task delegation router replacing LLM managers in hierarchical crews.
+* **`LayaCrewRouter`**: task delegation router replacing LLM managers in hierarchical crews.
 * **`LayaTaskGuard`**: Pre-execution task guardrail screening prompts and instructions for jailbreaks, injections, and policy violations.
 
-Both take core's per-call decision controls -- the two token budgets (`max_len`, `head_max_len`), the language and abstention controls (`lang`, `min_confidence`), the five prediction-hook arguments (`hooks`, `on_predict_start`, `on_predict_end`, `hooks_raise`, `hooks_timeout`) and the two routing hints (`task`, `lang_guess`) -- see [Per-call decision controls](#5-per-call-decision-controls).
+Both take core's per-call decision controls -- the input token budget (`max_len`), the language and abstention controls (`lang`, `min_confidence`), the five prediction-hook arguments (`hooks`, `on_predict_start`, `on_predict_end`, `hooks_raise`, `hooks_timeout`) and the two routing hints (`task`, `lang_guess`) -- see [Per-call decision controls](#5-per-call-decision-controls).
 
-Supports both **local in-process inference** (`Agent` or `Router`) and **remote HTTP inference** against your own `laya-serve` instance without requiring PyTorch on edge clients.
+Supports both **local in-process inference** (`Agent` or `Router`) and **remote HTTP inference** against your own `laya-serve` instance with weights hosted by the service.
 
 ---
 
 ## Installation
 
 ```bash
-pip install "laya[crewai]"
+python -m pip install -e '.[multimodal,crewai]'
 ```
 
 ---
 
-## 1. Sub-35ms Task Delegation in Hierarchical Crews
+## 1. Task Delegation in Hierarchical Crews
 
-In hierarchical CrewAI workflows, a manager agent decides which worker agent should execute each incoming task. Autoregressive LLMs take 2,000–4,000 ms generating text just to make this delegation choice. `LayaCrewRouter` evaluates task requirements against agent roles and goals in **~33 ms** with zero token generation cost:
+In hierarchical CrewAI workflows, a manager agent decides which worker agent should execute each incoming task. Autoregressive LLMs take 2,000–4,000 ms generating text just to make this delegation choice. `LayaCrewRouter` evaluates task requirements against agent roles and goals with zero token generation cost:
 
 ```python
 from crewai import Agent, Crew, Process, Task
@@ -46,7 +46,7 @@ writer = Agent(
 
 agents = [analyst, architect, writer]
 
-# Initialize sub-35ms router with confidence fallback
+# Initialize router with confidence fallback
 router = LayaCrewRouter(
     confidence_threshold=0.80,   # If confidence < 0.80, delegate to fallback agent
     fallback_agent_index=0,
@@ -57,7 +57,7 @@ task = Task(
     expected_output="A bulleted summary of gross margin percentages compared to prior quarter.",
 )
 
-# Route and assign agent in ~33ms:
+# Route and assign agent:
 decision = router.route(task, agents)
 print(f"Delegated to: {decision.role} (Confidence: {decision.confidence:.3f})")
 
@@ -107,13 +107,9 @@ for task in (safe_task, adversarial_task):
 - **Automatic Fallback:** Specify `fallback_agent_index` to route ambiguous tasks to a human supervisor or general lead agent.
 - **Strict Guarding:** Set `raise_on_low_confidence=True` to raise `LayaLowConfidenceError` when a task cannot be matched to an agent role with sufficient confidence.
 
-`answer_confidence` is the quantity temperature scaling fits and the one every calibration figure
-in the repository is computed on, which is why the threshold reads it rather than the entropy
-`confidence`. It is not calibrated as shipped: `laya-multilingual` ships no fitted temperatures at
-all (`temperature: [1.0, 1.0, 1.0]`, empty `temperature_by_options`), and english's `choice:11+` is
-refused by the loader's own clamp with a warning that says to treat it as uncalibrated. Fit and
-validate any threshold on held-out data at the option counts your workload uses -- see the
-README's [Calibration](https://github.com/NandhaKishorM/laya#calibration) section.
+Use `answer_confidence` for thresholding. Fit and validate the threshold with held-out
+decisions at the option counts you expect in production.
+[Native calibration](multimodal.md#calibration-and-evaluation)
 
 ---
 
@@ -144,48 +140,7 @@ token budgets (`max_len`, `head_max_len`), the language and abstention controls 
 (`task`, `lang_guess`). They are per instance, so a crew with a large roster can be given room while
 the rest of the pipeline keeps the checkpoint's defaults.
 
-A delegation choice shares the checkpoint's *option* budget -- `head_max_len`, 192 tokens on `laya`
--- and every candidate contributes its role and goal, so past roughly 20 agents the later goals
-start reaching the model as the same truncated text.
-
-```python
-router = LayaCrewRouter(
-    confidence_threshold=0.80,
-    max_len=1024,          # total window
-    head_max_len=512,      # tokens shared by the roster
-)
-
-decision = router.route(task, agents)   # agents: 59 candidates
-```
-
-Measured with `laya` on Apple silicon, one forward pass per task, scored on the delegated agent,
-against a 59-agent roster built from the MASSIVE en intent labels (role only, goal left empty) with
-one utterance per label, so ground truth is exact. Each cell is how many of the 59 tasks were given
-to their own agent; both repeats gave the same count.
-
-| 59-agent roster | Default budget | `max_len=1024, head_max_len=384` | `…, head_max_len=512` |
-|---|---|---|---|
-| Tasks on their own agent | 2/59 | 7/59 | 16/59 |
-| Median ms per task | 146 | 190 | 265 |
-
-Before this, the same run could not be made at all: `LayaCrewRouter.__init__() got an unexpected
-keyword argument 'max_len'`.
-
-Absolute accuracy is not the claim here -- the checkpoint is not a MASSIVE classifier and 59 similar
-labels are a stress shape. The claim is reachability and price: a roster the default budget collapses
-to near-nothing is readable from a crew, and at this size the wider window costs little time. Note
-the middle row is 7/59 where the identical criteria sent straight to `Router.predict` scored 8/59;
-only the `instructions` sentence differed, which is the expected sensitivity of a choice question to
-its own wording. With fewer than about 20 candidates the roles already fit and widening can move
-answers the wrong way, which is why both budgets are opt-in per instance. See the [LangChain
-integration](langchain.md#7-widening-the-token-budget-for-many-options) for that measured cliff.
-
-**Hooks run on the local path only.** A router or guard with a `base_url` and `hooks=[...]` raises
-`ValueError` rather than reporting a success whose hook never ran -- a hook is a Python callable that
-executes inside `predict`, and no wire format carries it. Install hooks in the process that runs
-inference. The two budgets, the language and abstention controls and the two routing hints all
-travel to a remote node, in the request body, up to its `LAYA_MAX_TOKEN_BUDGET` ceiling; a larger
-value comes back as a 422.
+Set `max_len` to size the full prompt, including the state, instructions and option labels.
 
 ### Language and abstention
 
@@ -212,26 +167,6 @@ router = LayaCrewRouter(
 
 ### Which checkpoint answers
 
-**The two routing hints choose the checkpoint that decides.** `task="typed-decisions"` pins the
-workflow rather than waiting for auto task detection to recognise the question ids, and `lang_guess`
-takes a language code -- or a callable of the state being screened -- from something that already
-knows it, consulted after an explicit `lang` and before core's own script detection; any non-English
-code routes to the multilingual checkpoint. One naming trap, since both are on the same call:
-`route(task, agents)` delegates a CrewAI *task*, while `task=` is core's selector and takes a
-workflow name such as `"typed-decisions"` -- it does not say which CrewAI task is being delegated.
-
-```python
-guard = LayaTaskGuard(
-    questions=screening_questions,
-    lang_guess="de",           # this crew's tickets arrive in German
-)
-```
-
-A node built on an `Agent` (`agent=Agent(...)`) reads neither, because an `Agent` has no routing step
-to read them in -- it answers on the checkpoint it was built with. The node stores the hint, and its
-first call raises `ValueError` naming the argument before `predict` is reached rather than taking the
-call and dropping it. A callable `lang_guess` on a `base_url` node raises before the request goes out,
-rather than coming back as serve's 422 after it. The same rule lives in
-`laya.integrations._controls`, which the LangChain and LlamaIndex wrappers import; see the [LangChain
-integration](langchain.md#9-which-checkpoint-answers) for the precedence, the measured count of
-German queries detection leaves on the English checkpoint, and the recorded before.
+A native `Router` sends requests to the configured checkpoint. Set `model` or `task` to
+select a registered name. A direct `Agent` uses its loaded checkpoint. For HTTP calls,
+supply language hints as strings. [Routing](routing.md)

@@ -211,10 +211,9 @@ for lang, spec in LANGUAGES.items():
     check("lang/%s suppressed slot 0 gives the English value" % lang,
           r["metric"], round((-5 / 3 - 1.875 - 2.0) / 3, 4))
 
-# Routing only, no weights: the non-English states go to the checkpoint #131 is about.
+# All language slices select the same native model, without loading checkpoint weights.
 for lang, spec in LANGUAGES.items():
-    check("route/%s" % lang, routes(spec["states"]),
-          {"english": 10} if lang == "en" else {"multilingual": 10})
+    check("route/%s" % lang, routes(spec["states"]), {"multimodal": len(spec["states"])})
 
 
 # --------------------------------------------------- the default run is unchanged

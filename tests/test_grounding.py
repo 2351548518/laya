@@ -8,7 +8,7 @@ import torch
 
 from laya.agent import Agent
 from laya.grounding import GroundingHead, box_answer, box_iou, grounding_loss, last_valid_state, validate_boxes
-from laya.grounding_train import GroundingTrainConfig
+from laya.train import GroundingTrainConfig
 from laya.multimodal import MultimodalAgent
 
 
@@ -78,7 +78,7 @@ def test_single_box_selects_before_float_cast_with_exact_outputs_and_gradients(d
 
 
 def test_single_box_selection_does_not_average_in_an_untrained_set_task():
-    from laya.grounding_train import checkpoint_score,grounding_retained
+    from laya.train import checkpoint_score,grounding_retained
     metrics={'single_n':10,'set_n':0,'acc_iou50':.8,'set_f1_50':0.}
     assert checkpoint_score(metrics)==.8
     assert grounding_retained(dict(metrics,acc_iou50=.78),metrics,.03)
@@ -87,7 +87,7 @@ def test_single_box_selection_does_not_average_in_an_untrained_set_task():
 
 def test_single_training_rejects_multi_target_rows_before_loading_a_backbone(tmp_path):
     import json
-    from laya.grounding_train import finetune_grounding
+    from laya.train import finetune_grounding
     row={'group':'a','state':{'image':'unused.jpg'},'questions':{'q':{'type':'box','instructions':'the mug'}},
         'grounding':{'task':'multiple','boxes':[[.1,.1,.2,.3],[.5,.5,.7,.8]]}}
     (tmp_path / 'unused.jpg').touch()
@@ -136,10 +136,10 @@ def test_small_prediction_inside_crowd_is_ignored():
     assert out['object_logits'].grad.abs().sum()==0
 
 
-def test_box_contract_is_multimodal_only_and_requires_no_criteria():
+def test_box_contract_requires_no_criteria():
     q = {'type': 'box', 'instructions': 'the red mug'}
     MultimodalAgent._check_question('mug', q)
-    with pytest.raises(ValueError):Agent._check_question('mug', q)
+    Agent._check_question('mug', q)
     with pytest.raises(ValueError, match='criteria'):MultimodalAgent._check_question('mug', dict(q, criteria=[]))
     with pytest.raises(ValueError):MultimodalAgent._check_question('mug', dict(q, instructions=''))
     with pytest.raises(ValueError):MultimodalAgent._check_question('mug', dict(q, instructions={'find':'mug'}))
@@ -212,7 +212,7 @@ def test_batched_geometry_preserves_per_example_gradients(multiple):
 
 
 def test_geometry_microbatch_respects_head_and_token_limits():
-    from laya.grounding_train import _geometry_microbatches
+    from laya.train import _geometry_microbatches
     def prepare(state,question):
         length=state['length']
         return {'input_ids':torch.ones(1,length,dtype=torch.long),'attention_mask':torch.ones(1,length,dtype=torch.long)},None,None
@@ -228,7 +228,7 @@ def test_geometry_microbatch_respects_head_and_token_limits():
 
 
 def test_lora_mode_activates_checkpointed_language_and_freezes_tower_modes():
-    from laya.grounding_train import _grounding_train_mode
+    from laya.train import _grounding_train_mode
     model=torch.nn.Module();model.model=torch.nn.Module()
     model.model.vision_tower=torch.nn.Dropout(.5);model.model.audio_tower=torch.nn.Dropout(.5)
     model.model.language_model=torch.nn.Linear(4,4);model.grounding_head=GroundingHead(4,32,4)
@@ -244,7 +244,7 @@ def test_lora_mode_activates_checkpointed_language_and_freezes_tower_modes():
 
 def test_grounding_rows_cannot_silently_discard_extra_questions(tmp_path):
     import json
-    from laya.grounding_train import load_grounding_rows
+    from laya.train import load_grounding_rows
     path=tmp_path/'rows.jsonl'
     q={'type':'box','instructions':'the mug'}
     path.write_text(json.dumps({'state': '', 'questions':{'a':q,'b':q}})+'\n')
@@ -255,7 +255,7 @@ def test_grounding_rows_cannot_silently_discard_extra_questions(tmp_path):
 @pytest.mark.parametrize("change", ["replace", "remove"])
 def test_indexed_grounding_rows_detect_changed_path(tmp_path, change):
     import json
-    from laya.grounding_train import _IndexedGroundingRows
+    from laya.train import _IndexedGroundingRows
 
     path = tmp_path / "train.jsonl"
     row = {"id": "original", "state": "Packing station",
@@ -279,7 +279,7 @@ def test_indexed_grounding_rows_detect_changed_path(tmp_path, change):
 
 def test_decision_batch_checks_reference_only_when_kl_enabled(monkeypatch):
     from laya import multimodal_train
-    from laya.grounding_train import _decision_batch_loss
+    from laya.train import _decision_batch_loss
 
     calls = []
 
@@ -306,14 +306,14 @@ def test_decision_batch_checks_reference_only_when_kl_enabled(monkeypatch):
 
 
 def test_retention_guard_checks_every_modality():
-    from laya.grounding_train import decision_retained
+    from laya.train import decision_retained
     before={'by_modality':{'text':{'accuracy':.7},'audio':{'accuracy':.7}}}
     after={'by_modality':{'text':{'accuracy':.9},'audio':{'accuracy':.5}}}
     assert not decision_retained(after,before,.05)
 
 
 def test_joint_validation_accepts_hard_and_soft_decision_target_formats():
-    from laya.grounding_train import grounding_metrics
+    from laya.train import grounding_metrics
     from test_multimodal import tiny_agent
 
     agent = tiny_agent()
@@ -329,7 +329,7 @@ def test_joint_validation_accepts_hard_and_soft_decision_target_formats():
 def test_permuted_decision_replay_preserves_training_epoch_order(tmp_path):
     import json
     from test_multimodal import tiny_agent
-    from laya.grounding_train import finetune_grounding
+    from laya.train import finetune_grounding
     agent=tiny_agent();agent.model.grounding_head=GroundingHead(8,32,4)
     agent.model.peft_config = {}  # Metadata retained by merged base models.
     agent.grounding_trained=agent.detection_trained=False

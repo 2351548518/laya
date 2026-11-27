@@ -232,36 +232,27 @@ def embed_fn_from_agent(
     max_length: int = 512,
     batch_size: int = 32,
 ) -> Callable[[Sequence[str]], np.ndarray]:
-    """Mean-pool the checkpoint encoder already loaded on ``agent``.
+    """Mean-pool the input token embeddings of a loaded native checkpoint.
 
-    The callable embeds a list of strings with ``agent.tok`` and ``agent.model.encoder``.
-    It does not run the decision head and does not download weights. A dedicated
-    bi-encoder passed as ``embed_fn`` will usually shortlist better; this helper is
-    for callers who only have the Laya checkpoint in memory.
-
-    Padding positions are excluded from the mean. The encoder's train/eval flag is
-    left as the caller set it (a loaded ``Agent`` is already in eval).
-    Each call uses the current ``agent.device``, including after CPU fallback.
+    The callable shares the native tokenizer and embedding table, without running a backbone
+    forward pass. Supply an external embedding function when contextual embeddings are needed.
     """
     if isinstance(max_length, bool) or not isinstance(max_length, int) or max_length < 1:
         raise ValueError("max_length must be a positive integer, got %r" % (max_length,))
     if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size < 1:
         raise ValueError("batch_size must be a positive integer, got %r" % (batch_size,))
 
-    # The two attributes the docstring names are the only ones here that were never checked: an
-    # agent that is not a loaded checkpoint answered with the interpreter's own AttributeError, the
-    # one leak in this function, while `_call_predict` below refuses the same mistake for the agent
-    # it does use. Checked before `import torch` so a wrong argument does not pay for the import.
     tok = getattr(agent, "tok", None)
-    encoder = getattr(getattr(agent, "model", None), "encoder", None)
-    if tok is None or encoder is None:
-        raise TypeError("agent must provide tok and model.encoder")
+    lookup = getattr(getattr(agent, "model", None), "get_input_embeddings", None)
+    if tok is None or not callable(lookup):
+        raise TypeError("agent must provide a native tokenizer and input embeddings")
+    embeddings = lookup()
 
     import torch
 
     def embed_fn(texts: Sequence[str]) -> np.ndarray:
         rows = ["" if text is None else str(text) for text in texts]
-        hidden = _hidden_size(encoder)
+        hidden = embeddings.weight.shape[-1]
         if not rows:
             return np.zeros((0, hidden), dtype=np.float32)
         device = agent.device
@@ -279,9 +270,7 @@ def embed_fn_from_agent(
             input_ids = encoded["input_ids"].to(device)
             attention_mask = encoded["attention_mask"].to(device)
             with torch.inference_mode():
-                hidden_states = encoder(
-                    input_ids=input_ids, attention_mask=attention_mask
-                ).last_hidden_state
+                hidden_states = embeddings(input_ids)
                 mask = attention_mask.unsqueeze(-1).to(dtype=hidden_states.dtype)
                 pooled = (hidden_states * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1.0)
             parts.append(pooled.float().cpu().numpy())
@@ -550,10 +539,7 @@ def _round_answers(result):
     """The answers mapping of one elimination round, which this module indexes by group number.
 
     ``predict_tournament`` numbers its own group questions, so the keys it indexes here are keys the
-    caller never wrote. A group a reply leaves out still raises the plain ``KeyError`` for its
-    number: ``laya-java/fixtures/tournament.json`` records that as the cross-language contract, for
-    the Java and TypeScript ports read the same reply, so naming it here would move three ports
-    rather than one module.
+    caller never wrote. A reply that omits a group raises ``KeyError`` for the group number.
     """
     answers = result.get("answers")
     if not isinstance(answers, dict):
@@ -561,10 +547,3 @@ def _round_answers(result):
             "predict/system_one must return an answers dict, got %s" % type(answers).__name__
         )
     return answers
-
-
-def _hidden_size(encoder) -> int:
-    size = getattr(getattr(encoder, "config", None), "hidden_size", None)
-    if isinstance(size, bool) or not isinstance(size, int) or size < 1:
-        return 0
-    return size

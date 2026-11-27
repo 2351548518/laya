@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-from laya.grounding_train import GroundingTrainConfig
+from laya.train import GroundingTrainConfig
 from scripts.multimodal import evaluate
 from scripts.multimodal.calibrate import calibration_passes
 from scripts.multimodal.train import validate_visual_training
@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_core_training_and_cli_have_no_research_dependencies():
     paths = list((ROOT / 'scripts/multimodal').glob('*.py'))
     paths += [ROOT / 'laya' / name for name in ['multimodal.py', 'multimodal_train.py',
-        'grounding.py', 'grounding_train.py', 'multimodal_distributed.py', 'multimodal_objectives.py',
+        'grounding.py', 'train.py', 'train_cli.py', 'multimodal_distributed.py', 'multimodal_objectives.py',
         'multimodal_readout.py', 'multimodal_calibration.py']]
     for path in paths:
         for node in ast.walk(ast.parse(path.read_text())):
@@ -221,7 +221,7 @@ def test_calibration_rejects_an_aggregate_gain_hiding_a_modality_regression():
 
 
 def test_request_shaped_dataset_preserves_media_labels_and_option_order(tmp_path):
-    from laya.grounding_train import load_grounding_rows
+    from laya.train import load_grounding_rows
     from laya.multimodal_data import can_shuffle_choice, record_input
     from scripts.multimodal.prepare_dataset import main
     from test_multimodal import tiny_agent
@@ -273,3 +273,102 @@ def test_request_shaped_dataset_checks_file_parts(tmp_path, assets, files, error
            "media_files": files, "expected": {"x": True}}
     with pytest.raises(ValueError, match=error):
         normalize_record(row, tmp_path, verify_media=False)
+
+
+def test_swanlab_mirror_preserves_existing_steps_and_separates_resumes(tmp_path):
+    from types import SimpleNamespace
+    from scripts.multimodal.monitor_swanlab import mirror
+
+    (tmp_path / "sft").mkdir()
+    (tmp_path / "launch.json").write_text(json.dumps({"schedule": {"sft": 20}}))
+    (tmp_path / "sft-config.json").write_text(json.dumps({"global_batch_size": 64, "video_cache_dir": "/cache"}))
+    dev = {"step": 10, "single_n": 20, "acc_iou50": .5,
+           "decisions": {"overall": {"n": 12, "accuracy": .8, "ece": None},
+                         "by_modality": {"text": {"n": 6, "accuracy": .9}, "image": {"n": 6, "accuracy": .7}}}}
+    evaluation = "GROUNDING DEV " + json.dumps(dev)
+    (tmp_path / "sft.log").write_text("\n".join([
+        "grounding step=1 loss=1.00000 elapsed=20.0s ranks=4",
+        "grounding step=10 loss=0.75000 elapsed=200.0s ranks=4",
+        "grounding step=10 loss=0.76000 elapsed=201.0s ranks=4",
+        evaluation, "GROUNDING DEV {", "Resumed joint training at optimizer step 5",
+        "grounding step=6 loss=0.81000 elapsed=20.0s ranks=4", evaluation,
+    ]) + "\n")
+    runs = []
+
+    def init(**options):
+        points = []
+        runs.append((options, points))
+        return SimpleNamespace(log=lambda data, step: points.append((step, data)), finish=lambda **kwargs: None)
+
+    fake = SimpleNamespace(init=init, Settings=lambda **kwargs: kwargs)
+    mirror(fake, tmp_path, "sft", tmp_path / "swanlog", False, None, mode="online", project="tracking")
+    (options, points), (resumed_options, resumed_points) = runs
+    assert options["mode"] == "online" and options["public"] is False
+    assert "video_cache_dir" not in options["config"]
+    assert [step for step, _ in points] == [1, 10, 10]
+    assert points[1][1]["train/progress_pct"] == 50.
+    assert points[1][1]["train/examples_per_second"] == pytest.approx(3.2)
+    assert points[2][1]["dev/joint/macro_harmonic_accuracy"] == pytest.approx(2 * .8 * .5 / 1.3)
+    assert "dev/decision/ece" not in points[2][1]
+    assert resumed_options["name"].endswith("-resume-5")
+    assert [step for step, _ in resumed_points] == [6, 10]
+    assert "train/seconds_per_step_500" not in resumed_points[0][1]
+
+
+def test_swanlab_follow_waits_for_a_complete_training_line(tmp_path, monkeypatch):
+    from scripts.multimodal import monitor_swanlab
+
+    log = tmp_path / "sft.log"
+    report = tmp_path / "report.json"
+    log.write_bytes(b"grounding step=10 loss=0.7")
+
+    def append(_seconds):
+        with log.open("ab") as stream:
+            stream.write(b"5 elapsed=200.0s ranks=4\n")
+        report.write_text('{"status":"complete"}')
+
+    monkeypatch.setattr(monitor_swanlab.time, "sleep", append)
+    assert list(monitor_swanlab.log_lines(log, True, report)) == ["grounding step=10 loss=0.75 elapsed=200.0s ranks=4"]
+
+
+def test_native_swanlab_reporter_logs_metrics_and_isolates_sdk_failure(tmp_path, monkeypatch, caplog):
+    from types import SimpleNamespace
+    from laya._swanlab import SwanLabReporter
+
+    runs = []
+
+    def init(**options):
+        points, states = [], []
+        runs.append((options, points, states))
+
+        def log(data, step):
+            if step == 12:
+                raise OSError("simulated transport failure")
+            points.append((step, data))
+
+        return SimpleNamespace(log=log, finish=lambda state: states.append(state))
+
+    monkeypatch.setitem(sys.modules, "swanlab", SimpleNamespace(init=init, Settings=lambda **values: values))
+    config = dict(starting_step=0, planned_steps=12, world_size=4, global_batch_size=64)
+    baseline = dict(single_n=2, acc_iou50=.5)
+    output = tmp_path / "training/sft"
+    with SwanLabReporter(output, mode="online", project="training") as reporter:
+        reporter.start(config, baseline)
+        reporter.training_step(1, 1.5, 20., .8, 64, {"head": .0002})
+        reporter.evaluation(1, baseline, score=.55, selected=True, final=True)
+    options, points, states = runs[0]
+    assert options["log_dir"] == str(output / "swanlog")
+    assert options["on_online_error"] == "offline" and options["public"] is False
+    assert points[0] == (0, {"dev/box/single_n": 2, "dev/box/acc_iou50": .5})
+    assert points[1][1]["lr/head"] == .0002 and points[1][1]["train/gradient_norm"] == .8
+    assert points[2][1]["final/joint/selection_score"] == .55 and states == ["success"]
+
+    with SwanLabReporter(output, mode="online", project="training") as reporter:
+        reporter.start(dict(config, starting_step=10), baseline)
+        reporter.training_step(11, .8, 20., .5, 64, {"head": .0001})
+        reporter.training_step(12, .7, 40., .4, 64, {"head": .0001})
+        reporter.evaluation(12, baseline, score=.55, selected=False, final=True)
+    options, points, states = runs[1]
+    assert options["group"] == "training" and options["name"].endswith("-resume-10")
+    assert [step for step, _ in points] == [11] and states == ["crashed"]
+    assert "SwanLab logging failed (OSError)" in caplog.text

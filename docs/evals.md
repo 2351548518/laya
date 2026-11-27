@@ -1,7 +1,7 @@
-# Classic text evaluation harness
+# Text decision evaluation
 
 For native multimodal accuracy and single-box geometry, use the local checkpoint evaluator.
-[Native benchmarks](benchmarks.md#native-multimodal-checkpoints)
+[Native benchmarks](benchmarks.md)
 
 `laya.evals` turns a labelled dataset into a repeatable score, and a baseline into a
 pass/fail gate, so a quality change is a reviewable diff instead of a hand-check.
@@ -17,7 +17,7 @@ takes its normal load time.
 laya-evals validate research/evals/fixture.jsonl
 
 # score a labelled set on one checkpoint, with thresholds and a baseline
-laya-evals run data.jsonl --model english --device cpu \
+laya-evals run data.jsonl --model multimodal --device cpu \
     --min-accuracy 0.8 --max-ece 0.05 --score-within 0.25 --slice language \
     --json report.json --markdown report.md
 
@@ -106,9 +106,9 @@ with open("repeat.json", encoding="utf-8") as handle:
 revision = "YOUR_CHECKPOINT_COMMIT"
 with laya.Router(device="cpu", revision=revision) as runner:
     report = evaluate_agreement(
-        runner, reference, repeat, model="english",
+        runner, reference, repeat, model="multimodal",
         student_provenance={
-            "model": "convaiinnovations/laya", "revision": revision,
+            "model": "ZeeoRe/jev-multimodal-qwen3.5-4b", "revision": revision,
             "settings": {"device": "cpu"},
         },
     )
@@ -157,7 +157,7 @@ from laya.evals import Dataset
 from laya.evals_shortlist import evaluate_shortlist
 from laya.shortlist import embed_fn_from_agent
 
-agent = laya.load("laya")   # the classic encoder: the shortlist reads its embeddings
+agent = laya.load()  # use the native checkpoint input embeddings
 dataset_path = "intents.jsonl"
 dataset = Dataset.from_jsonl(dataset_path)
 report = evaluate_shortlist(
@@ -198,7 +198,7 @@ import laya
 from laya.evals import Dataset
 from laya.evals_tournament import evaluate_tournament
 
-agent = laya.load("laya")   # the classic encoder
+agent = laya.load()
 dataset_path = "intents.jsonl"
 report = evaluate_tournament(
     agent, Dataset.from_jsonl(dataset_path), group_size=16,
@@ -228,49 +228,11 @@ size once on held-out data. The runtime's final probabilities and confidence are
 over finalists, not over the original labels. The metadata identifies whether
 elimination lost the gold label, but not which round lost it.
 
-## Evaluating an ONNX export
+## Native checkpoint
 
-`run --onnx PATH` scores an exported ONNX model through `ONNXAgent` instead of the torch
-Router, so an ONNX deployment (including an INT8 copy from `scripts/export_onnx.py --quantize`)
-gets gated by the same thresholds and baselines as the torch path:
-
-```bash
-python scripts/export_onnx.py --model convaiinnovations/laya --output laya.onnx --quantize
-laya-evals run data.jsonl --onnx laya.int8.onnx --max-ece 0.05
-```
-
-The export **verifies itself before it exits**: it runs the graph it just wrote in ONNX Runtime at
-batch 1, 2 and 3 and compares against PyTorch, and `scripts/export_onnx.py --quantize` does the same
-for the INT8 copy at a looser tolerance. A graph that cannot serve more than one question fails the
-export instead of being written and deployed. That needs `onnxruntime` (`pip install laya[onnx]`);
-`scripts/export_onnx.py --no-verify` skips it if you only have the exporter installed.
-
-Marker width is dynamic in the exported graph for two or more markers (a graph traced at 2 runs at
-3, 4, 5 and 8), but exactly one marker is baked out by a Python branch in the model, so a
-one-criterion `score` question is not servable from ONNX when every question in the batch has one
-criterion; use the torch path for those. There is no need to re-export per criteria count.
-
-`--model` names the checkpoint the export came from — a Hub id or local path, not a Router
-short name like `english`, since there is no Router on this path (default
-`convaiinnovations/laya`). Its config and tokenizer are loaded from there. The agent serves one checkpoint, so a dataset row
-whose `model` field names a different one fails with a clear error rather than being silently
-answered by the wrong model; `--device` does not apply. `--batch-size` uses the agent's batch
-API when it has one and falls back to one call per state otherwise; `--sort-by-length` is forwarded
-to that batch API; the per-state fallback has no group to reorder. Pass `--calibration PATH`
-to load a fitted calibration map onto `ONNXAgent`, so calibration gates such as `--max-ece`
-evaluate against calibrated probabilities. The report's `config` block records the `onnx` path
-and `calibration` path (when set).
-
-Measured on `research/evals/fixture.jsonl` (12 labelled rows, English checkpoint, CPU):
-
-| runner | choice_acc | noul_acc | score_mae | ece | mean_conf | p50 ms |
-|---|---|---|---|---|---|---|
-| torch Router | 0.75 | 1.00 | 1.3418 | 0.1596 | 0.7304 | 116.8 |
-| `--onnx` fp32 | 0.75 | 1.00 | 1.3418 | 0.1596 | 0.7304 | 66.3 |
-| `--onnx` int8 | 0.75 | 1.00 | 1.3512 | 0.1658 | 0.7304 | 46.3 |
-
-The fp32 export reproduces the torch numbers exactly, and the quantized copy moves `score_mae`
-by 0.009 and `ece` by 0.006 — the kind of drift `compare --tolerance` is meant to gate.
+Use `laya-evals run bench.jsonl --checkpoint /path/to/checkpoint` for labelled text decisions.
+For native media and single-box labels, use `scripts/multimodal/evaluate.py`.
+[Native evaluation](multimodal.md#calibration-and-evaluation)
 
 ## Dataset format
 
@@ -302,7 +264,7 @@ Each metric is computed per answer where it applies and aggregated over the data
 | `choice_accuracy` | `choice` | fraction whose chosen label matches |
 | `noul_accuracy` | `noul` | fraction whose boolean (probability >= 0.5) matches |
 | `score_mae` | `score` | mean absolute error |
-| `score_within_<tol>` | `score` | fraction within an absolute tolerance |
+| `score_within_<tol>` | `score` | fraction within the absolute tolerance supplied by `--score-within` |
 | `ece` | any answer with a confidence and a known label | expected calibration error, 15 bins, computed on the column `laya.evals._answer_confidence` reads -- `answer["answer_confidence"]` where the answer carries it, and a fallback where it does not; see [which confidence a metric reads](#which-confidence-a-metric-reads) |
 | `brier` | any answer with a confidence and a known label | Brier score of confidence as P(correct), `mean((confidence - correct)**2)`; lower is better |
 | `aurc` | any answer with a confidence and a known label | area under the risk--coverage curve: one risk value per distinct confidence level, each weighted by the answers that level spans; lower is better, and rewards a confidence that *ranks* right from wrong rather than just being calibrated |
@@ -318,30 +280,25 @@ of all five of those metrics -- `ece` included, because `ece`, `brier`, `aurc` a
 therefore publishes no `ece` however confident its answers are, and `--max-ece` over it fails with
 `metric 'ece' is not in the report` rather than passing on a number that was never computed.
 
-### Which confidence a metric reads
+## Which confidence a metric reads
 
 Every row above that takes a confidence (`ece`, `brier`, `aurc`, both `selective_accuracy@*`,
 `mean_confidence`) gets its column from `laya.evals._answer_confidence`, which prefers
 `answer["answer_confidence"]` -- the probability of the answer being reported, the quantity temperature
-scaling fits. It is not a claim that the number is right as shipped: both base checkpoints are
-over-confident and `laya-multilingual` ships no fitted temperatures at all -- see the README's
-[Calibration](https://github.com/NandhaKishorM/laya#calibration) -- which is what `ece` measures
-rather than assumes.
+scaling fits. Predictions are over-confident when their confidence exceeds observed accuracy.
+Use ECE and the coverage metrics to check confidence on a held-out split.
+[Native calibration](multimodal.md#calibration-and-evaluation)
 
 An answer that carries no `answer_confidence` falls through, in order, to `confidence`, then
-`max(p, 1 - p)` for a `noul`, then `max(probabilities)`. Those are different quantities. On `choice`
-and `score` the `confidence` field is normalized entropy, which moves with the option count (#394)
-rather than with how right the answer is; `max(probabilities)` is the mass on the top option, equal to
-the reported answer's probability only when the reported answer is the argmax.
+`max(p, 1 - p)` for a `noul`, then `max(probabilities)`. For `choice` and `score`,
+Laya's extended `confidence` is based on normalized entropy. A single System One response uses
+the TypeSafe formulas. `max(probabilities)` agrees with the reported answer's probability when
+the reported answer is the argmax.
 
-The shape that actually arrives without the field is the strict Jev wire contract: `LAYA_JEV_STRICT`
-drops `answer_confidence` from every answer (`laya/serve.py::_project_jev_strict`, and the flag's row
-in [the HTTP API page](http-api.md)), so a report run over recorded strict responses calibrates the
-entropy number. Measured on three labelled rows -- `choice` carrying `answer_confidence` 0.95 against
-an entropy `confidence` of 0.7887, `score` 0.90 against 0.6410, `noul` 0.87 -- the same dataset scores
-`mean_confidence` 0.9067 and `ece` 0.0900 over the full payloads and 0.7666 and 0.1707 over the strict
-projection. Two reports are comparable only when their answers carry the same field;
-`tests/test_evals.py` pins both paths so a change to that fallback order has to be made deliberately.
+`LAYA_JEV_STRICT` omits `answer_confidence`. The legacy strict batch projection retains the
+backbone's confidence values. In the three-row regression fixture, that projection changes
+`mean_confidence` from 0.9067 to 0.7666 and `ece` from 0.0900 to 0.1707. Use the same response
+format in every run of a calibration comparison. [HTTP confidence fields](http-api.md#confidence-three-numbers-not-interchangeable)
 
 ### Coverage cuts and ties
 
@@ -435,7 +392,7 @@ raising `TypeError` halfway through a long run.
 ### The abstention gate at a threshold
 
 `--min-confidence T` forwards core's opt-in abstention threshold (#361) to every call the run
-makes, so `Router` and `ONNXAgent` mark answers whose `answer_confidence` falls below `T` with
+makes, so `Router` and `MultimodalAgent` mark answers whose `answer_confidence` falls below `T` with
 `low_confidence: True` and `abstention: "abstained"` before the harness sees them. The gate is a
 *reporting* control, not a scoring one: `apply_confidence_gate` leaves
 `answer["choice"] / ["noul"] / ["score"]` as the raw argmax and `_aggregate` reads only those
@@ -521,7 +478,6 @@ is reviewable on its own:
 | `coverage_metric_definition` | which definition of `aurc` / `selective_accuracy@*` produced this report (see [coverage cuts](#coverage-cuts-and-ties)). A relative gate rule on either refuses a baseline recorded under a different one, rather than subtracting numbers that do not mean the same thing |
 | `thresholds` | the gate this run applied: `min`, `max` and `baseline_tolerance` |
 | `gate_policy` | the optional slice gate policy applied by `run --gate-policy` |
-| `revisions` | the commit each checkpoint that answered was loaded from: a torch run reports one entry per checkpoint it loaded, an `--onnx` run one entry keyed by the `--model` value that names the export's source, and a checkpoint given as a local directory is recorded as `null` (see [below](#baseline-and-ci-gate)) |
 
 `dataset` is a path, and a path is not an identity: a dataset can be edited in place, moved, or
 refetched under the same name, and a CI cache can hand two runs the same filename and different
@@ -551,7 +507,7 @@ use has one.
 `option_order` is the one field hashed conditionally, and only when a row names it. It is a
 caller-supplied key: `laya/mcp/server.py` advertises it, `Agent._check_question` and
 `laya/mcp/tools.py::_check_option_order` validate it as a permutation of the option indices, and
-`laya/common.py::build_sequence` and `unpermute_probs` read it to place each answer slot, so a row
+`native processor` and `unpermute_probs` read it to place each answer slot, so a row
 that permutes its options asks a different question and two such datasets must not share a
 fingerprint. `research/eval/metamorphic.py::permute_options` measures the same sensitivity from the
 other side -- it exists to shuffle the option list and check that the answers follow. Hashing an
@@ -590,39 +546,14 @@ A key missing on either side is *unknown*, not a conflict, so every report writt
 identity existed keeps comparing exactly as it did. That includes the scheduled gate's baseline
 below, which comes from `research/eval/` and has no `config.schema` at all.
 
-Two CI surfaces use this:
+The CI job runs the metric, parsing and comparison tests without model weights. The native
+evaluation workflow also runs the multimodal, agreement and tournament tests on release or
+manual dispatch.
 
-- a weight-free job in `.github/workflows/ci.yml` runs `tests/test_evals.py` and
-  `tests/test_evals_api.py`, so metric math, dataset parsing and the CLI are covered on every
-  PR without downloading a checkpoint;
-- `.github/workflows/evals.yml` runs weekly, before a release and on demand: it evaluates the
-  English checkpoint on the MASSIVE English suite and compares to
-  `research/results/eval_english_51_languages.json` with the tolerances in
-  `research/evals/thresholds.json`. It uploads the report as an artifact and does not block a
-  PR.
-
-The harness is deterministic for a fixed checkpoint revision, so a report is reproducible.
-`run` records the dataset, model and device, plus the [timing](#batching-and-timing) facts of the
-run, in the report's `config` block, and `revisions`: the commit each checkpoint that answered was
-actually loaded from. `--revision <SHA>` pins that commit for every checkpoint the run loads, and
-`--revision english=<SHA>` pins one checkpoint — which is the form an auto-routing run
-wants, since the three checkpoints are three repositories and one commit cannot exist in all of
-them. Repeat a pin to say the same commit twice; two different commits for one checkpoint — however
-it is spelled, so `en=` beside `english=` counts — exit 2 instead of loading whichever came last,
-because `revisions` reports the commit that ANSWERED and a dropped pin would leave no trace. The
-same refusal covers two different bare commits.
-Left unpinned, the run takes the checkpoint's default branch and the report still says which
-commit answered, so a baseline drift can be attributed to the weights or to the code.
-`laya/revisions.py` publishes reviewed commit SHAs in `PINNED_REVISIONS` for callers who want to
-opt in. With `--onnx`, only a bare `--revision <SHA>` applies, to the config and tokenizer download.
-
-Both routes write the `revisions` block. A torch run reports one entry per checkpoint the Router
-loaded; an `--onnx` run answers from one export, so it reports a single entry keyed by the `--model`
-value that names that export's source — which is an assumption when `--model` is left out, since the
-key then reads the default `convaiinnovations/laya` while `model` itself is `null`. Neither route can
-name a commit for a checkpoint given as a local directory: `Agent.revision` and `ONNXAgent.revision`
-both stay `None` when nothing was downloaded (`laya/agent.py:574`, `laya/onnx_agent.py:107`), so that
-entry is recorded as `null` rather than dropped.
+The JSON report records the dataset, device and resolved checkpoint `revisions` in `config`.
+Use `--revision SHA` for a common Hub revision or `--revision multimodal=SHA` for a named
+checkpoint. A local directory without Hub snapshot metadata carries a null revision. Keep
+the evaluation data and checkpoint digest with a reported result.
 
 ## Adding the real labelled set
 
@@ -640,11 +571,11 @@ does not require torch.
 laya-evals evidence --checkpoint ./my-checkpoint [--report report.json]
 ```
 
-A checkpoint directory must contain `rl_agent_config.json`. Calibration evidence is derived from
+For a native checkpoint, the command reads `multimodal_config.json`. Calibration evidence is derived from
 the persisted `training.laya_train_calibration` block: a legacy checkpoint with no training
 metadata is `UNKNOWN`; an entry whose `items` is not an integer count — a missing key, a string, a
 JSON `true` — is `UNKNOWN` rather than a count of one; a question type with zero items is `MISSING`;
-a type whose entry records any upstream `issues` text (not fitted, below `MIN_TYPE_N`/`CALIB_WARN_N`,
+a type whose entry records any upstream `issues` text (not fitted, too few calibration items,
 clamped, unchanged fit) is `INSUFFICIENT`; a clean fit is `PRESENT`. The helper trusts the persisted
 `issues` written by #933 instead of keeping a second numeric threshold source.
 

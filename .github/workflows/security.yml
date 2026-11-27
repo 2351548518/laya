@@ -56,7 +56,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install pip-audit
-      - name: Audit shipped dependencies (core + [serve], blocking)
+      - name: Audit shipped dependencies (core + [serve,multimodal], blocking)
         run: |
           # Audit what the package DECLARES, not a local install. Installing torch from the
           # PyTorch CPU index yields a local version (2.14.0+cpu) that does not exist on PyPI,
@@ -75,7 +75,8 @@ jobs:
           with open("pyproject.toml", "rb") as fh:
               project = tomllib.load(fh)["project"]
           specs = list(project.get("dependencies", []))
-          specs.extend(project.get("optional-dependencies", {}).get("serve", []))
+          for extra in ("serve", "multimodal"):
+              specs.extend(project.get("optional-dependencies", {}).get(extra, []))
           seen = set()
           for spec in specs:
               if spec not in seen:
@@ -104,7 +105,7 @@ jobs:
               project = tomllib.load(fh)["project"]
           seen = set()
           for extra, specs in project.get("optional-dependencies", {}).items():
-              if extra == "serve":
+              if extra in {"serve", "multimodal"}:
                   continue          # already in the blocking audit above
               for spec in specs:
                   if spec not in seen:          # `langchain` and `langgraph` repeat two of these
@@ -129,15 +130,6 @@ jobs:
             echo "::warning::advisories in optional-integration dependencies: ${ids% } -- visible here, not blocking PRs (see #645)"
           fi
 
-  # Java as well as Python. This job named `python` only, so `laya-java` -- ~35,000 lines that
-  # compile to a jar and publish to Maven Central -- had no taint analysis over it at all.
-  # CodeQL is the only free engine within reach that does real interprocedural dataflow, which is
-  # what finds a sink several calls away from its source; the pattern scanners in `java.yml`
-  # cannot see that.
-  #
-  # A matrix rather than `languages: python, java-kotlin` in one cell: the Java cell needs a JDK
-  # and a build (the Go cell a toolchain and a build), and keeping them separate means a Java build failure cannot take the Python
-  # analysis down with it.
   codeql:
     name: CodeQL (${{ matrix.language }})
     runs-on: ubuntu-latest
@@ -149,44 +141,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # `javascript-typescript` needs no build step, so adding the TypeScript SDK costs one
-        # matrix cell and no build risk. `csharp` is NOT here: CodeQL would have to run
-        # `dotnet build` for it, and a build this change cannot verify locally would turn a
-        # scanner into a broken required check. laya-dotnet is covered by gitleaks only today;
-        # adding it needs whoever owns that build to confirm autobuild works. `go` builds the
-        # modules in laya-go/ and its nested laya-go/onnx/, not the repo root: autobuild finds
-        # both go.mod files itself and builds the onnx module with cgo (checked with the CodeQL
-        # CLI 2.27.1: "Found 2 go.mod files in: laya-go/go.mod, laya-go/onnx/go.mod", and
-        # onnx/session_cgo.go is in the extracted sources), so no explicit build step is needed.
-        language: [python, java-kotlin, javascript-typescript, go]
+        language: [python, javascript-typescript]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # Only the Java cell compiles anything, so only it needs a JDK -- and the wrapper jar it
-      # would execute is validated first, for the reason `java.yml` gives: it is a binary that
-      # runs at build time and is the one file here a reviewer cannot read.
-      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
-        if: ${{ matrix.language == 'java-kotlin' }}
-        with:
-          distribution: temurin
-          java-version: "17"
-          cache: gradle
-      - uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
-        if: ${{ matrix.language == 'java-kotlin' }}
-      # The Go cell compiles too, so it needs the same pinned toolchain `go.yml` uses and not
-      # whatever the runner image happens to carry.
-      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
-        if: ${{ matrix.language == 'go' }}
-        with:
-          go-version: "1.27.1"
-          cache: false
       - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           languages: ${{ matrix.language }}
           queries: security-extended
-      # Python needs no build step; Java and Go do, and autobuild finds the Gradle build and
-      # laya-go/go.mod itself.
-      - uses: github/codeql-action/autobuild@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
-        if: ${{ matrix.language == 'java-kotlin' || matrix.language == 'go' }}
       - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
 
   supply_chain:
@@ -195,16 +156,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Weights must load through safetensors, never pickle
-        run: |
-          # torch.load / pickle execute arbitrary code during deserialization. Laya loads
-          # checkpoints from the Hub, so a pickle path would be remote code execution on
-          # `laya.load("someone/their-model")`.
-          if grep -rnE --include='*.py' "\bpickle\b|torch\.load\(|joblib\.load\(|yaml\.load\(" laya/ laya-ts/scripts/; then
-            echo "::error::unsafe deserialization in the shipped package - use safetensors"
-            exit 1
-          fi
-          echo "OK: no unsafe deserialization in laya/ or laya-ts/scripts/"
+      - name: Validate model and optimizer deserialization
+        run: python tests/test_checkpoint_safety.py
       - name: No shell-out or dynamic exec in the shipped package
         run: |
           # laya/video.py is the one sanctioned shell-out: it runs the ffmpeg and ffprobe binaries
@@ -220,5 +173,3 @@ jobs:
             exit 1
           fi
           echo "OK: no os.system/subprocess/eval/exec in laya/ outside the ffmpeg calls in laya/video.py"
-      - name: ONNX exporter requires safetensors weights
-        run: python tests/test_export_onnx_safety.py

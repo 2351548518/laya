@@ -139,21 +139,23 @@ it there: the soft targets (0.94 and 0.98 here; with 0.90 the ceiling was 0.85) 
 temperature, which came out above 1 in every run (1.18 to 1.37). A threshold moves the trade-off;
 it does not remove the wrong actions.
 
-## The training recipe
+## Evaluate a native checkpoint
+
+Set `CHECKPOINT` to a local [native checkpoint](../../../README.md#quickstart).
+The runner evaluates the frozen Spanish decisions with the supplied model and device.
 
 ```bash
-cd research/benchmarks/es_phone_turns/train
-python generate.py          # needs a local Ollama server; cached answers are in raw/
-python build_train.py       # 4,740 cases -> train.jsonl, seeded, no network
-cd ../../../..
-python research/scripts/finetune_single_device.py \
-    --data research/benchmarks/es_phone_turns/train/train.jsonl \
-    --output-dir out/es-phone --device mps --epochs 4
+mkdir -p _local
+python research/benchmarks/es_phone_turns/run.py --model "$CHECKPOINT" --dataset cases \
+  --device cpu --out _local/es-phone-native.json
 ```
 
-Four epochs take about half an hour on an Apple M2 Ultra (`--device mps`). `train.jsonl` is not
-committed: `build_train.py` rebuilds it, byte for byte, from the cached answers in
-[`train/raw/`](train/raw).
+## Historical training data
+
+The earlier text checkpoint used four training epochs. The original trainer is retained in Git.
+To reconstruct its 4,740 training examples, run `python build_train.py` in
+[`train/`](train) using the cached answers in [`train/raw/`](train/raw).
+[Historical trainer](https://github.com/2351548518/laya/blob/21167295a16ec64de8b68999e17c37fb9a5e8706/research/scripts/finetune_single_device.py)
 
 What is in the 4,740 cases:
 

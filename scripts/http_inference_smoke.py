@@ -1,4 +1,4 @@
-"""Qualify one authenticated HTTP inference against an already-running cached server.
+"""Check one authenticated native decision on a running local service.
 
 Run with --help for required provenance and device checks. This command neither starts
 the service nor controls its downloads: configure HF_HUB_OFFLINE=1 on the server first.
@@ -48,6 +48,13 @@ def check_answers(result: Dict[str, Any], questions: Dict[str, Any]) -> None:
         if kind == "noul":
             require(probability(answer.get("noul")), "invalid noul probability")
             continue
+        if kind == "box":
+            box = answer.get("box")
+            require(isinstance(box, dict) and set(box) == {"left", "top", "right", "bottom"}
+                    and all(probability(value) for value in box.values())
+                    and box["left"] < box["right"] and box["top"] < box["bottom"], "invalid box coordinates")
+            require(probability(answer.get("confidence")), "invalid localization confidence")
+            continue
         criteria = question["criteria"]
         keys = set(criteria) if kind == "choice" else {str(i) for i in range(len(criteria))}
         probs = answer.get("probabilities")
@@ -62,7 +69,7 @@ def check_answers(result: Dict[str, Any], questions: Dict[str, Any]) -> None:
             require(isinstance(score, (int, float)) and not isinstance(score, bool)
                     and math.isfinite(score) and 0 <= score <= len(criteria) - 1, "invalid score")
         else:
-            raise SmokeFailure("smoke supports choice, score and noul questions")
+            raise SmokeFailure("unsupported question type")
 
 
 def check_checkpoint(health: Dict[str, Any], checkpoint: str, revision: str, device: str) -> None:
@@ -74,7 +81,9 @@ def check_checkpoint(health: Dict[str, Any], checkpoint: str, revision: str, dev
     devices = health.get("checkpoint_devices")
     fallbacks = health.get("cpu_fallbacks")
     require(all(isinstance(value, dict) for value in (revisions, devices, fallbacks)), "missing checkpoint evidence")
-    require(revisions.get(checkpoint) == revision, "checkpoint revision differs from pin")
+    expected_revision = None if revision == "local" else revision
+    require(checkpoint in revisions and revisions[checkpoint] == expected_revision,
+            "checkpoint revision differs from expectation")
     actual = devices.get(checkpoint)
     require(actual == device or (device == "cuda" and isinstance(actual, str) and actual.startswith("cuda:")),
             "checkpoint device differs from requested device")
@@ -90,15 +99,22 @@ def qualify(args: argparse.Namespace, report: Dict[str, Any]) -> None:
     loopback = parsed.hostname in ("localhost", "127.0.0.1", "::1")
     require(parsed.scheme == "https" or (parsed.scheme == "http" and loopback), "HTTP requires a loopback host")
     require(bool(parsed.hostname), "URL needs a host")
-    for value in (args.source_revision, args.checkpoint_revision):
-        require(re.fullmatch(r"[0-9a-fA-F]{40}", value) is not None, "revisions must be full commit SHAs")
+    if args.source_revision is not None:
+        require(re.fullmatch(r"[0-9a-fA-F]{40}", args.source_revision) is not None, "invalid source commit SHA")
+    require(args.checkpoint_revision == "local" or re.fullmatch(r"[0-9a-fA-F]{40}", args.checkpoint_revision),
+            "checkpoint revision must be a full commit SHA or local")
     require(math.isfinite(args.timeout) and args.timeout > 0, "timeout must be finite and positive")
     key = Path(args.api_key_file).read_text(encoding="utf-8-sig").strip()
     require(bool(key) and not any(c in key for c in "\r\n\0"), "invalid API key file")
     request = json.loads(Path(args.request).read_text(encoding="utf-8"))
     questions = request.get("questions")
-    require("state" in request and isinstance(questions, dict) and bool(questions), "request needs state and questions")
-    request["model"] = args.checkpoint
+    require(isinstance(questions, dict) and bool(questions), "request needs questions")
+    if args.route == "systemone":
+        require("state" in request, "System One request needs state")
+        request["model"] = args.checkpoint
+    else:
+        require(args.checkpoint == "multimodal", "the media endpoint uses the multimodal checkpoint")
+    path = "/v1/" + args.route
     # Ignore environment proxies for loopback; redirects are refused for every destination.
     handlers = [NoRedirect()]
     if loopback:
@@ -107,6 +123,8 @@ def qualify(args: argparse.Namespace, report: Dict[str, Any]) -> None:
 
     def call(path: str, body: Any = None, authenticated: bool = True):
         headers = {"Content-Type": "application/json"}
+        if body and "assets" in body:
+            headers["TypeSafe-Danger-Zone-Images"] = "true"
         if authenticated:
             headers["Authorization"] = "Bearer " + key
         data = None if body is None else json.dumps(body).encode("utf-8")
@@ -118,14 +136,14 @@ def qualify(args: argparse.Namespace, report: Dict[str, Any]) -> None:
             # Error bodies may contain operator details; retain the status, not the body.
             return error.code, None
 
-    status, _ = call("/v1/systemone", request, authenticated=False)
+    status, _ = call(path, request, authenticated=False)
     report["unauthenticated_status"] = status
     require(status == 401, "server did not reject an unauthenticated inference request")
     status, before = call("/health")
     require(status == 200 and isinstance(before, dict) and "loaded" in before, "authenticated health details unavailable")
     report["health_before"] = before
     started = time.perf_counter()
-    status, result = call("/v1/systemone", request)
+    status, result = call(path, request)
     report["inference_status"] = status
     report["inference_seconds"] = round(time.perf_counter() - started, 4)
     require(status == 200, "inference did not return HTTP 200")
@@ -146,9 +164,10 @@ def main() -> int:
     parser.add_argument("--url", default="http://127.0.0.1:8000")
     parser.add_argument("--api-key-file", required=True)
     parser.add_argument("--request", default=str(Path(__file__).resolve().parents[1] / "examples/docker/request.json"))
-    parser.add_argument("--source-revision", required=True, help="operator-verified server source SHA; HTTP does not expose it")
-    parser.add_argument("--checkpoint", default="english", help="explicit registered checkpoint name")
-    parser.add_argument("--checkpoint-revision", required=True)
+    parser.add_argument("--route", choices=("systemone", "multimodal"), default="systemone")
+    parser.add_argument("--source-revision", help="operator-verified server source SHA")
+    parser.add_argument("--checkpoint", default="multimodal", help="registered checkpoint name")
+    parser.add_argument("--checkpoint-revision", required=True, help="Hub commit SHA, or local for a merged directory")
     parser.add_argument("--device", required=True, help="expected actual checkpoint device, e.g. cpu or cuda:0")
     parser.add_argument("--timeout", type=float, default=120, help="seconds per HTTP request; no inference retries")
     parser.add_argument("--output", type=Path, help="JSON report destination; default stdout")

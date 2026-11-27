@@ -288,7 +288,7 @@ def _canonical(value: Any) -> str:
 
 
 def _as_tokenized_instructions(body: Dict[str, Any]) -> Any:
-    """`instructions` exactly as `laya/agent.py::Agent._to_internal` hands it over.
+    """`instructions` exactly as `laya/agent.py::DecisionAgent._to_internal` hands it over.
 
     A non-string becomes ``json.dumps(ins, ensure_ascii=False)``, and that step is not cosmetic:
     ``tests/test_criteria.py:229-251`` pins that the default ``ensure_ascii=True`` escaped
@@ -320,7 +320,7 @@ def questions_fingerprint(dataset: "Dataset") -> str:
     `tests/test_router_batch.py:543` pins that rewording `instructions` alone moves a row into its
     own batch group. Those two need nothing when a question grows a field, because a whole-dict hash
     takes whatever the dict holds; this one lists its fields, so a sixth field
-    `laya/agent.py::Agent._check_question` starts reading has to be added here as well or the
+    `laya/agent.py::DecisionAgent._check_question` starts reading has to be added here as well or the
     identity goes blind to it again.
 
     It is a function of the decision space, not of the rows, so scoring more states on the same
@@ -332,16 +332,16 @@ def questions_fingerprint(dataset: "Dataset") -> str:
     Normalizing them would widen the change past what the identity needs.
 
     `labels` is hashed for the same reason `instructions` is:
-    `laya/agent.py::Agent._check_question` validates it through
-    `laya/common.py::_resolve_noul_labels`, `laya/agent.py::Agent._to_internal` carries it into
+    `laya/agent.py::DecisionAgent._check_question` validates it through
+    `laya/common.py::_resolve_noul_labels`, `laya/agent.py::DecisionAgent._to_internal` carries it into
     the internal question, and that resolver is what turns it into the option text the model
     reads. Leaving it out let two question sets with different rendered options hash alike, which
     is the one thing this function exists to prevent.
 
     `option_order` is the fifth and last field a question body can carry, and it was the one left
-    out: `laya/agent.py::Agent._check_question` accepts only a permutation of the option indices,
+    out: `laya/agent.py::DecisionAgent._check_question` accepts only a permutation of the option indices,
     `Agent._to_internal` copies it into the internal question, and from there it reaches both the
-    tokenized head (`laya/common.py::build_sequence` through `build_head`) and the reported
+    tokenized head (`native processor` through `build_head`) and the reported
     probabilities (`laya/common.py::unpermute_probs`, applied in `Agent._decode_answers`). It is
     hashed only when a row names it, so the digest of a question set that does not use the field
     stays the number its committed baseline already carries.
@@ -492,25 +492,18 @@ def default_evaluators() -> List[Evaluator]:
 def _answer_confidence(answer: Dict[str, Any]) -> Optional[float]:
     """The column the calibration metrics read: `answer_confidence` when the answer carries one.
 
-    `answer_confidence` is the probability of the answer being reported -- the quantity temperature
-    scaling fits and the quantity this repository's calibration figures are computed on. It is not
-    *calibrated* as shipped: both base checkpoints are over-confident and `laya-multilingual` ships no
-    fitted temperatures at all (README, Calibration), which is why `ece` measures this column instead
-    of assuming it.
+    `answer_confidence` is the probability assigned to the reported answer. ECE measures
+    whether that value matches observed correctness on the evaluation split.
 
     An answer carrying no `answer_confidence` falls through three more reads, in order: the
     `confidence` field, then `max(p, 1 - p)` for a `noul`, then `max(probabilities)`. Those are not
-    the same quantity, and the first is the one this function otherwise exists to avoid: `confidence`
-    is normalized entropy on `choice` and `score`, which moves with the option count (#394) rather
-    than with how right the answer is, and `laya.confidence.answer_confidence_value` refuses to fall
-    back to it for the abstention gate on exactly that reasoning. `max(probabilities)` is the mass on
-    the top option, which is the reported answer's probability only when the answer *is* the argmax.
+    the same quantity. For `choice` and `score`, `confidence` is based on normalized entropy
+    in extended Laya answers. Single System One requests instead use the TypeSafe choice and
+    score formulas. `max(probabilities)` is the mass on the top option, equal to the reported
+    answer's probability when it is the argmax.
 
-    The stripped-down shape is not hypothetical. `LAYA_JEV_STRICT` projects the served response onto
-    the Jev wire contract, which carries no `answer_confidence` (`laya/serve.py`, and the flag's row
-    in docs/http-api.md), so a report run over recorded strict responses calibrates the entropy
-    number and is not comparable to one run over full payloads. `tests/test_evals.py` pins both paths
-    and the gap between them; `docs/evals.md` says so where an operator reads the metrics.
+    `LAYA_JEV_STRICT` projects the response onto fields with no `answer_confidence`. Use the
+    same response format when comparing calibration metrics across checkpoints.
     """
     confidence = answer.get("answer_confidence")
     # `bool` is a subclass of `int`, so `isinstance(True, (int, float))` is true: a JSON
@@ -794,10 +787,8 @@ def is_confidence_metric(name: str) -> bool:
 def _answered_model(result: Any) -> Optional[Any]:
     """Which checkpoint produced `result`, read the way each runner records it.
 
-    A `Router` puts its choice under `routing["model"]` and leaves no checkpoint name at the top
-    level: `result["model"]` is the payload's family tag, `"laya-rl-agent"`, on every Agent and
-    ONNXAgent result too. So a routed run has to read `routing`, or its `by model` slice reports
-    one family for every checkpoint that answered.
+    `Router` reports its registered checkpoint name under `routing["model"]`. Prefer that
+    name when available and use the backend's response model for direct calls.
     """
     result = result or {}
     routing = result.get("routing")
@@ -1133,7 +1124,7 @@ def evaluate(runner: Any, dataset: Dataset, evaluators: Optional[Sequence[Evalua
     runner that predates the knob is unaffected by a run that does not ask. Nothing about the
     scored answers changes -- the results come back in chunk order either way.
 
-    `min_confidence` is the opt-in abstention threshold `Router` and `ONNXAgent` apply to
+    `min_confidence` is the opt-in abstention threshold the native agent and Router apply to
     `answer_confidence` (#361). `laya.confidence.apply_confidence_gate` marks every answer below
     it with `low_confidence: True` and `abstention: "abstained"`, and the raw argmax stays on
     `answer["choice"] / ["noul"] / ["score"]` -- so `_aggregate` publishes the same accuracy,
@@ -1185,9 +1176,8 @@ def evaluate(runner: Any, dataset: Dataset, evaluators: Optional[Sequence[Evalua
             if not _takes_min_confidence(runner, target):
                 raise EvalError(
                     "evaluate(min_confidence=%r) refused: this runner's %s does not accept the "
-                    "abstention threshold. Either use a Router/ONNXAgent that gates on "
-                    "answer_confidence (#361), or drop the threshold -- the report would "
-                    "otherwise name a `min_confidence` it never applied." % (min_confidence, target))
+                    "abstention threshold. Use a native agent or Router with confidence gating, "
+                    "or omit `min_confidence`." % (min_confidence, target))
     # Whether `predict` can be handed `Example.model` at all (#1107). `Agent.predict` is
     # `system_one` -- no `model`, no `**kwargs` -- so the single-row path used to raise `TypeError`
     # on every row, and `on_error="skip"` published a zero-case report. The batch half was already
@@ -1204,9 +1194,8 @@ def evaluate(runner: Any, dataset: Dataset, evaluators: Optional[Sequence[Evalua
         first, offender = named
         raise EvalError(
             "evaluate() refused: example %d names model %r, but this runner's predict does not "
-            "accept a `model` argument. Either use a Router/ONNXAgent whose predict forwards the "
-            "checkpoint, or drop the per-example `model` -- the report would otherwise name a "
-            "checkpoint it never sent (#1107)." % (first, offender.model))
+            "accept a `model` argument. Use a Router to select a checkpoint per example, "
+            "or omit the per-example `model` for a fixed checkpoint." % (first, offender.model))
     evaluators = list(evaluators) if evaluators is not None else default_evaluators()
     cases: List[Dict[str, Any]] = []
     waits: List[float] = []          # what each request actually waited: its chunk's whole call

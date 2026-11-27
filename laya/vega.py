@@ -2,9 +2,8 @@
 
     import laya
 
-    agent = laya.Agent(vegaml=True)                 # the 0.8B universal reader + the engine
-    agent = laya.load(vegaml=True)                  # the same
-    agent = laya.Agent(vegaml="4b")                 # the 4B reader; or a Hub id, or a local dir
+    agent = laya.load(vegaml=True)                  # Vega's default reader
+    agent = laya.load(vegaml="4b")                  # a larger reader, Hub ID or local directory
 
     out = agent.predict(state, questions)         # laya's shape, plus vega's fields
     out["answers"]["dept"]["choice"]              # as always
@@ -19,23 +18,10 @@
     agent.predict(video=clip, questions=questions) # the sound track if it carries speech, frames if not
     agent.predict_long(very_long_state, questions)   # 73k tokens, no windowing
     agent.save_calibration("fit/")               # heads and calibration, reloadable
-    laya.vega.Router(fast=laya.Agent(vegaml=False), ...)  # model switching: laya for short English text,
-                                                  # vega for everything else
 
-**What the argument buys.** laya's own checkpoints are ModernBERT encoders: fast, small, text
-only, with a temperature-scaled confidence and no notion of "I have not seen anything like
-this". ``vegaml=True`` swaps the engine underneath for vegaml's: a frozen decoder reader with a
-small physics engine on top, which adds a conformal prediction set, an abstain flag, an
-out-of-distribution flag (``unbound``), heads fitted on your labels over the frozen features,
-a calibration that is refit on your rows rather than shipped, 73k tokens of context, and the
-same typed interface over images and speech. Everything is reachable through the methods laya
-already has, so a caller switches by changing one argument.
-
-**What it costs.** A 0.8B reader against a ~150M encoder: roughly five times the latency on
-plain text (measured 72 ms a decision against 16 ms batched on a T4), two to four gigabytes
-of memory. vegaml ships with laya since 0.4.23 (``pip install -U laya``). Core laya
-is untouched when the argument is not given, which is why this lives in its own module and is
-imported only on demand.
+Install the ``vega`` extra to enable this backend. It fits decision heads and calibration from
+labelled examples and exposes conformal sets, abstention and out-of-distribution indicators.
+The default ``laya.load()`` path loads a native multimodal decision checkpoint.
 
 **Automatic thresholding, which is the question this module exists to answer.** A caller never
 sets a confidence number. ``route`` is decided per answer, in this order:
@@ -84,7 +70,7 @@ import threading
 import time
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
-from .agent import Agent
+from .agent import DecisionAgent
 from .hooks import PredictContext, compose_hooks, dispatch, validate_timeout
 
 __all__ = ["VegaAgent", "Router", "is_available", "HEAD_ARRAYS"]
@@ -122,7 +108,7 @@ def _to_vega_questions(questions: Mapping[str, Mapping]) -> Dict[str, Dict]:
     """
     out = {}
     for qid, q in questions.items():
-        Agent._check_question(qid, q)
+        DecisionAgent._check_question(qid, q)
         t = q["type"]
         vq: Dict[str, Any] = {"instructions": q["instructions"]}
         if t == "noul":
@@ -350,20 +336,10 @@ def _fold(answer: Mapping, q: Mapping) -> Dict[str, Any]:
 
 
 # ----------------------------------------------------------------------------- the agent
-class VegaAgent(Agent):
-    """``laya.Agent`` with vegaml's engine underneath. Built by ``laya.Agent(vegaml=...)``.
-
-    Subclasses :class:`laya.Agent` so ``isinstance`` checks, hooks and callers that duck-type
-    a laya agent keep working, but it does **not** run ``Agent.__init__``: there is no
-    ModernBERT checkpoint to load. Everything a laya caller touches is reimplemented here on
-    top of ``vegaml.Vega``.
-    """
+class VegaAgent(DecisionAgent):
+    """A decision agent backed by ``vegaml.Vega``, loaded with ``laya.load(vegaml=True)``."""
 
     _backend = "vega"
-
-    def __new__(cls, *args, **kwargs):
-        # Agent.__new__ dispatches here on vegaml=...; coming back through it would recurse.
-        return object.__new__(cls)
 
     def __init__(self, model_id_or_path: Optional[str] = None, device: Optional[str] = None,
                  token: Optional[str] = None, *, vegaml: Union[bool, str, None] = True,
@@ -414,6 +390,10 @@ class VegaAgent(Agent):
         heads = sorted(self.vega.heads)
         return "VegaAgent(%s, max_len=%s, heads=%d, calibrated=%s)" % (
             self.model_id, self.max_len, len(heads), self.calibration is not None)
+
+    @property
+    def backend(self):
+        return "vega"
 
     @property
     def context_tokens(self) -> int:
@@ -1088,7 +1068,7 @@ class VegaAgent(Agent):
     @staticmethod
     def attach(backbone: str, texts: Sequence[str], out_dir: str, **kw) -> Dict[str, Any]:
         """Attach your own frozen reader to the universal engine, from your own text, with no
-        labels: writes a model directory that ``laya.Agent(vegaml=out_dir)`` then loads."""
+        labels: writes a model directory that ``laya.load(vegaml=out_dir)`` then loads."""
         import vegaml
         return vegaml.attach(backbone, texts, out_dir, **kw)
 
@@ -1179,23 +1159,17 @@ def _pad_for_calibration(result: Mapping, cal) -> Dict:
 
 # ----------------------------------------------------------------------------- switching
 class Router:
-    """Model switching: laya's fast encoder where it is enough, vega where it is not.
+    """Route short English text to an attached decision agent and other inputs to Vega.
 
         from laya.vega import Router
-        router = Router(fast=laya.Agent(vegaml=False), vega=laya.Agent(vegaml=True))
+        router = Router(fast=laya.load(), vega=laya.load(vegaml=True))
         router.predict(state, questions)            # -> picks, and says which under "routing"
 
-    The rule, in order: an ``image``, ``audio`` or ``video`` goes to vega (the encoder has no eyes or
-    ears); a state longer than the fast model's context goes to vega (73k against 512 or
-    1,024); non-English or non-Latin text goes to vega (the universal reader is multilingual,
-    and laya's own English checkpoint collapses on non-Latin scripts); a question with a
-    fitted head on vega goes to vega (that is what the labels bought); everything else goes to
-    the fast model. ``model=`` forces one. The result carries ``routing = {"model", "reason"}``
-    in the shape ``laya.Router`` already returns, so a caller switching from that class reads
-    nothing new.
+    Policy checks explicit media, the configured text budget, language and fitted Vega heads.
+    Use ``model=`` to force a backend. The result reports the selected backend under ``routing``.
     """
 
-    def __init__(self, fast: Optional[Agent] = None, vega: Optional[VegaAgent] = None,
+    def __init__(self, fast: Optional[DecisionAgent] = None, vega: Optional[VegaAgent] = None,
                  fast_context_tokens: int = 512, prefer_vega_when_fitted: bool = True):
         self.fast = fast
         self._vega = vega
@@ -1213,7 +1187,7 @@ class Router:
         from .lang import is_english
 
         if image is not None or audio is not None or video is not None:
-            return "vega", "image, audio or video: the encoder has no vision or speech path"
+            return "vega", "the hybrid routing policy sends media to Vega"
         if self.fast is None:
             return "vega", "no fast model attached"
         text = state if isinstance(state, str) else json.dumps(state, ensure_ascii=False)
@@ -1230,7 +1204,7 @@ class Router:
             fitted = [q for q in questions if q in self._vega.vega.heads]
             if fitted:
                 return "vega", "fitted heads exist for %s" % ", ".join(fitted)
-        return "fast", "short English text, no fitted head: the fast encoder is enough"
+        return "fast", "short English text without a fitted Vega head"
 
     def predict(self, state: Any = None, questions: Optional[Mapping] = None, *,
                 model: Optional[str] = None, image=None, audio=None, video=None,

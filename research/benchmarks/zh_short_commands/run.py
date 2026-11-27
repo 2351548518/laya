@@ -1,8 +1,8 @@
 """Run the Chinese short-command benchmark against one Laya checkpoint.
 
     PYTHONPATH=. python research/benchmarks/zh_short_commands/run.py \
-        --checkpoint convaiinnovations/laya --subfolder multilingual \
-        --out research/benchmarks/zh_short_commands/results/v1/laya-multilingual
+        --checkpoint ./local-checkpoint \
+        --out ./zh-short-commands-report
 
 Writes ``<out>/report.json`` with the same four parts as ``research/eval/laya_eval.py``:
 ``config``, ``report``, ``summary`` and ``cases``. Every number in ``report`` can be
@@ -26,15 +26,18 @@ if ROOT not in sys.path:
 import prompts  # noqa: E402
 
 from research.eval.laya_eval import (  # noqa: E402
-    ece, macro_f1, score_cases, softmax_t, summarise, temperature_for,
+    score_cases, softmax_t, summarise, temperature_for,
 )
 
 CASES_PATH = os.path.join(HERE, "data", "cases.jsonl")
 
 
 def sha256_file(path: str) -> str:
+    digest = hashlib.sha256()
     with open(path, "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def load_cases(path: str = CASES_PATH):
@@ -62,7 +65,7 @@ def stub_logits(cases):
     return out
 
 
-def choice_records(config, cases, logits, agent, unclamped):
+def choice_records(config, cases, logits, agent):
     """One record per case, in the shape laya_eval.py emits."""
     import numpy as np
     from laya.common import QTYPES
@@ -72,7 +75,7 @@ def choice_records(config, cases, logits, agent, unclamped):
     for i, z in enumerate(logits):
         k = len(z)
         temperature = 1.0 if agent is None else temperature_for(
-            agent, QTYPES["choice"], k, unclamped)
+            agent, QTYPES["choice"], k)
         probs = softmax_t(z, temperature)
         pred = int(np.argmax(probs))
         correct = int(pred == gold_index[i])
@@ -106,7 +109,7 @@ def choice_records(config, cases, logits, agent, unclamped):
     return {"report": report, "cases": records}
 
 
-def noul_records(config, cases, logits, agent, unclamped):
+def noul_records(config, cases, logits, agent):
     """One record per (case, dimension); accuracy is per dimension, not top-1."""
     import numpy as np
     from laya.common import QTYPES
@@ -118,7 +121,7 @@ def noul_records(config, cases, logits, agent, unclamped):
         for j, dim in enumerate(dims):
             z = logits[i * len(dims) + j]
             temperature = 1.0 if agent is None else temperature_for(
-                agent, QTYPES["noul"], len(z), unclamped)
+                agent, QTYPES["noul"], len(z))
             probs = softmax_t(z, temperature)
             p_true = float(probs[1])          # noul scores [false, true] in that order
             # Store the rounded value and derive everything else from it, so the record
@@ -164,55 +167,47 @@ def noul_records(config, cases, logits, agent, unclamped):
 
 
 def checkpoint_provenance(args, agent):
-    """Best-effort record of what was actually scored: repo, snapshot, weight hash."""
-    info = {"checkpoint": args.checkpoint, "subfolder": args.subfolder,
-            "device": "stub" if args.stub else str(getattr(agent, "device", None)),
+    """Record the native checkpoint and the exact components used to score it."""
+    info = {"checkpoint": args.checkpoint, "device": "stub" if args.stub else str(agent.device),
             "stub": bool(args.stub)}
     if agent is None:
         return info
-    try:
-        import torch
-        import transformers
-        import laya
-        info["torch"] = torch.__version__
-        info["transformers"] = transformers.__version__
-        info["laya"] = laya.__version__
-    except Exception:                              # pragma: no cover - provenance only
-        pass
-    subfolder = (args.subfolder + "/") if args.subfolder else ""
-    try:
-        if os.path.isdir(args.checkpoint):
-            weight = os.path.join(args.checkpoint, subfolder, "model.safetensors")
-            if os.path.exists(weight):
-                info["weight_sha256"] = sha256_file(weight)
-                info["weight_bytes"] = os.path.getsize(weight)
-            else:
-                info["provenance_error"] = "no model.safetensors under %s" % args.checkpoint
-        else:
-            from huggingface_hub import snapshot_download
-            snap = snapshot_download(args.checkpoint, allow_patterns=["*.safetensors"],
-                                     local_files_only=True)
-            info["snapshot"] = os.path.basename(snap)
-            weight = os.path.join(snap, subfolder + "model.safetensors")
-            if os.path.exists(weight):
-                info["weight_sha256"] = sha256_file(weight)
-                info["weight_bytes"] = os.path.getsize(weight)
-    except Exception as exc:                       # pragma: no cover - provenance only
-        info["provenance_error"] = "%s: %s" % (type(exc).__name__, exc)
+
+    import torch
+    import transformers
+    import laya
+    from pathlib import Path
+
+    revision = agent.checkpoint_revision
+    info.update(revision=revision, torch=torch.__version__, transformers=transformers.__version__,
+                laya=laya.__version__)
+    path = Path(args.checkpoint).expanduser()
+    if revision and not path.is_dir():
+        from huggingface_hub import snapshot_download
+
+        path = Path(snapshot_download(args.checkpoint, revision=revision, local_files_only=True))
+    if path.is_dir():
+        artifacts = sorted(path.glob("*.safetensors"))
+        artifacts.extend(sorted((path / "adapter").glob("*.safetensors")))
+        manifest = path / "multimodal_config.json"
+        if manifest.is_file():
+            artifacts.insert(0, manifest)
+        adapter_config = path / "adapter" / "adapter_config.json"
+        if adapter_config.is_file():
+            artifacts.append(adapter_config)
+        info["artifacts"] = [{"file": file.relative_to(path).as_posix(), "bytes": file.stat().st_size,
+                              "sha256": sha256_file(file)}
+                             for file in artifacts]
     return info
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="zh-short-commands")
-    parser.add_argument("--checkpoint", default="convaiinnovations/laya",
-                        help="checkpoint repo id or local path")
-    parser.add_argument("--subfolder", default="multilingual")
+    parser.add_argument("--checkpoint", help="trained native checkpoint directory or Hub ID")
     parser.add_argument("--device", default=None, help="cpu, cuda, mps (default: auto)")
     parser.add_argument("--configs", default=",".join(prompts.CONFIGS),
                         help="comma list of configs to run")
     parser.add_argument("--out", default=None, help="output directory for report.json")
-    parser.add_argument("--unclamped", action="store_true",
-                        help="score with the checkpoint's raw bucket temperatures")
     parser.add_argument("--stub", action="store_true",
                         help="skip the checkpoint and score with a fixed pseudo-random vector")
     args = parser.parse_args(argv)
@@ -225,19 +220,22 @@ def main(argv=None) -> int:
     cases = load_cases()
     print("cases: %d  configs: %s" % (len(cases), ", ".join(configs)))
 
+    from laya.revisions import default_checkpoint
+
+    args.checkpoint = args.checkpoint or default_checkpoint()
     agent = None
     if not args.stub:
         import laya
-        agent = laya.load(args.checkpoint, subfolder=args.subfolder, device=args.device)
+        agent = laya.load(args.checkpoint, device=args.device)
 
     report, summary = {}, {}
     for config in configs:
         pairs = prompts.cases_for(config, [c["text"] for c in cases])
         logits = stub_logits(pairs) if args.stub else score_cases(agent, pairs)
         if config in prompts.NOUL_CONFIGS:
-            out = noul_records(config, cases, logits, agent, args.unclamped)
+            out = noul_records(config, cases, logits, agent)
         else:
-            out = choice_records(config, cases, logits, agent, args.unclamped)
+            out = choice_records(config, cases, logits, agent)
         report[config] = out["report"]
         summary[config] = {"accuracy": out["report"].get("accuracy"),
                            "mean_confidence": out["report"].get("mean_confidence")}
@@ -260,7 +258,7 @@ def main(argv=None) -> int:
             "cases_sha256": sha256_file(CASES_PATH),
             "prompts_sha256": sha256_file(os.path.join(HERE, "prompts.py")),
             "configs": configs,
-            "unclamped": bool(args.unclamped),
+            "unclamped": False,
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "checkpoint": checkpoint_provenance(args, agent),
         },

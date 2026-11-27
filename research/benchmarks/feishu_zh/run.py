@@ -67,13 +67,18 @@ def main():
             elapsed = (time.perf_counter() - start) * 1000
             return {k: result[k] for k in ['model', 'answers', 'usage'] if k in result}, elapsed, {}
     else:
-        if not args.checkpoint or not args.checkpoint.is_dir():
-            parser.error('--checkpoint must be an existing local checkpoint directory')
+        if not args.checkpoint or not (args.checkpoint / 'multimodal_config.json').is_file():
+            parser.error('--checkpoint must be a local native checkpoint with multimodal_config.json')
+        files = sorted(args.checkpoint.glob('*.safetensors'))
+        adapter = args.checkpoint / 'adapter'
+        files.extend(sorted(adapter.glob('*.safetensors')))
+        files.append(args.checkpoint / 'multimodal_config.json')
+        if (adapter / 'adapter_config.json').is_file():
+            files.append(adapter / 'adapter_config.json')
         os.environ.update(HF_HUB_OFFLINE='1', USE_TF='0', USE_TORCH='1', TOKENIZERS_PARALLELISM='false')
         import torch
         import transformers
         import laya
-        from laya.common import build_sequence, serialize_state, render_options
         torch.set_num_threads(2)
         start = time.perf_counter()
         agent = laya.load(str(args.checkpoint.resolve()), device=args.device)
@@ -84,12 +89,15 @@ def main():
                                              stderr=subprocess.DEVNULL).strip()
         except (OSError, subprocess.CalledProcessError):
             commit = None
-        metadata.update(model=args.model or 'laya-local', checkpoint_revision=args.checkpoint_revision,
-                        checkpoint_config=agent.cfg, checkpoint_model_sha256=file_sha(args.checkpoint / 'model.safetensors'),
+        metadata.update(model=args.model or args.checkpoint.name,
+                        checkpoint_revision=agent.checkpoint_revision or args.checkpoint_revision,
+                        checkpoint_config=agent.cfg,
+                        checkpoint_artifacts={file.relative_to(args.checkpoint).as_posix(): file_sha(file)
+                                              for file in files},
                         load_seconds=load_seconds, torch=torch.__version__,
                         transformers=transformers.__version__, device=str(agent.device), cpu_threads=2,
                         laya_source_commit=commit,
-                        laya_source_files={name: file_sha(source / name) for name in ['agent.py', 'common.py']})
+                        laya_source_files={name: file_sha(source / name) for name in ['multimodal.py', 'common.py']})
 
         def call(req):
             if agent.device.type == 'mps':
@@ -103,20 +111,11 @@ def main():
             elif agent.device.type == 'cuda':
                 torch.cuda.synchronize()
             elapsed = (time.perf_counter() - start) * 1000
-            lengths = []
-            for question in req['questions'].values():
-                q = agent._to_internal(question)
-                seq, _ = build_sequence(agent.tok, req['state'], q, agent.cfg['max_len'], agent.cfg['head_max_len'])
-                empty, _ = build_sequence(agent.tok, '', q, agent.cfg['max_len'], agent.cfg['head_max_len'])
-                full = len(agent.tok(serialize_state(req['state']), add_special_tokens=False)['input_ids'])
-                head = len(agent.tok('%s question: %s' % (q['t'], str(q['ins']).replace(agent.tok.mask_token, ' ')),
-                                     add_special_tokens=False)['input_ids'])
-                lengths.append(dict(state_tokens=full, retained_state_tokens=len(seq)-len(empty),
-                                    instruction_tokens=head, retained_instruction_tokens=seq.index(agent.tok.sep_token_id)-1,
-                                    option_tokens=[len(agent.tok(' '+option, add_special_tokens=False)['input_ids']) for option in render_options(q)]))
-            return response, elapsed, dict(device=str(agent.device), lengths=lengths,
-                state_truncated=any(x['retained_state_tokens'] < x['state_tokens'] for x in lengths),
-                instructions_truncated=any(x['retained_instruction_tokens'] < x['instruction_tokens'] for x in lengths))
+            usage = response.get("usage", {})
+            return response, elapsed, dict(device=str(agent.device),
+                                           input_tokens=usage.get("input_tokens"),
+                                           state_truncated=bool(usage.get("truncated")),
+                                           instructions_truncated=False)
     args.output.mkdir(parents=True, exist_ok=True)
     try:
         for mode in args.modes:

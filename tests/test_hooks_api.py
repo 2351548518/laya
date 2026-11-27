@@ -9,6 +9,7 @@ the key matched, so what a key covers is part of the contract, not an implementa
 
 Run: python tests/test_hooks_api.py
 """
+import ast
 import contextlib
 import dataclasses
 import functools
@@ -26,7 +27,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import laya  # noqa: E402
 from laya import Agent, AsyncHook, BaseHook, OptionStabilityHook, PredictContext, PredictHook, Router, load  # noqa: E402
 from laya.hooks import HOOK_EVENTS, Hook, calibrate_reliability, decide_reliability  # noqa: E402
-from laya.onnx_agent import ONNXAgent  # noqa: E402
 from laya.router import _question_schema  # noqa: E402
 from laya.vega import VegaAgent  # noqa: E402
 
@@ -81,33 +81,23 @@ check("HTTP route snapshot stays outside core exports", "RouteSnapshot" in laya.
 check("HTTP route options stay outside core exports", "RouteOptions" in laya.__all__, False)
 check("core does not import the HTTP SDK", "laya_client" in sys.modules, False)
 
-for label, fn in (("Agent.__init__", Agent.__init__), ("load", load),
-                  ("Router.__init__", Router.__init__), ("ONNXAgent.__init__", ONNXAgent.__init__)):
+for label, fn in (("Agent.__init__", Agent.__init__), ("Router.__init__", Router.__init__)):
     for param, default in HOOK_KEYS.items():
         check_param(label, fn, param, default)
 
-for label, fn in (("Agent.__init__", Agent.__init__), ("load", load)):
-    check_param(label, fn, "compile_warmup", True)
-    check_param(label, fn, "compile_cache", False)
-    check_param(label, fn, "compile_mode", "default")
-
-# Python and TypeScript share the 0.4.0 fallback for unidentified text.
-check_param("Router.__init__", Router.__init__, "default", "multilingual")
+check_param("Router.__init__", Router.__init__, "default", "multimodal")
 check_param("Router.__init__", Router.__init__, "multimodal", None)
-check_param("load", load, "multimodal", None)
 check_param("load", load, "model_id_or_path", None)
 from laya.cli import build_parser  # noqa: E402
+from laya.multimodal import MultimodalAgent, MULTIMODAL_MODELS  # noqa: E402
+from laya.revisions import DEFAULT_CHECKPOINT  # noqa: E402
 check("CLI native checkpoint selector", build_parser().parse_args(["--multimodal", "native"]).multimodal, "native")
-check_true("MultimodalAgent is a public lazy export", "MultimodalAgent" in laya.__all__)
-from laya.multimodal import MultimodalAgent  # noqa: E402
-from laya.multimodal import DEFAULT_MULTIMODAL_MODEL, MULTIMODAL_MODELS  # noqa: E402
+check_true("Agent is the native public runtime", Agent is MultimodalAgent)
+check("Router publishes the native checkpoint", laya.DEFAULT_MODELS, {"multimodal": DEFAULT_CHECKPOINT})
 with patch("laya.multimodal.MultimodalAgent") as load_native:
-    check("load(multimodal=True) bypasses the Vega default", load(multimodal=True), load_native.return_value)
-    check("native default source", load_native.call_args.args, (DEFAULT_MULTIMODAL_MODEL,))
-    with patch("laya.agent.os.path.isfile", return_value=True) as is_file:
-        check("load detects a local native checkpoint", load("my-checkpoint"), load_native.return_value)
-        check("native config probe", is_file.call_args.args, (os.path.join("my-checkpoint", "multimodal_config.json"),))
-    check("saved native source", load_native.call_args.args, ("my-checkpoint",))
+    check("load forwards native hooks and device", load("checkpoint", device="cpu", hooks=[]), load_native.return_value)
+    check("native load arguments", load_native.call_args.args, ("checkpoint",))
+    check("native load options", load_native.call_args.kwargs, {"device": "cpu", "hooks": []})
 check("Qwen3.5 4B alias", MULTIMODAL_MODELS["qwen3.5-4b"], "Qwen/Qwen3.5-4B")
 check("Qwen3.5 9B alias", MULTIMODAL_MODELS["qwen3.5-9b"], "Qwen/Qwen3.5-9B")
 from laya.multimodal_train import MultimodalTrainConfig, finetune_multimodal  # noqa: E402
@@ -140,7 +130,7 @@ vega_choice = fold_vega_answer({"choice": "1", "probs": {"1": .9, "other": .1}, 
 check("Vega choice preserves caller label types", vega_choice["choice"], 1)
 check("Vega probabilities preserve caller label types", vega_choice["probabilities"], {1: .9, "other": .1})
 check("Vega prediction set preserves caller label types", vega_choice["prediction_set"], [1])
-from laya.grounding_train import GroundingTrainConfig, finetune_grounding  # noqa: E402
+from laya.train import GroundingTrainConfig, finetune_grounding  # noqa: E402
 from laya.grounding import grounding_loss  # noqa: E402
 from laya.grounding import GroundingHead  # noqa: E402
 check_param("GroundingHead", GroundingHead, "slots", 1)
@@ -179,6 +169,7 @@ check_param("GroundingTrainConfig", GroundingTrainConfig, "max_decision_regressi
 check_param("finetune_grounding", finetune_grounding, "decision_dev_data", None)
 check_param("finetune_grounding", finetune_grounding, "row_validator", None)
 check_param("finetune_grounding", finetune_grounding, "resume_from", None)
+check_param("finetune_grounding", finetune_grounding, "reporter", None)
 from laya.multimodal_train import load_rows as load_multimodal_rows  # noqa: E402
 check_param("multimodal data loader", load_multimodal_rows, "path", inspect.Parameter.empty)
 for _media in ("image", "audio", "video", "sampling_rate"):
@@ -244,25 +235,14 @@ if _mcp_batch_tool is not None:
 # misconfiguration no request caused.
 _OVERLAP = "Router.__init__/a shared pin overlapping a per-checkpoint one constructs"
 try:
-    Router(sha256_digests={"english": {"model.safetensors": "b" * 64}},
+    Router(sha256_digests={"multimodal": {"model.safetensors": "b" * 64}},
            agent_kwargs={"expected_sha256": {"model.safetensors": "c" * 64}})
     check_true(_OVERLAP, True, "constructed")
 except ValueError as exc:
     check_true(_OVERLAP, False, "raised instead of constructing: %s" % exc)
 
-# load() forwards Agent's own construction options, so none of them is reachable only
-# through the class; tests/test_download.py asserts that against both signatures.
-check_param("load", load, "compile", False)
-check_param("load", load, "backend", None)
-check_param("load", load, "onnx_path", None)
-check_param("Agent.__init__", Agent.__init__, "backend", None)
-check_param("Agent.set_backend", Agent.set_backend, "name", "auto")
-check_param("Agent.set_backend", Agent.set_backend, "strict", False)
 check_true("Agent.backend is a property", isinstance(Agent.backend, property))
-check_true("Agent.backend_object is a property", isinstance(Agent.backend_object, property))
-
-# ONNXAgent downloads the same Hub artifacts as Agent, so it authenticates the same way
-check_param("ONNXAgent.__init__", ONNXAgent.__init__, "token", None)
+check_param("Agent.__init__", Agent.__init__, "expected_sha256", None)
 
 # AsyncHook wraps async hooks with an optional loop
 check_param("AsyncHook.__init__", AsyncHook.__init__, "loop", None)
@@ -317,32 +297,15 @@ for method in ("route", "route_batch"):
                getattr(RemoteRouter, method) is getattr(Router, method))
 
 for label, fn in (("Agent.predict_batch", Agent.predict_batch),
-                  ("Agent.system_one", Agent.system_one),
-                  ("Agent.predict_long", Agent.predict_long),
                   ("Router.predict", Router.predict),
                   ("Router.predict_batch", Router.predict_batch),
                   ("Router.predict_long", Router.predict_long),
-                  ("ONNXAgent.system_one", ONNXAgent.system_one),
-                  ("ONNXAgent.predict_long", ONNXAgent.predict_long),
                   ("VegaAgent.system_one", VegaAgent.system_one)):
     check_param(label, fn, "hooks", None)
     check_param(label, fn, "on_predict_start", None)
     check_param(label, fn, "on_predict_end", None)
     check_param(label, fn, "hooks_raise", None)
     check_param(label, fn, "hooks_timeout", None)
-
-# The scan sizes its windows from the checkpoint budget, so it takes `window`/`stride` instead
-# of the per-call token overrides the single-window entries take.
-# The TypeScript predictLong port uses these same long-only controls. Keep the
-# Python oracle's ONNX and Router surfaces pinned alongside the torch entry point.
-for label, fn in (("Agent.predict_long", Agent.predict_long),
-                  ("ONNXAgent.predict_long", ONNXAgent.predict_long),
-                  ("Router.predict_long", Router.predict_long)):
-    for param in ("window", "stride", "batch_size"):
-        check_param(label, fn, param, None)
-    check_param(label, fn, "aggregate", "auto")
-    for param in ("max_len", "head_max_len", "min_confidence"):
-        check("%s/%s not accepted" % (label, param), param in sig(fn), False)
 
 check_param("Agent.predict_batch", Agent.predict_batch, "batch_size", None)
 check_param("Agent.predict_batch", Agent.predict_batch, "sort_by_length", False)
@@ -353,9 +316,7 @@ check_param("Router.predict_batch", Router.predict_batch, "diagnostics", None)
 
 # per-call token-budget overrides
 for label, fn in (("Agent.predict_batch", Agent.predict_batch),
-                  ("Agent.system_one", Agent.system_one),
-                  ("Router.predict", Router.predict),
-                  ("ONNXAgent.system_one", ONNXAgent.system_one)):
+                  ("Router.predict", Router.predict)):
     check_param(label, fn, "max_len", None)
     check_param(label, fn, "head_max_len", None)
 
@@ -417,26 +378,8 @@ _value_diagnostic_state = {
 }
 check("diagnostic value source beyond the segment budget", analyse(_value_diagnostic_state, explain=True)["diagnostic"],
       {"stage": "value", "reason": "named_value", "source": {"leaf_index": 1, "path": ["body"], "line": 3}})
-_diagnostic_router = Router()
-check("route carries detector diagnostic", _diagnostic_router.route(_diagnostic_state, {}, explain=True)
-      ["detection"]["diagnostic"], _segment_diagnostic)
-_diagnostic_batch = _diagnostic_router.route_batch([
-    {"state": _diagnostic_state, "questions": {}},
-    {"state": _diagnostic_state, "questions": {}, "model": "english"},
-], explain=True)
-check("route batch carries diagnostic in order", _diagnostic_batch[0]["detection"]["diagnostic"],
-      _segment_diagnostic)
-check("override bypass has no detector diagnostic", _diagnostic_batch[1]["detection"], None)
-for _key_size in (128, 129):
-    _key = "😀" * _key_size
-    _key_diagnostic = analyse({
-        "note": "This is an English note about the order. " * 20,
-        _key: "Ich kann mich nicht anmelden und brauche Hilfe",
-    }, explain=True)["diagnostic"]
-    check(f"diagnostic key bound {_key_size} code points", _key_diagnostic["source"]["path"],
-          [_key] if _key_size == 128 else None)
+check("default checkpoint handles Chinese text", Router().route("请退款")["model"], "multimodal")
 
-# route() and route_batch() take per-call hooks so a hook can pin a checkpoint for one call
 for label, fn in (("Router.route", Router.route),
                   ("Router.route_batch", Router.route_batch)):
     check_param(label, fn, "hooks", None)
@@ -462,7 +405,6 @@ for param in ("hooks", "on_predict_start", "on_predict_end", "hooks_raise"):
 # --------------------------------------------------------------- aliases
 check_true("Agent.predict is Agent.system_one", Agent.predict is Agent.system_one)
 check_true("Router.system_one is Router.predict", Router.system_one is Router.predict)
-check_true("ONNXAgent.predict is ONNXAgent.system_one", ONNXAgent.predict is ONNXAgent.system_one)
 
 # --------------------------------------------------------------- context
 FIELDS = ["states", "questions", "run_id", "results", "decision", "model", "agent", "router",
@@ -528,19 +470,19 @@ for bad in (0, -1, float("nan"), float("inf"), float("-inf")):
         PASS.append("validate_timeout/%r rejected" % (bad,))
 
 # --------------------------------------------------------------- class defaults
-for label, cls in (("Agent", Agent), ("Router", Router), ("ONNXAgent", ONNXAgent)):
+for label, cls in (("Agent", Agent), ("Router", Router)):
     check("%s/hooks default" % label, cls.hooks, ())
     check("%s/hooks_raise default" % label, cls.hooks_raise, True)
     check("%s/hooks_concurrent default" % label, cls.hooks_concurrent, True)
     check("%s/hooks_timeout default" % label, cls.hooks_timeout, None)
     check("%s/_hooks_lock default" % label, cls._hooks_lock, None)
 
-# Agent and ONNXAgent carry the checkpoint id for ctx.model; Router has no single model.
-for label, cls in (("Agent", Agent), ("ONNXAgent", ONNXAgent)):
+# Agent carries its checkpoint id for ctx.model. Router selects a model per request.
+for label, cls in (("Agent", Agent),):
     check("%s/model_id default" % label, cls.model_id, None)
 
 # runtime registration surface
-for label, cls in (("Agent", Agent), ("Router", Router), ("ONNXAgent", ONNXAgent)):
+for label, cls in (("Agent", Agent), ("Router", Router)):
     for method in ("add_hook", "remove_hook", "hooks_installed"):
         check_true("%s/%s exists" % (label, method), callable(getattr(cls, method, None)))
 
@@ -549,7 +491,7 @@ class _ApiProbeHook(BaseHook):
     pass
 
 
-for label, cls in (("Agent", Agent), ("Router", Router), ("ONNXAgent", ONNXAgent)):
+for label, cls in (("Agent", Agent), ("Router", Router)):
     reg = cls.__new__(cls)
     reg.hooks = ()
     h1, h2 = _ApiProbeHook(), _ApiProbeHook()
@@ -653,34 +595,6 @@ for label, cls in (("LayaRouter", LayaRouter), ("LayaGuardrail", LayaGuardrail),
             check_true("%s/%s declared field" % (label, param), param in declared)
     check_true("%s has no per-call hooks_concurrent" % label,
                "hooks_concurrent" not in inspect.signature(cls.__init__).parameters)
-
-# --------------------------------------------------------------- usage block
-# `input_tokens` / `output_tokens` are the fields every client decodes, so they are always
-# present. `options` (#538) is additive and conditional: it appears only for a request whose
-# options lost their distinct token spans, which is what keeps it out of ordinary responses.
-from laya.common import build_head, build_sequence, collapsed_options, state_room, window_budget  # noqa: E402
-
-check_param("build_sequence", build_sequence, "return_stats", False)
-check_param("build_sequence", build_sequence, "return_truncation_stats", False)
-
-# The sizing surface `predict_long` reads before it splits a state: `build_head` is the question
-# half `build_sequence` assembles, `state_room` is what is left of `max_len` for the state after
-# it, and `window_budget` turns the two into the window and stride a scan may use. Their defaults
-# are the checkpoint's, so a caller can measure a question without holding an Agent.
-for _name, _fn, _params in (("build_head", build_head, (("head_max_len", 192), ("option_order", None))),
-                            ("state_room", state_room, (("max_len", 512), ("head_max_len", 192))),
-                            ("window_budget", window_budget, (("max_len", 512), ("head_max_len", 192),
-                                                              ("window", None), ("stride", None)))):
-    for _param, _default in _params:
-        check_param(_name, _fn, _param, _default)
-check("collapsed_options/nothing collapsed is empty",
-      collapsed_options(["q"], [{"options": {"options": 3, "options_distinct": 3,
-                                             "tokens_per_option": None}}]), {})
-check("collapsed_options/a collapsed question is reported",
-      collapsed_options(["q"], [{"options": {"options": 58, "options_distinct": 42,
-                                             "tokens_per_option": 4}}]),
-      {"q": {"total": 58, "distinct": 42, "tokens_per_option": 4}})
-
 
 # ------------------------------------------------- the cache key the examples and docs teach
 # `examples/hooks/cache.py`, and the caching blocks of `docs/hooks/patterns.md`,
@@ -922,7 +836,7 @@ def run_cache_example():
 
     class StubLaya:
         @staticmethod
-        def load(name, on_predict_start=None, on_predict_end=None):
+        def load(name=None, on_predict_start=None, on_predict_end=None):
             return StubAgent(on_predict_start, on_predict_end)
 
     out = io.StringIO()
@@ -1183,103 +1097,31 @@ nested(one_child)
 check("docs/hooks/tracing.md/enrich on one state still links", SPAN_LINKS,
       [{"parent_run_id": one_child.run_id, "child_run_id": "child-1"}])
 
-# ------------------------------------------------ taught token-budget bodies size the whole call
-#
-# A start hook's ctx.head_max_len / ctx.max_len REPLACE the budgets in force (laya/agent.py), and
-# what is in force is the caller's per-call value or the checkpoint default in `agent.cfg`. Once a
-# question's options overflow the head, laya/common.py keeps each of them
-# `max(4, (head_max_len - 16) // k)` tokens -- so `16 + 4 * k` buys exactly the floor it is meant to
-# escape -- and the state is left with `max_len - head_max_len - 8` tokens, so widening the head
-# without widening the window truncates the state instead of the labels.
-
-WIDE_K = 60
+# Native checkpoints use one prompt budget. A start hook can raise it for a wide choice
+# anywhere in the request while respecting a larger caller or checkpoint budget.
 WIDE_Q = {"type": "choice", "instructions": "Which of these intents is it?",
           "criteria": {"intent_%02d" % i: "intent number %02d about the account" % i
-                       for i in range(WIDE_K)}}
+                       for i in range(60)}}
 SMALL_Q = {"type": "choice", "instructions": "Which team?",
            "criteria": {"billing": "invoices and payments", "support": "product help"}}
-CFG192 = {"head_max_len": 192, "max_len": 512}
-CFG256 = {"head_max_len": 256, "max_len": 1024}
 
 
-def budget_ctx(questions, cfg=CFG192, **in_force):
-    """A start-hook context for one call, with the budgets the caller left in place."""
+def budget_ctx(questions, checkpoint_max_len=4096, **in_force):
     return PredictContext(states=["My invoice was charged twice."], questions=questions,
-                          model="english", agent=type("Ag", (), {"cfg": dict(cfg)})(), **in_force)
+                          model="multimodal",
+                          agent=type("Ag", (), {"max_len": checkpoint_max_len})(), **in_force)
 
 
-def run_body(hook, ctx):
-    """The name of what the body raised, or None -- a start hook that raises aborts the call."""
-    try:
-        hook(ctx)
-        return None
-    except Exception as exc:
-        return exc.__class__.__name__
-
-
-BUDGET = [("docs/hooks/patterns.md", "widen_for_high_cardinality", "### Token-budget shaping"),
-          ("docs/hooks/examples.md", "widen", "## Token budget")]
-for path, name, anchor in BUDGET:
-    hook = taught(path, name, after=anchor)
-    check_true("%s/%s sizes on every question, not the first" % (path, name),
-               "next(iter(ctx.questions" not in hook.__taught_body__,
-               "the body still measures one question: %r" % hook.__taught_body__)
-
-    call = budget_ctx({"first": SMALL_Q, "second": WIDE_Q})
-    check("%s/%s/a call that needs no widening does not raise" % (path, name),
-          run_body(hook, call), None)
-    check_true("%s/%s/sizes on the widest question of the call" % (path, name),
-               call.head_max_len is not None and (call.head_max_len - 16) // WIDE_K > 4,
-               "wrote head=%s for a %d-option question: %s"
-               % (call.head_max_len, WIDE_K,
-                  "it wrote no budget at all" if call.head_max_len is None
-                  else "each label keeps %d tokens" % max(4, (call.head_max_len - 16) // WIDE_K)))
-    check_true("%s/%s/leaves the state a window" % (path, name),
-               call.max_len is not None and call.max_len - call.head_max_len - 8 >= 64,
-               "head=%s window=%s: %s"
-               % (call.head_max_len, call.max_len,
-                  "the state keeps no window of its own"
-                  if call.max_len is None or call.head_max_len is None
-                  else "the state keeps %d tokens" % (call.max_len - call.head_max_len - 8)))
-
-    empty = budget_ctx({})
-    check("%s/%s/a call with no questions neither raises nor rewrites" % (path, name),
-          (run_body(hook, empty), empty.head_max_len, empty.max_len), (None, None, None))
-    small = budget_ctx({"q": SMALL_Q})
-    run_body(hook, small)
-    check("%s/%s/a narrow question leaves the budget alone" % (path, name),
-          (small.head_max_len, small.max_len), (None, None))
-    caller = budget_ctx({"q": WIDE_Q}, head_max_len=324, max_len=2048)
-    run_body(hook, caller)
-    check_true("%s/%s/never lowers the caller's own per-call budget" % (path, name),
-               caller.head_max_len is not None and caller.head_max_len >= 324
-               and caller.max_len is not None and caller.max_len >= 2048,
-               "wrote (%s, %s) over a caller's (324, 2048)"
-               % (caller.head_max_len, caller.max_len))
-    wider = budget_ctx({"q": WIDE_Q}, head_max_len=640, max_len=4096)
-    run_body(hook, wider)
-    check_true("%s/%s/a caller who already went wider keeps their budget" % (path, name),
-               (wider.head_max_len, wider.max_len) == (640, 4096),
-               "wrote (%s, %s) over a caller's (640, 4096)"
-               % (wider.head_max_len, wider.max_len))
-    checkpoint = budget_ctx({"q": WIDE_Q}, cfg=CFG256)
-    run_body(hook, checkpoint)
-    check_true("%s/%s/never lowers the checkpoint default" % (path, name),
-               checkpoint.head_max_len is None or checkpoint.head_max_len >= 256,
-               "wrote head=%s where the checkpoint declares 256" % checkpoint.head_max_len)
-
-# The two pages teach one behaviour, on the same calls.
-_widest, _raised = budget_ctx({"first": SMALL_Q, "second": WIDE_Q}), budget_ctx({})
-_first_budget = taught(BUDGET[0][0], BUDGET[0][1], after=BUDGET[0][2])
-_first_budget(_widest)
-run_body(_first_budget, _raised)
-for path, name, anchor in BUDGET[1:]:
-    other = taught(path, name, after=anchor)
-    second, empty = budget_ctx({"first": SMALL_Q, "second": WIDE_Q}), budget_ctx({})
-    check("%s/%s/sizes like the pattern page" % (path, name),
-         (run_body(other, second), second.head_max_len, second.max_len,
-          run_body(other, empty), empty.head_max_len),
-         (None, _widest.head_max_len, _widest.max_len, None, _raised.head_max_len))
+widen = taught("docs/hooks/patterns.md", "widen_for_many_options", after="### Token-budget shaping")
+for label, ctx, expected in (
+    ("sizes on the widest question", budget_ctx({"first": SMALL_Q, "second": WIDE_Q}), 8192),
+    ("leaves empty calls alone", budget_ctx({}), None),
+    ("leaves a narrow call alone", budget_ctx({"q": SMALL_Q}, max_len=2048), 2048),
+    ("preserves a higher caller budget", budget_ctx({"q": WIDE_Q}, max_len=12288), 12288),
+    ("preserves a higher checkpoint budget", budget_ctx({"q": WIDE_Q}, checkpoint_max_len=16384), 16384),
+):
+    widen(ctx)
+    check("native token-budget hook " + label, (ctx.max_len, ctx.head_max_len), (expected, None))
 
 
 # --------------------------------------------------------------- the HTTP boundary
@@ -1418,31 +1260,7 @@ finally:
     _examples_emitted.clear()
 
 
-# Pin the optional TileLang entry points without importing the fast extra in CI.
-import ast  # noqa: E402
-
-# `encoding="utf-8"` because a bare `open()` takes the runner's locale codec, which is cp1252 on
-# `tests (windows)`; the gate that keeps every repo read in tests/ pinned is section 4 of
-# tests/test_portability.py.
-with open(os.path.join(os.path.dirname(os.path.dirname(__file__)), "laya", "tl_kernels.py"),
-          encoding="utf-8") as f:
-    _tl_defs = {node.name: node for node in ast.parse(f.read()).body if isinstance(node, ast.FunctionDef)}
-for _name in ("gemm_kernel", "gemm_geglu_kernel", "add_ln_kernel", "rope_kernel", "attn_kernel"):
-    _args = _tl_defs[_name].args
-    check("%s/cpu keyword-only" % _name, [arg.arg for arg in _args.kwonlyargs], ["cpu"])
-    check("%s/cpu default" % _name, ast.literal_eval(_args.kw_defaults[0]), False)
-    check("%s/GPU dtype default" % _name, ast.literal_eval(_args.defaults[-1]), "bfloat16")
-_args = _tl_defs["compile_cpu"].args
-check("compile_cpu/arguments", [arg.arg for arg in _args.args], ["kernel"])
-check("compile_cpu/varargs", _args.vararg.arg, "args")
-check("compile_cpu/kwargs", _args.kwarg.arg, "kwargs")
-
-
-# --------------------------------- docs/hooks/api.md signature blocks: hooks_timeout is
-# named next to every hooks_raise the page shows. Router.__init__, Router.route and
-# ONNXAgent.__init__ used to omit it while Agent, load, predict, predict_long, predict_batch
-# and system_one all carried it, so a reader copying one of those three blocks got the
-# instance default instead of the per-call override.
+# --------------------------------- Documented hook signatures
 _api_md_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                             "docs", "hooks", "api.md")
 with open(_api_md_path, encoding="utf-8") as _api_f:
@@ -1464,32 +1282,17 @@ _missing_timeout = [s.splitlines()[0].split("(")[0].strip()
 check("docs/hooks/api.md every block that names hooks_raise also names hooks_timeout",
       _missing_timeout, [])
 
-# Ban the pre-fix wordings so a future edit cannot just rename the parameter and go green.
-check_true("docs/hooks/api.md Router constructor no longer ends at hooks_concurrent",
-           "hooks_raise=True, hooks_concurrent=True,\n)\n\nrouter.route" not in _api_text)
-check_true("docs/hooks/api.md route() no longer ends at hooks_raise=None",
-           "hooks=None, hooks_raise=None)\n\nrouter.predict(" not in _api_text)
-check_true("docs/hooks/api.md ONNXAgent constructor no longer ends at hooks_concurrent",
-           "hooks_raise=True, hooks_concurrent=True)\n\nonnx_agent.system_one" not in _api_text)
-
-# Code truth: every documented surface really accepts hooks_timeout, so the ban cannot be
-# re-falsified by removing the parameter from the code.
 from laya.router import Router as _ApiRouter  # noqa: E402
-from laya.onnx_agent import ONNXAgent as _ApiONNXAgent  # noqa: E402
 from laya.agent import Agent as _ApiAgent  # noqa: E402
-from laya import load as _api_load  # noqa: E402
 
 for _label, _obj in [
     ("Agent.__init__", _ApiAgent.__init__),
-    ("load", _api_load),
     ("Agent.system_one", _ApiAgent.system_one),
     ("Agent.predict_batch", _ApiAgent.predict_batch),
     ("Router.__init__", _ApiRouter.__init__),
     ("Router.route", _ApiRouter.route),
     ("Router.predict", _ApiRouter.predict),
     ("Router.predict_batch", _ApiRouter.predict_batch),
-    ("ONNXAgent.__init__", _ApiONNXAgent.__init__),
-    ("ONNXAgent.system_one", _ApiONNXAgent.system_one),
 ]:
     check("hooks_timeout is a real parameter of %s" % _label,
           "hooks_timeout" in inspect.signature(_obj).parameters, True)
@@ -1511,7 +1314,7 @@ check_true("docs/hooks/tracing.md nested-call example passes a per-call on_predi
 
 # Code truth: no laya predict path ever writes `"run_id":` as a payload key, so the ban cannot be
 # re-falsified by adding the key at a later refactor.
-for _src_rel in ("laya/agent.py", "laya/router.py", "laya/onnx_agent.py", "laya/serve.py"):
+for _src_rel in ("laya/multimodal.py", "laya/router.py", "laya/serve.py"):
     with open(os.path.join(REPO, _src_rel), encoding="utf-8") as _sf:
         _src_text = _sf.read()
     check('%s never writes "run_id" as a payload key' % _src_rel,
@@ -1520,87 +1323,30 @@ for _src_rel in ("laya/agent.py", "laya/router.py", "laya/onnx_agent.py", "laya/
 # PredictContext really exposes run_id, which is the field the corrected example reads.
 _pc_fields = {f.name for f in dataclasses.fields(PredictContext)}
 check("PredictContext/run_id is a dataclass field", "run_id" in _pc_fields, True)
-# --------------------------------------- docs/hooks/errors.md hooks_raise and hooks_timeout
-# enumerations. Pre-fix the page named 4 surfaces for hooks_raise and 5 for hooks_timeout, so a
-# reader never knew predict_long / ONNXAgent.predict_batch / ONNXAgent.predict_long /
-# Router.route_batch / Router.predict_batch carried the controls. The code truth is: every
-# public class-body `def` on Agent / Router / ONNXAgent that takes a `hooks_raise` or
-# `hooks_timeout` kwarg, with the alias assignments (`predict = system_one`,
-# `system_one = predict`, `predict = system_one`) excluded so the page does not double-list.
-_errors_md = os.path.join(REPO, "docs", "hooks", "errors.md")
-with open(_errors_md, encoding="utf-8") as _ef:
-    _errors_text = _ef.read()
+# --------------------------------------- Hook controls in the error handling guide
+with open(os.path.join(REPO, "docs", "hooks", "errors.md"), encoding="utf-8") as _f:
+    _errors_text = _f.read()
 
-check_true("docs/hooks/errors.md drops the pre-fix hooks_raise parenthetical",
-           "(`hooks_raise=` on `predict_batch`,\n`system_one`, `Router.route`, `Router.predict`)"
-           not in _errors_text)
-check_true("docs/hooks/errors.md drops the pre-fix hooks_timeout four-plus-one list",
-           "per call on `predict_batch`, `system_one`,\n`Router.route`, `Router.predict` "
-           "and `ONNXAgent.system_one`" not in _errors_text)
+_hook_surfaces = {
+    "Agent.predict": Agent.predict,
+    "Agent.system_one": Agent.system_one,
+    "Agent.predict_batch": Agent.predict_batch,
+    "Router.route": Router.route,
+    "Router.route_batch": Router.route_batch,
+    "Router.predict": Router.predict,
+    "Router.predict_batch": Router.predict_batch,
+    "Router.predict_long": Router.predict_long,
+}
+for _setting, _marker in (
+    ("hooks_raise", "It is set per instance and can be overridden"),
+    ("hooks_timeout", "It can be set per instance or overridden"),
+):
+    _paragraph = _errors_text.partition(_marker)[2].split("\n\n", 1)[0]
+    _documented = set(re.findall(r"`([A-Z][A-Za-z]+\.[a-z_]+)`", _paragraph))
+    check("error guide lists " + _setting + " surfaces", _documented, set(_hook_surfaces))
+    for _label, _method in _hook_surfaces.items():
+        check_true(_label + " accepts " + _setting, _setting in inspect.signature(_method).parameters)
 
-
-def _paragraph(marker):
-    start = _errors_text.index(marker)
-    stop = _errors_text.find("\n\n", start)
-    return _errors_text[start:stop if stop != -1 else len(_errors_text)]
-
-
-_QUALIFIED = re.compile(r"`([A-Z][A-Za-z]+\.[a-z_]+)`")
-_raise_doc = set(_QUALIFIED.findall(_paragraph("It is set per instance and can be overridden")))
-_timeout_doc = set(_QUALIFIED.findall(_paragraph("It can be set per instance or overridden")))
-
-check_true("docs/hooks/errors.md hooks_raise paragraph names at least 11 surfaces",
-           len(_raise_doc) >= 11, "found %d" % len(_raise_doc))
-check_true("docs/hooks/errors.md hooks_timeout paragraph names at least 11 surfaces",
-           len(_timeout_doc) >= 11, "found %d" % len(_timeout_doc))
-
-
-def _canonical_surfaces(module_path, cls_name):
-    with open(module_path, encoding="utf-8") as f:
-        tree = ast.parse(f.read())
-    alias_names = set()
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Name):
-            for tgt in node.targets:
-                if isinstance(tgt, ast.Name):
-                    alias_names.add(tgt.id)
-    for cls in tree.body:
-        if isinstance(cls, ast.ClassDef) and cls.name == cls_name:
-            for sub in cls.body:
-                if isinstance(sub, ast.Assign) and isinstance(sub.value, ast.Name):
-                    for tgt in sub.targets:
-                        if isinstance(tgt, ast.Name):
-                            alias_names.add(tgt.id)
-            out = {"hooks_raise": set(), "hooks_timeout": set()}
-            for sub in cls.body:
-                if not isinstance(sub, ast.FunctionDef):
-                    continue
-                if sub.name in alias_names or sub.name.startswith("_"):
-                    continue
-                kwnames = {a.arg for a in list(sub.args.args) + list(sub.args.kwonlyargs)}
-                for kw in ("hooks_raise", "hooks_timeout"):
-                    if kw in kwnames:
-                        out[kw].add("%s.%s" % (cls_name, sub.name))
-            return out
-    raise AssertionError("%s not a top-level class in %s" % (cls_name, module_path))
-
-
-_real_raise, _real_timeout = set(), set()
-for _mod_rel, _cls in [("laya/agent.py", "Agent"),
-                        ("laya/router.py", "Router"),
-                        ("laya/onnx_agent.py", "ONNXAgent")]:
-    _per = _canonical_surfaces(os.path.join(REPO, _mod_rel), _cls)
-    _real_raise |= _per["hooks_raise"]
-    _real_timeout |= _per["hooks_timeout"]
-
-check("docs/hooks/errors.md hooks_raise surfaces match laya's class bodies",
-      _raise_doc, _real_raise)
-check("docs/hooks/errors.md hooks_timeout surfaces match laya's class bodies",
-      _timeout_doc, _real_timeout)
-check_true("laya's AST scan finds at least 9 hooks_raise surfaces",
-           len(_real_raise) >= 9, "found %d" % len(_real_raise))
-check_true("laya's AST scan finds at least 11 hooks_timeout surfaces",
-           len(_real_timeout) >= 11, "found %d" % len(_real_timeout))
 # --------------------------------------- docs/hooks/lifecycle.md three-tier composition
 # laya/hooks.py::compose_hooks returns `defaults + installed + per-call`, so every lifecycle
 # diagram and the ordering rules must name all three tiers with defaults first. Pre-fix, the
@@ -1732,59 +1478,12 @@ try:
           _compose_probe_seen, ["defaults", "installed", "per-call"])
 finally:
     _hooks_mod.clear_default_hooks()
-# --------------------------------------- Laya guide batch path: predict_batch vs route_batch
-# The Laya guide's "Per-call hooks reach the batch path" bullet claims specific kwargs for
-# Router.predict_batch and Router.route_batch. Pre-fix it lumped both together and claimed
-# they both take `hooks`, `on_predict_start`, `on_predict_end` and `hooks_raise`, but
-# route_batch fires only on_route and has no predict events to bind convenience callables
-# to, so its signature carries neither on_predict_start nor on_predict_end. Both take
-# hooks_timeout, which the pre-fix bullet did not mention.
-_readme_md = os.path.join(REPO, "docs", "laya-guide.md")
-with open(_readme_md, encoding="utf-8") as _rmf:
-    _readme_text = _rmf.read()
-
-check_true("Laya guide drops the pre-fix combined batch-hooks claim",
-           "Router.predict_batch` and `Router.route_batch` take `hooks`, `on_predict_start`, "
-           "`on_predict_end` and `hooks_raise`, matching `predict`" not in _readme_text)
-
-# Pull the bullet that names the batch path so the gate reads one specific claim.
-_bullets = [ln for ln in _readme_text.splitlines()
-            if ln.startswith("* ")
-            and "Router.predict_batch" in ln and "Router.route_batch" in ln]
-check_true("Laya guide has one Per-call-hooks-reach-the-batch bullet",
-           len(_bullets) == 1, "found %d" % len(_bullets))
-_batch_bullet = _bullets[0] if _bullets else ""
-
-# Each named Router entry must appear with the kwarg set the actual signature has.
-_predict_batch_params = set(inspect.signature(Router.predict_batch).parameters) - {"self"}
-_route_batch_params = set(inspect.signature(Router.route_batch).parameters) - {"self"}
-check_true("Router.predict_batch really does not take on_predict_start / on_predict_end",
-           {"on_predict_start", "on_predict_end"}.issubset(_predict_batch_params),
-           sorted(_predict_batch_params))
-check_true("Router.route_batch really does not take on_predict_start / on_predict_end",
-           {"on_predict_start", "on_predict_end"}.isdisjoint(_route_batch_params),
-           sorted(_route_batch_params))
-for _kw in ("hooks", "hooks_raise", "hooks_timeout"):
-    check("Router.predict_batch takes %s" % _kw, _kw in _predict_batch_params, True)
-    check("Router.route_batch takes %s" % _kw, _kw in _route_batch_params, True)
-
-# The bullet must name hooks_timeout for both, must name the two convenience callables for
-# predict_batch, and must NOT name them for route_batch. Locate each sub-claim by the entry
-# name and read the kwargs list that follows it up to the next semicolon / period.
-def _kw_backtick_names(sentence_fragment):
-    return set(re.findall(r"`([a-z_]+)`", sentence_fragment))
-
-
-_pb_zone = _batch_bullet.split("`Router.predict_batch`", 1)[1].split(";")[0]
-_rb_zone = _batch_bullet.split("`Router.route_batch`", 1)[1].split("(")[0]
-_pb_named = _kw_backtick_names(_pb_zone)
-_rb_named = _kw_backtick_names(_rb_zone)
-check("README predict_batch clause names exactly its hooks kwargs",
-      _pb_named & {"hooks", "on_predict_start", "on_predict_end", "hooks_raise", "hooks_timeout"},
-      {"hooks", "on_predict_start", "on_predict_end", "hooks_raise", "hooks_timeout"})
-check("README route_batch clause names exactly its hooks kwargs",
-      _rb_named & {"hooks", "on_predict_start", "on_predict_end", "hooks_raise", "hooks_timeout"},
-      {"hooks", "hooks_raise", "hooks_timeout"})
+# --------------------------------------- Routing has no prediction hook callables
+_prediction_hooks = {"on_predict_start", "on_predict_end"}
+check_true("Router.predict_batch accepts prediction hook callables",
+           _prediction_hooks <= set(inspect.signature(Router.predict_batch).parameters))
+check_true("Router.route_batch accepts routing hooks only",
+           _prediction_hooks.isdisjoint(inspect.signature(Router.route_batch).parameters))
 
 
 # --------------------------------------------------------------- patterns.md composition order

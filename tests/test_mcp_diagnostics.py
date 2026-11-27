@@ -20,7 +20,7 @@ STATE = {"message": "Turn lights off"}
 QUESTIONS = {"category": {"type": "choice", "instructions": "Classify the message.",
                           "criteria": {"A": "Support", "B": "Other"}}}
 DIAGNOSTIC = {"stage": "whole_state", "reason": "insufficient_words", "source": None}
-ROUTING = {"model": "english", "repo": "example/english", "reason": "test route"}
+ROUTING = {"model": "multimodal", "repo": "example/native", "reason": "test route"}
 INVALID_FLAGS = [None, 0, 1, 0.0, 1.0, "false", "true", "", [], {}]
 
 
@@ -83,7 +83,7 @@ def test_route_returns_the_core_diagnostic_without_detection_values(state, expec
 
 
 @pytest.mark.parametrize("override", [
-    {"model": "english"}, {"task": "typed_decisions"}, {"lang": "de"}, {"lang_guess": "de"},
+    {"model": "multimodal"}, {"task": "default"}, {"lang": "de"}, {"lang_guess": "de"},
 ])
 def test_route_override_has_explicit_null_diagnostic(override):
     router = Router()
@@ -255,16 +255,16 @@ def _call_batch_tool(arguments):
 def test_batch_default_preserves_legacy_router_and_exact_output(flag):
     router = LegacyBatchRouter()
     out = laya_route_batch(_batch_requests(), router=router, **flag)
-    expected = {"decisions": [dict(ROUTING), dict(ROUTING)], "model_counts": {"english": 2}}
+    expected = {"decisions": [dict(ROUTING), dict(ROUTING)], "model_counts": {"multimodal": 2}}
     assert json.dumps(out) == json.dumps(expected)
     assert len(router.batch_calls) == 1
 
 
 def test_batch_diagnostics_preserve_order_overrides_and_model_counts():
-    router = RecordingBatchRouter()
+    router = RecordingBatchRouter(models={"support": "models/support"})
     requests = _batch_requests()
     requests[1]["lang"] = "de"
-    requests.append({"state": copy.deepcopy(STATE), "questions": copy.deepcopy(QUESTIONS), "model": "english"})
+    requests.append({"state": copy.deepcopy(STATE), "questions": copy.deepcopy(QUESTIONS), "model": "support"})
     requests.append({"state": {"note": "This is an English note about the order. " * 20,
                                "payload": {"customer": "Ich kann mich nicht anmelden und brauche Hilfe"}},
                      "questions": copy.deepcopy(QUESTIONS)})
@@ -277,8 +277,8 @@ def test_batch_diagnostics_preserve_order_overrides_and_model_counts():
          "source": {"leaf_index": 1, "path": ["payload", "customer"], "line": 1}},
     ]
     assert explained == plain
-    assert [d["model"] for d in explained["decisions"]] == ["multilingual", "multilingual", "english", "multilingual"]
-    assert explained["model_counts"] == {"multilingual": 3, "english": 1}
+    assert [d["model"] for d in explained["decisions"]] == ["multimodal", "multimodal", "support", "multimodal"]
+    assert explained["model_counts"] == {"multimodal": 3, "support": 1}
     assert router.batch_calls[0][1] == {}
     assert router.batch_calls[1][1] == {"explain": True}
     assert len(router.calls) == 2 * len(requests)
@@ -289,13 +289,13 @@ def test_batch_uses_each_final_hook_decision_and_preserves_hooks_timeout():
     class ReplaceSecondRoute(BaseHook):
         def on_route(self, ctx):
             if ctx.states[0]["message"].startswith("xyzzy"):
-                ctx.decision = dict(ROUTING)
+                ctx.decision = dict(ROUTING, model="support")
 
     router = RecordingBatchRouter(hooks=[ReplaceSecondRoute()])
     out = laya_route_batch(_batch_requests(), hooks_timeout=2.5, router=router, explain=True)
     assert out["decisions"][0]["diagnostic"] == DIAGNOSTIC
-    assert out["decisions"][1] == dict(ROUTING, diagnostic=None)
-    assert out["model_counts"] == {"multilingual": 1, "english": 1}
+    assert out["decisions"][1] == dict(ROUTING, model="support", diagnostic=None)
+    assert out["model_counts"] == {"multimodal": 1, "support": 1}
     assert router.batch_calls[0][1] == {"hooks_timeout": 2.5, "explain": True}
     assert len(router.batch_calls) == 1
     assert len(router.calls) == 2
@@ -380,7 +380,7 @@ def test_real_mcp_batch_calls_honor_explain_and_timeout(flag, timeout, expected_
         assert [d["diagnostic"]["reason"] for d in out["decisions"]] == ["insufficient_words", "no_language_evidence"]
     else:
         assert all(set(d) == {"model", "repo", "reason"} for d in out["decisions"])
-    assert out["model_counts"] == {"multilingual": 2}
+    assert out["model_counts"] == {"multimodal": 2}
     assert len(router.batch_calls) == 1
     assert router.batch_calls[0][1] == expected_kwargs
     assert len(router.calls) == 2

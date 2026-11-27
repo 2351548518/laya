@@ -114,7 +114,7 @@ def build_parser():
                         help="a soft language hint that participates in routing instead of skipping "
                              "detection: checked after --lang and before the built-in detector, so a "
                              "probable-but-uncertain code can nudge the checkpoint without forcing it")
-    parser.add_argument("--task", help="force a typed-decisions workflow instead of detecting it")
+    parser.add_argument("--task", help="select a registered checkpoint by task name")
     parser.add_argument("--preset", choices=sorted(PRESETS), metavar="NAME",
                         help="answer a ready-made question preset (%s) instead of the router questions; implies --predict"
                         % ", ".join(sorted(PRESETS)))

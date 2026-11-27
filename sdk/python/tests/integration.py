@@ -13,6 +13,23 @@ import time
 from laya_client import LayaAPIError, LayaClient, LayaConnectionError
 
 
+def jev_confidence(answer):
+    probabilities = answer["probabilities"]
+    labels = sorted(probabilities, key=int) if answer["type"] == "score" else list(probabilities)
+    values = [probabilities[label] for label in labels]
+    n = len(values)
+    if n == 1:
+        return 1.0
+    total = sum(values)
+    p = [value / total if total else 1 / n for value in values]
+    mode = p.index(max(p))
+    if answer["type"] == "choice":
+        return (p[mode] - 1 / n) / (1 - 1 / n)
+    spread = sum(value * abs(i - mode) for i, value in enumerate(p))
+    uniform_spread = sum(abs(i - (n - 1) / 2) for i in range(n)) / n
+    return max(0.0, 1 - spread / uniform_spread)
+
+
 def check_batch(result, expected, strict=False):
     assert len(result["results"]) == len(expected)
     for item, direct in zip(result["results"], expected):
@@ -39,28 +56,21 @@ def check_batch(result, expected, strict=False):
         assert result["total_usage"][key] == sum(item["usage"][key] for item in expected), key
 
 
-def check_batch_http(client, anonymous, fixture, strict, legacy):
+def check_batch_http(client, anonymous, fixture, strict, model):
     questions = fixture["questions"]
-    if legacy:
-        # v0.4.7 has a batch endpoint. One-state passes give its unchanged fixture a parity oracle.
-        states = ["hello", fixture["state"], ["hello"]]
-        expected = [client.predict(state, questions, model="english") for state in states]
-        check_batch(client.predict_batch(states, questions, model="english", batch_size=1), expected)
-        check_batch(client.predict_batch(states[:1], questions, model="english"), expected[:1])
-    else:
-        for case in fixture["batch_cases"]:
-            result = client.predict_batch(case["states"], questions, model="english", **case["controls"])
-            check_batch(result, case["expected"], strict)
-        labels = {str(i): "Option %d" % i for i in range(5)}
-        large = {"large": {"type": "choice", "instructions": "Pick one", "criteria": labels}}
-        states = fixture["batch_cases"][0]["states"]
-        # Tournament execution is per state on the server, even when batch shape controls are set.
-        expected = [client.predict(state, large, model="english") for state in states]
-        check_batch(client.predict_batch(states, large, model="english",
-                                         batch_size=2, sort_by_length=True), expected, strict)
+    for case in fixture["batch_cases"]:
+        result = client.predict_batch(case["states"], questions, model=model, **case["controls"])
+        check_batch(result, case["expected"], strict)
+    tournament = fixture["tournament"]
+    large = tournament["questions"]
+    states = fixture["batch_cases"][0]["states"]
+    # Strict single predictions use Jev confidence. Strict batches retain core confidence.
+    expected = tournament["expected"] if strict else [client.predict(state, large, model=model) for state in states]
+    check_batch(client.predict_batch(states, large, model=model,
+                                     batch_size=2, sort_by_length=True), expected, strict)
 
     small = {"refund": questions["refund"]}
-    result = client.predict_batch(["hello"] * 64, small, model="english", batch_size=8)
+    result = client.predict_batch(["hello"] * 64, small, model=model, batch_size=8)
     assert len(result["results"]) == 64
     for key in ("input_tokens", "output_tokens"):
         assert result["total_usage"][key] == sum(item["usage"][key] for item in result["results"])
@@ -78,14 +88,13 @@ def check_batch_http(client, anonymous, fixture, strict, legacy):
             raise AssertionError("Batch request should have failed with HTTP %d" % status)
 
 
-def run(server_python, fixture_path, strict=False, legacy=False):
+def run(server_python, fixture_path, strict=False):
+    model = "multimodal"
     with tempfile.TemporaryDirectory(prefix="laya-sdk-live-") as directory:
         root = Path(directory)
-        command = [str(server_python), "-u", str(fixture_path)]
-        if not legacy:
-            command.extend(["--tournament", "--batch"])
-            if strict:
-                command.append("--strict")
+        command = [str(server_python), "-u", str(fixture_path), "--tournament", "--batch"]
+        if strict:
+            command.append("--strict")
         env = dict(os.environ)
         env.pop("PYTHONPATH", None)
         env.update(HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1", LAYA_TOURNAMENT_GROUP="0",
@@ -118,7 +127,7 @@ def run(server_python, fixture_path, strict=False, legacy=False):
                         if time.monotonic() >= deadline or server.poll() is not None:
                             raise
                         time.sleep(0.05)
-                result = client.predict(fixture["state"], fixture["questions"], model="english")
+                result = client.predict(fixture["state"], fixture["questions"], model=model)
                 expected = fixture["expected"]
                 assert result["model"] == expected["model"]
                 if strict:
@@ -131,6 +140,9 @@ def run(server_python, fixture_path, strict=False, legacy=False):
                                     for qid, answer in expected["answers"].items()},
                         "usage": {k: expected["usage"][k] for k in ("input_tokens", "output_tokens")},
                     }
+                    for answer in projected["answers"].values():
+                        if answer["type"] in ("choice", "score"):
+                            answer["confidence"] = round(jev_confidence(answer), 4)
                     assert result == projected, (result, projected)
                     gated = client.predict(fixture["state"], fixture["questions"], min_confidence=0.99)
                     assert all("abstention" not in a for a in gated["answers"].values())
@@ -140,27 +152,26 @@ def run(server_python, fixture_path, strict=False, legacy=False):
                             assert result["answers"][qid][key] == value, (qid, key)
                     for key, value in expected["usage"].items():
                         assert result["usage"][key] == value, key
-                    assert result["routing"]["model"] == "english"
+                    assert result["routing"]["model"] == model
                     auto = client.predict(fixture["state"], fixture["questions"])
-                    assert auto["routing"]["model"] == "multilingual"
+                    assert auto["routing"]["model"] == model
                     gated = client.predict(fixture["state"], fixture["questions"], lang="en",
-                                           max_len=128, head_max_len=64, min_confidence=0.0)
-                    assert gated["routing"]["model"] == "english"
+                                           max_len=128, min_confidence=0.0)
+                    assert gated["routing"]["model"] == model
                     assert all(a["abstention"] == "passed" for a in gated["answers"].values())
 
-                if not legacy:
-                    labels = {str(i): "Option %d" % i for i in range(5)}
-                    answer = client.predict("hello", {"large": {
-                        "type": "choice", "instructions": "Pick one", "criteria": labels,
-                    }})["answers"]["large"]
-                    assert set(answer["probabilities"]) == set(labels)
-                    assert answer["choice"] in labels
-                    if strict:
-                        assert "x_tournament" not in answer
-                    else:
-                        finalists = answer["x_tournament"]["finalists"]
-                        assert 0 < len(finalists) <= 2
-                        assert all(p == 0.0 for k, p in answer["probabilities"].items() if k not in finalists)
+                labels = {str(i): "Option %d" % i for i in range(5)}
+                answer = client.predict("hello", {"large": {
+                    "type": "choice", "instructions": "Pick one", "criteria": labels,
+                }})["answers"]["large"]
+                assert set(answer["probabilities"]) == set(labels)
+                assert answer["choice"] in labels
+                if strict:
+                    assert "x_tournament" not in answer
+                else:
+                    finalists = answer["x_tournament"]["finalists"]
+                    assert 0 < len(finalists) <= 2
+                    assert all(p == 0.0 for k, p in answer["probabilities"].items() if k not in finalists)
 
                 anonymous = LayaClient(base_url=fixture["baseURL"], api_key="wrong")
                 assert anonymous.health() == {"status": "ok"}
@@ -176,9 +187,9 @@ def run(server_python, fixture_path, strict=False, legacy=False):
                     assert error.status_code == 413
                 else:
                     raise AssertionError("Server request limit was bypassed")
-                check_batch_http(client, anonymous, fixture, strict, legacy)
+                check_batch_http(client, anonymous, fixture, strict, model)
                 print("PASS real HTTP single and batch inference, order, controls, auth and limits: "
-                      + ("legacy fixture" if legacy else "strict" if strict else "extended/tournament"), flush=True)
+                      + ("strict" if strict else "extended/tournament"), flush=True)
             except BaseException:
                 stderr.flush()
                 stderr.seek(0)
@@ -201,10 +212,8 @@ if __name__ == "__main__":
     parser.add_argument("--server-python", required=True, type=Path)
     parser.add_argument("--server-fixture", type=Path,
                         default=Path(__file__).resolve().parents[3] / "tests" / "sdk_server_fixture.py")
-    parser.add_argument("--legacy-fixture", action="store_true")
     args = parser.parse_args()
     # A virtualenv's interpreter may be a symlink to the base Python executable.
     server_python, fixture_path = args.server_python.absolute(), args.server_fixture.resolve()
-    run(server_python, fixture_path, legacy=args.legacy_fixture)
-    if not args.legacy_fixture:
-        run(server_python, fixture_path, strict=True)
+    run(server_python, fixture_path)
+    run(server_python, fixture_path, strict=True)

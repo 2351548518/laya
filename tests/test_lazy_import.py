@@ -75,7 +75,7 @@ import laya  # noqa: E402
 
 missing = [n for n in laya.__all__ if not hasattr(laya, n)]
 check("all __all__ names resolve with torch", missing, [])
-check("from-import of a lazy name", laya.Agent.__name__, "Agent")
+check("from-import of a lazy name", laya.Agent.__name__, "MultimodalAgent")
 check("__dir__ lists lazy names", "load" in dir(laya), True)
 
 

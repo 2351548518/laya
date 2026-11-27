@@ -23,9 +23,8 @@ The pools here are smaller than the ones the bar was originally chosen against (
 reproducible and are not quoted anywhere). What this script pins is the shape of the trade: the
 ordering of the rows, and the marginal cost in real prose of each step of the bar.
 
-No model weights, no network beyond the dataset download `massive_route_comparison.py` already
-does, and no dependency on the current value of either constant -- the bar is applied here from
-the swept parameters, so the table stays meaningful after the constants move.
+The script downloads the pinned dataset on a cache miss. It evaluates the supplied sweep
+parameters independently of the current thresholds and loads no model weights.
 """
 from __future__ import annotations
 

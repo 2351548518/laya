@@ -51,7 +51,7 @@ combines L1 coordinate error, generalized IoU (GIoU) and quality supervision fro
 IoU. During development, joint selection can combine box accuracy with macro decision accuracy
 across modalities.
 
-The head lives in `laya/grounding.py`, the trainer in `laya/grounding_train.py`, and the starter
+The head lives in `laya/grounding.py`, the trainer in `laya/train.py`, and the starter
 settings in `configs/multimodal/`. [Joint training and evaluation](multimodal.md#head-warmup-and-lora-training)
 
 ## Evaluation and scope

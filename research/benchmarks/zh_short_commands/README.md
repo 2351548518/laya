@@ -101,31 +101,18 @@ Recorded by `run.py` in the archive's `config.checkpoint` block; the audit refus
 - Scoring: the checkpoint's own per-bucket temperatures, clamped exactly as `Agent` applies them (`unclamped: false` in the archive), the same code path as [`research/eval/laya_eval.py`](../../eval/laya_eval.py). No thresholds were fitted, and nothing here is fine-tuned.
 - The whole seven-configuration sweep takes about 20 seconds on CPU.
 
-`research/eval/README.md` records a different value for the same file — `sha256 b99c8bea…`. That string is the git blob id (`SHA-1`) of the *LFS pointer* stored in the Hub repository, not the SHA-256 of the weights: hashing the pointer text `version https://git-lfs.github.com/spec/v1\noid sha256:9d628fd9…\nsize 643835514\n` as a git blob reproduces `b99c8bea239c53f6f6bce734557dc6c403fa6b3e` exactly. The same file's `rl_agent_config.json` entry (`sha256 00e35f88…`) is likewise the blob id of the JSON itself. Anyone who checks these with `sha256sum` will see a mismatch and conclude the checkpoint changed when it did not. Flagged here rather than silently fixed, since it is a separate change to a file this contribution does not own.
-
 ## Run it on your machine
 
-Download only the multilingual runtime files if you do not already have them (about 614 MiB):
-
-```python
-from huggingface_hub import snapshot_download
-root = snapshot_download(
-    "convaiinnovations/laya",
-    allow_patterns=["multilingual/*.json", "multilingual/model.safetensors",
-                    "multilingual/encoder/*", "multilingual/tokenizer/*"],
-)
-print(root + "/multilingual")
-```
-
-Set `CHECKPOINT` to that directory, check the file, then run the sweep. `--stub` scores with a fixed pseudo-random vector instead of a checkpoint and exercises the whole pipeline offline; `--configs` runs a subset:
+Set `CHECKPOINT` to the local [native checkpoint](../../../README.md#quickstart).
+The runner records hashes of the cases, prompts, weights and native configuration. Choose a fresh
+output directory for each run. Use `--stub` to check the pipeline without a model, or `--configs`
+to select a subset of the sweep.
 
 ```bash
 python research/benchmarks/zh_short_commands/run.py --checkpoint "$CHECKPOINT" \
-  --device cpu --out /tmp/zh-short-commands
-python research/benchmarks/zh_short_commands/audit.py --run-dir /tmp/zh-short-commands
+  --device cpu --out _local/zh-short-commands
+python research/benchmarks/zh_short_commands/audit.py --run-dir _local/zh-short-commands
 ```
-
-The runner hashes the cases, `prompts.py` and the checkpoint's `model.safetensors` into the report, so an archive from another machine can be compared with the committed one field by field. Use a new output directory for every run. `--unclamped` reproduces the raw pre-clamp temperatures the older committed sweeps used; the archived numbers above use the clamped ones.
 
 ## Files
 

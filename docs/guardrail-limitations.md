@@ -1,9 +1,9 @@
-# Guardrail Limitations
+# Historical guardrail measurements
 
-The guard presets detect direct attacks well and instructions embedded in document-shaped text
-much less well. [#781](https://github.com/NandhaKishorM/laya/issues/781) measured this on 53
-synthetic labelled cases; the numbers below are that reporter's measurements, not ours, and this
-page reports them rather than restating them as our own benchmarks.
+On 53 synthetic labelled cases the earlier Laya checkpoint scored direct attacks higher than
+instructions embedded in document-shaped text. These measurements apply to the checkpoint and
+settings below. Evaluate the native multimodal checkpoint on labelled examples from your deployment
+before transferring a threshold. [Original report](https://github.com/NandhaKishorM/laya/issues/781)
 
 ## What was measured
 
@@ -22,8 +22,7 @@ for them:
 All three `prompt_injection` scores sit under the 0.5 threshold a deployer would read as "not an
 injection". The `harm_severity` column is a different unit. `laya.guard_questions()` defines it as a
 `score` question over four levels, and a `score` answer's `score` field is the *expected level* —
-`laya/agent.py` computes it as `(np.arange(k) * p).sum()`, so 0.82 is a position on a 0..3 scale,
-not a probability.
+the expected value is `(np.arange(k) * p).sum()`, so 0.82 is a position on a 0..3 scale.
 
 That distinction decides how the column reads against the guard's own gate.
 `laya/integrations/_guard.py` turns the level into the probability that the answer sits at or above

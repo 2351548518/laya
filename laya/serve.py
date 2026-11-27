@@ -22,16 +22,13 @@ env var                    meaning                                        defaul
 ``LAYA_HOST``              bind address                                   0.0.0.0
 ``LAYA_PORT``              bind port                                      8000
 ``LAYA_DEVICE``            torch device for every checkpoint              (auto)
-``LAYA_MULTIMODAL_MODEL``  native multimodal model or trained directory   (off)
+``LAYA_MULTIMODAL_MODEL``  native checkpoint directory or Hub ID         (published Qwen)
 ``LAYA_PRELOAD``           build the checkpoints at startup, not lazily   1
-``LAYA_MODELS``            comma list to preload                          (all classic,
-                                                                         or multimodal)
+``LAYA_MODELS``            comma list to preload                          (all registered)
 ``LAYA_THREADS``           cap torch intra-op threads (CPU inference).    (torch
                            Keep <= physical cores; oversubscribing the     default)
                            logical/hyperthread count is a large regression.
-``LAYA_AUTO_TASK``         auto-route to the typed-decisions checkpoint   0
-``LAYA_DEFAULT_MODEL``     fallback checkpoint when a state carries no   (multilingual)
-                           language evidence; aliases like ml work
+``LAYA_DEFAULT_MODEL``     default registered checkpoint                  (multimodal)
 ``LAYA_MAX_LOADED``        checkpoints kept resident at once. Below what  2
                            routing can choose, one reloads per switch.
 ``LAYA_IDLE_UNLOAD_SECONDS`` unload checkpoints after this many idle     0 (off)
@@ -104,38 +101,11 @@ MAX_BODY_BYTES = 2 * 1024 * 1024
 # the orchestrator the process is healthy, so nothing ever restarts it. Bounding the read turns an
 # indefinitely held slot into a slot held for at most this long, and releases it either way.
 DEFAULT_BODY_READ_TIMEOUT = 10.0
-# `/v1/systemone/batch` collates `states x questions` rows into ONE tensor, and each of the caps
-# above bounds only one factor: 64 states of 64 questions is 4096 rows from a 4.1 KB body, with every
-# documented limit satisfied, and `batch_size` defaults to `None`, which `predict_batch` documents as
-# "sends them all in one pass". Measured on the english checkpoint, CPU: ~127-142 ms per row at its
-# `max_len` of 512, roughly flat to 128 rows, so 4096 rows is minutes inside one forward pass while
-# the single inference gate is held.
-#
-# What a row COSTS is its width, and `max_len` is a request field capped only by
-# `DEFAULT_MAX_TOKEN_BUDGET` (8192) -- 16x the english checkpoint's own 512. 256 rows at 8192 is the
-# same 2 097 152 tokens as 4096 rows at 512 and collates the same tensor, so a bound on rows is the
-# wrong bound. The budget below is therefore in tokens.
-#
-# It CHUNKS rather than refuses. A refusal would need this number to be right about hardware serve
-# cannot see: measured here, peak RSS did not move at all between 32, 64 and 128 rows (flat at
-# 1151 MB), so the memory ceiling this would have been protecting was never reached at any size that
-# could be measured, and a 4096-row batch may be entirely reasonable on a larger machine. Splitting
-# the work bounds what one forward pass collates without refusing any request, which is the part that
-# can be justified. What it does NOT bound is how long one request holds the inference gate -- that is
-# `LAYA_MAX_CONCURRENT` and the single-worker pool's business, and is already true of a single
-# `/v1/systemone` request over a 50 000-character state.
-#
-# 131072 is 256 rows at `_BATCH_ROW_TOKENS_ASSUMED`. Chosen so every shape that fits it goes through
-# in ONE pass exactly as before -- byte-identical, since `batch_size` is then not passed at all -- and
-# only larger shapes are split. That makes the number low-stakes: too low over-chunks, too high
-# under-chunks, and neither refuses anything.
+# Plan HTTP chunks using the number of states, questions and estimated tokens per row.
+# Native inference prepares each state separately and bounds its own question batches.
 DEFAULT_MAX_BATCH_TOKENS = 131072
-# The row width assumed when a request does not set `max_len`. serve cannot know the routed
-# checkpoint's own `max_len` without loading it, so this is the shipped english value; multilingual
-# is 1024, which this under-counts by 2x, meaning a multilingual batch chunks half as aggressively as
-# the budget intends.
 _BATCH_ROW_TOKENS_ASSUMED = 512
-# HTTP-only amplification guard; the library keeps its head_max_len-aware budget.
+# Bound the number of candidate options a single HTTP question can request.
 MAX_CHOICE_OPTIONS = 100
 # With `LAYA_TOURNAMENT_GROUP` set, a choice is narrowed in groups rather than read in one pass, so
 # its cap is Jev's documented one instead (#302). The tournament reads every label inside a group's
@@ -173,10 +143,8 @@ DEFAULT_MAX_TOKEN_BUDGET = 8192
 # language it reads, how many tokens it gets and where it abstains are all plain data.
 BODY_CONTROLS = ("model", "max_len", "head_max_len", "task", "lang", "lang_guess", "min_confidence")
 BODY_REFUSALS = ("hooks", "on_predict_start", "on_predict_end", "hooks_raise", "hooks_timeout")
-# `image`, `audio` and `video` are `Router.predict` arguments since 0.4.25 and route to the vega
-# lane; the HTTP body has no media encoding yet, so they are refused here rather than accepted as
-# strings and passed on, and the response says where media goes (laya.Agent(vegaml=True) locally).
-# A tuple of their own, because ``BODY_REFUSALS`` is pinned as the hook set LangChain refuses too.
+# Direct media goes to /v1/multimodal. System One accepts named image assets.
+# BODY_REFUSALS covers the separate hook controls shared with LangChain.
 MEDIA_REFUSALS = ("image", "audio", "video")
 
 # ``Router.predict_batch`` reads two different kinds of control: call-level keyword arguments that
@@ -483,18 +451,10 @@ def _predict_with_tournament(router: Any, state: Any, questions: Dict[str, Any],
 
 
 def _published_model_ids() -> Dict[str, str]:
-    """Public Hugging Face ids accepted so a client can name a checkpoint.
+    """Public checkpoint IDs clients may use instead of a registered name."""
+    from .router import DEFAULT_MODELS
 
-    Inverted from `laya.router.STANDALONE_MODELS` at call time rather than typed out: the
-    ids a client may send belong to that registry, and a copy here would silently auto-route
-    a checkpoint the router already knows. The root bundle is deliberately absent -- the
-    documented ``convaiinnovations/laya`` value means "let the Router choose", rather than
-    pinning the English checkpoint. Imported here rather than at module scope, the way this
-    module's other `laya.router` use does, so ``import laya.serve`` stays cheap.
-    """
-    from .router import BUNDLE_REPO, STANDALONE_MODELS
-
-    return {repo: name for name, repo in STANDALONE_MODELS.items() if repo != BUNDLE_REPO}
+    return {repo.lower(): name for name, repo in DEFAULT_MODELS.items()}
 
 
 def _names_unpublished_source(text: str) -> bool:
@@ -515,8 +475,7 @@ def _names_unpublished_source(text: str) -> bool:
 def _resolve_model(model: Optional[str], resolve=None) -> Optional[str]:
     """Map a client's `model` field onto a Laya checkpoint, or None to auto-route.
 
-    A Jev id such as ``jev-1``, and the bundle id ``convaiinnovations/laya``, stay None:
-    both mean "let the Router choose". A path or an unpublished Hub repo id is a
+    Jev IDs such as ``jev-1`` select the server default. A path or an unpublished Hub repo id is a
     different miss. Swallowing it used to answer with whichever checkpoint routing
     picked, which is a wrong answer. That request is a 422 instead.
     """
@@ -526,12 +485,8 @@ def _resolve_model(model: Optional[str], resolve=None) -> Optional[str]:
     published = _published_model_ids().get(text.lower())
     if published is not None:
         return published
-    from .router import BUNDLE_REPO, normalise_name
+    from .router import normalise_name
 
-    # The root bundle is the one Hub id whose documented meaning is auto-route, not a pin.
-    # It contains a slash, so the path check below would otherwise refuse it.
-    if text.lower() == BUNDLE_REPO:
-        return None
     # The resolver raises ValueError on anything that is not a known checkpoint or
     # alias. `resolve` defaults to the built-in table's `normalise_name`; the request
     # handlers pass the app's `Router.resolve`, so a checkpoint registered on the
@@ -806,20 +761,7 @@ def _validate_sort_by_length_param(body: Dict[str, Any]) -> Optional[bool]:
 
 
 def _resolve_max_loaded() -> Optional[int]:
-    """Resident-checkpoint cap from ``LAYA_MAX_LOADED``; ``None`` leaves it to ``Router``.
-
-    ``Router`` keeps two checkpoints resident, which is exactly the number automatic routing
-    picks between. ``LAYA_AUTO_TASK`` adds `typed-decisions` as a third possibility, and a cap
-    below the number of checkpoints in play unloads the least recently used one on every
-    switch -- #172 measured 20-23 s per request rebuilding a checkpoint on CPU against
-    49-136 ms with it resident. The value is left out of the constructor when unset rather
-    than defaulted to a copy of ``Router``'s own default here, so the two cannot drift.
-    Unparseable or non-positive input falls back the way ``_resolve_max_concurrent`` does: a
-    typo in a deployment file should not stop the server from starting.
-
-    Only checkpoints reached on demand are bounded by it: ``Router.preload()`` raises the cap
-    to hold whatever it builds, so a lower value never evicts a preloaded checkpoint.
-    """
+    """Resident checkpoint cap for on-demand loads. Preload can raise the cap."""
     raw = os.environ.get("LAYA_MAX_LOADED")
     if not raw:
         return None
@@ -830,20 +772,8 @@ def _resolve_max_loaded() -> Optional[int]:
     return n if n > 0 else None
 
 
-def _extra_models_option() -> Dict[str, Any]:
-    """Checkpoint registrations from ``LAYA_EXTRA_MODELS``, as the ``Router`` ``models`` keyword.
-
-    The variable is a JSON object mapping a checkpoint name to its source -- the same
-    shapes ``Router.register`` accepts: a Hub repo id or local checkpoint directory as a
-    plain string, or a ``["repo", "subfolder"]`` pair. ``Router._add`` applies the same
-    name rules as ``register`` (lowercase letters, digits, ``.``, ``_``, ``-``; never
-    ``auto``), and a name that matches a bundled checkpoint re-points it -- which is how
-    an operator serves a fine-tune under ``english`` without a code change.
-
-    As with ``_default_model_option``, a malformed value has no harmless fallback: a
-    checkpoint silently missing from the registry would auto-route its requests to a
-    different one, so this raises ``SystemExit`` and the caller refuses to start.
-    """
+def _extra_models_option() -> Dict[str, str]:
+    """Map each configured name to its native checkpoint directory or Hub repo."""
     raw = os.environ.get("LAYA_EXTRA_MODELS", "").strip()
     if not raw:
         return {}
@@ -852,49 +782,16 @@ def _extra_models_option() -> Dict[str, Any]:
     except ValueError as error:
         raise SystemExit("invalid LAYA_EXTRA_MODELS: not a JSON object (%s)" % error) from None
     if not isinstance(data, dict):
-        raise SystemExit("invalid LAYA_EXTRA_MODELS: a JSON object "
-                         "{name: source}, got %s" % type(data).__name__)
-    out = {}
+        raise SystemExit("invalid LAYA_EXTRA_MODELS: expected a JSON object {name: source}")
     for name, source in data.items():
-        if isinstance(source, list):
-            # `[]`, a third element and a number are all lists, so they reached the Router and became
-            # `ValueError: not enough values to unpack` on the first request that routed to them (or a
-            # repo id like `acme/5`), long after the operator was told the value parsed. This option
-            # is the one place that still knows the name and can refuse the startup.
-            if (not 1 <= len(source) <= 2
-                    or not all(part is None or isinstance(part, str) for part in source)
-                    or not any(isinstance(part, str) for part in source)):
-                raise SystemExit("invalid LAYA_EXTRA_MODELS: source for %r must be a repo "
-                                 "id, a local path, or a [repo, subfolder] pair; got %r" % (name, source))
-            out[name] = tuple(source)          # JSON has no tuple: [repo, subfolder]
-        elif isinstance(source, str):
-            out[name] = source
-        else:
-            raise SystemExit("invalid LAYA_EXTRA_MODELS: source for %r must be a repo "
-                             "id, a local path, or a [repo, subfolder] pair; got %s"
-                             % (name, type(source).__name__))
-    return out
+        if not isinstance(source, str) or not source.strip():
+            raise SystemExit("invalid LAYA_EXTRA_MODELS: source for %r must be a Hub repo id "
+                             "or local checkpoint directory" % name)
+    return data
 
 
 def _default_model_option(extra_models: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
-    """Routing fallback from ``LAYA_DEFAULT_MODEL``, as a ``Router`` keyword; unset sends nothing.
-
-    ``Router.default`` answers the two states that carry no language evidence at all: no letters,
-    and Latin script too short to identify ("Quero cancelar", "Esqueci minha senha"). ``Router``
-    defaults to ``multilingual`` since 0.4.0, and a deployment whose traffic is mostly English
-    may set ``Router(default="english")`` instead, as the README describes. Left out
-    of the constructor when unset, so the value cannot drift from ``Router``'s own default -- the
-    same reasoning as ``_resolve_max_loaded`` above.
-
-    The name is checked against the built-in table and its aliases plus any
-    ``LAYA_EXTRA_MODELS`` registrations, which is the set the Router ends up
-    serving -- not a list restated here. Unlike the numeric knobs, a typo here has
-    no harmless fallback: a silently-ignored value would keep routing the
-    ambiguous states to the checkpoint the operator just said cannot read them,
-    so this raises and the caller refuses to start rather than serve a
-    configuration nobody asked for. ``laya.mcp.server`` turns the same error into
-    a ``ToolError``, because a stdio server has no startup to refuse.
-    """
+    """Resolve the configured default against built-in aliases and registered names."""
     raw = os.environ.get("LAYA_DEFAULT_MODEL")
     if raw is None or not raw.strip():
         return {}
@@ -905,7 +802,7 @@ def _default_model_option(extra_models: Optional[Dict[str, Any]] = None) -> Dict
     except ValueError as error:
         # A LAYA_EXTRA_MODELS name is a valid default once the Router registers it.
         key = canonical_name(raw)
-        if not extra_models or key not in extra_models:
+        if key not in {canonical_name(name) for name in (extra_models or {})}:
             raise ValueError("invalid LAYA_DEFAULT_MODEL %r: %s" % (raw.strip(), error)) from None
         name = key
     return {"default": name}
@@ -1079,15 +976,9 @@ def _state_length(state: Any) -> int:
         raise HTTPException(status_code=400, detail="'state' must be JSON-serializable")
 
 
-def _require_inline_media(router: Any, state: Any, model: Optional[str], task: Any) -> None:
-    """Require inline bytes for native media submitted over HTTP."""
-    if (getattr(router, "_multimodal_spec", None) is None or not isinstance(state, dict)
-            or not any(state.get(key) is not None for key in ("image", "audio", "video"))):
-        return
-    from .router import MULTIMODAL_MODEL, canonical_name
-
-    selected = model if model is not None else task
-    if selected is None or canonical_name(selected) == MULTIMODAL_MODEL:
+def _require_inline_media(state: Any) -> None:
+    """Keep HTTP request media separate from trusted local Python file arguments."""
+    if isinstance(state, dict) and any(state.get(key) is not None for key in ("image", "audio", "video")):
         from fastapi import HTTPException
 
         raise HTTPException(status_code=422, detail="send native media as inline file bytes to /v1/multimodal")
@@ -1329,7 +1220,7 @@ def build_router():
     device = env_device()
     models_env = os.environ.get("LAYA_MODELS", "").strip()
     preload_names = [m.strip() for m in models_env.split(",") if m.strip()] or None
-    options = {"device": device, "auto_task_detection": _env_bool("LAYA_AUTO_TASK", False)}
+    options = {"device": device}
     multimodal_model = os.environ.get("LAYA_MULTIMODAL_MODEL", "").strip()
     if multimodal_model:
         options["multimodal"] = multimodal_model
@@ -1493,11 +1384,8 @@ def create_app(router: Optional[Any] = None):
 
     @app.get("/health")
     def health(authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
-        # `device` is where a resident checkpoint really computes, not what was asked for:
-        # `Agent.device` reflects the silent GPU -> CPU fallback, so a container that asked
-        # for a GPU it did not get says so. With nothing resident it is the configured
-        # preference, and `device_is_preference` tells the reader which of the two it is
-        # looking at. Same convention, and the same three keys, as `laya_status` over MCP.
+        # Report a resident checkpoint's device when one is available. Otherwise expose
+        # the configured preference, using the same fields as `laya_status` over MCP.
         # Liveness stays open, because every shipped probe reads it without a credential
         # (compose.http.yaml's healthcheck, the Docker HEALTHCHECK, a k8s liveness probe) and
         # the page promises as much. What is not open on a locked-down deployment is the detail
@@ -1514,13 +1402,7 @@ def create_app(router: Optional[Any] = None):
                 checkpoint_devices[name] = device
         actual = next(iter(checkpoint_devices.values()), None)
 
-        # Per-agent CPU-fallback counters, read through the same side-effect-free
-        # accessor the MCP status tool uses -- never Router.load(), which reorders the
-        # LRU and rebuilds evicted checkpoints. Every access is getattr-guarded so
-        # injected routers predating the counters stay health-compatible, like `revisions`.
-        # This counts the *scoped* fallback in _infer (a request that demotes to CPU and
-        # restores the device); a checkpoint built on CPU because the GPU was never
-        # available is reported by `device`, not here -- see #574.
+        # Read optional backend counters without loading or reordering resident checkpoints.
         fallbacks = {}
         for name in router.loaded or []:
             agent = router_agent(router, name)
@@ -1698,7 +1580,7 @@ def create_app(router: Optional[Any] = None):
                 raise HTTPException(status_code=503, detail="configure LAYA_MULTIMODAL_MODEL to enable image assets")
             model = MULTIMODAL_MODEL
         else:
-            _require_inline_media(router, state, model, body.get("task"))
+            _require_inline_media(state)
         max_budget_cap = _resolve_max_token_budget()
         max_len = _validate_budget_param(body, "max_len", max_budget_cap)
         head_max_len = _validate_budget_param(body, "head_max_len", max_budget_cap)
@@ -1866,7 +1748,7 @@ def create_app(router: Optional[Any] = None):
         # registry-aware `resolve` keeps the built-in table it was written against.
         model = _resolve_model(body.get("model"), getattr(router, "resolve", None))
         for state in states:
-            _require_inline_media(router, state, model, body.get("task"))
+            _require_inline_media(state)
         max_budget_cap = _resolve_max_token_budget()
         max_len = _validate_budget_param(body, "max_len", max_budget_cap)
         head_max_len = _validate_budget_param(body, "head_max_len", max_budget_cap)

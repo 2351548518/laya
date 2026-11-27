@@ -43,13 +43,12 @@ __version__ = "0.5.3"
 _LAZY_ATTRS = {
     # stdlib-only module, but keep it lazy so `import laya` does not pull in hashlib
     "PINNED_REVISIONS": (".revisions", "PINNED_REVISIONS"),
-    "Agent": (".agent", "Agent"),
+    "Agent": (".multimodal", "MultimodalAgent"),
     "VegaAgent": (".vega", "VegaAgent"),       # vegaml's engine behind laya's surface
     "MultimodalAgent": (".multimodal", "MultimodalAgent"),
     "Learner": (".learn", "Learner"),           # vegaml's continuous learner
     "Escalator": (".learn", "Escalator"),       # and its teacher for what it is unsure of
     "vllm_teacher": (".learn", "vllm_teacher"), # a teacher served on your own machines
-    "RLAgent": (".agent", "RLAgent"),
     "load": (".agent", "load"),
     "fit_temperatures": (".calibrate", "fit_temperatures"),
     "fit_one_temperature": (".calibrate", "fit_one_temperature"),
@@ -104,7 +103,6 @@ def __dir__():
 
 __all__ = [
     "Agent",
-    "RLAgent",
     "VegaAgent",
     "MultimodalAgent",
     "Learner",

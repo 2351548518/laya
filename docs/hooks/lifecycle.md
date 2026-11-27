@@ -28,7 +28,7 @@ predict_batch(states, questions, batch_size=..., hooks=..., ...)
   │    ├─ on_predict_start ─────────────────────────────┐
   │    │      a hook may:                                │
   │    │        • rewrite ctx.states / ctx.questions     │
-  │    │        • set ctx.max_len / ctx.head_max_len     │
+  │    │        • set ctx.max_len                        │
   │    │        • ctx.skip(results) ─────────────┐       │
   │    │        • raise (aborts; see errors)     │       │
   │    │                                         │      │
@@ -60,7 +60,7 @@ The same `ctx` object flows through start, error and end, so `run_id` correlates
 hook can read `ctx.error`.
 
 The `finally` guard is `ctx.results is not None`, not truthiness, and the empty batch is the only
-case where they differ: `predict_batch([])` sets `ctx.results = []` (`laya/agent.py::Agent.predict_batch`),
+case where they differ: `predict_batch([])` sets `ctx.results = []` (`laya/multimodal.py::MultimodalAgent.predict_batch`),
 so the guard passes, `ctx.usage` becomes `{"input_tokens": 0, "output_tokens": 0}`, and the confidence
 gate still runs over the (empty) result list. A call that raised before any result leaves
 `ctx.results` and `ctx.usage` both `None`. So for an end hook `usage is None` means "this call
@@ -140,11 +140,10 @@ Router.predict_batch(requests, batch_size=..., hooks=...)
        ├─ load(checkpoint) ──► on_load / on_evict
        ├─ for each request of this checkpoint, in input order:
        │      ctx = PredictContext(states=[state], questions, decision, model, agent, router,
-       │                           max_len=request.get("max_len"),
-       │                           head_max_len=request.get("head_max_len"))
+       │                           max_len=request.get("max_len"))
        │      on_predict_start       a hook may redact, rewrite, set a token budget or skip
-       ├─ group the requests left to infer by (questions, ctx.max_len, ctx.head_max_len)
-       │      agent.predict_batch(states, questions, ...)  ──► one shared forward pass per group
+       ├─ group the requests left to infer by questions and prompt budget
+       │      agent.predict_batch(states, questions, ...)  ──► shared inference batch
        │      result["routing"] = decision;  ctx.results = [result]
        ├─ ctx.usage, once per request
        ├─ (any failure) ──► for every started request, in reverse input order:
@@ -167,11 +166,9 @@ Key points:
   that shares the dict, including those whose start hooks ran earlier, and the caller too. Assign
   a new dict to `ctx.questions` instead.
 - The checkpoint name is resolved before grouping, so an `on_route` hook that pins a request by
-  an alias (`"ml"`) shares that checkpoint's forward pass, and `ctx.model` is the resolved name.
-- A request may carry its own `max_len` / `head_max_len`, the per-request form of the token budget
-  `predict` takes as call arguments. A start hook that sets `ctx.max_len` overrides it, because the
-  hook runs after the context is built. Requests that ask for different budgets cannot share a
-  forward pass, so a batch that mixes budgets makes one `agent.predict_batch` call per budget.
+  an alias such as `"laya"` shares the native checkpoint's group. `ctx.model` is the resolved name.
+- A request may carry its own `max_len`. A start hook that sets `ctx.max_len` overrides it.
+  The Router sends requests with different budgets in separate calls to `agent.predict_batch`.
 - Every started request gets exactly one `on_predict_end`, even when another request's end hook
   raises; the first such error is raised after all of them have run.
 - If a checkpoint group fails, every one of its started requests fails with the exception: each
@@ -188,20 +185,20 @@ Key points:
 Router's internal lock is released, so a hook may safely call back into the Router.
 
 ```
-load("multilingual")
+load("gemma")                        (a separately registered checkpoint)
   │
   ├─ [lock]
-  │    build Agent(...)          (seconds: download + weights)
+  │    build MultimodalAgent(...)     (load weights and processor)
   │    register in _agents / _order
-  │    evict LRU if over max_loaded ──► evicted = ["english"]
+  │    evict LRU if over max_loaded ──► evicted = ["multimodal"]
   ├─ [unlock]
-  ├─ on_evict("english")
-  └─ on_load("multilingual")
+  ├─ on_evict("multimodal")
+  └─ on_load("gemma")
 
-unload("english")
+unload("gemma")
   ├─ [lock] remove from _agents / _order
   ├─ [unlock]
-  └─ on_evict("english")
+  └─ on_evict("gemma")
 ```
 
 `attach(name, agent)` registers an existing agent and does **not** fire `on_load`, because no

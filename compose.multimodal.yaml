@@ -1,18 +1,17 @@
-# Layer on compose.yaml and compose.http.yaml. Add compose.cuda.yaml for NVIDIA.
+# Layer on compose.yaml and compose.http.yaml to use a local merged checkpoint.
+x-checkpoint: &checkpoint
+  environment:
+    LAYA_MULTIMODAL_MODEL: /opt/laya/checkpoint
+    HF_HUB_OFFLINE: "1"
+    TRANSFORMERS_OFFLINE: "1"
+  volumes:
+    - type: bind
+      source: "${LAYA_MULTIMODAL_MODEL_DIR:?Set LAYA_MULTIMODAL_MODEL_DIR to a local merged checkpoint directory}"
+      target: /opt/laya/checkpoint
+      read_only: true
+      bind:
+        create_host_path: false
+
 services:
-  laya-serve:
-    build:
-      args:
-        LAYA_MULTIMODAL: "1"
-    environment:
-      LAYA_MULTIMODAL_MODEL: /opt/laya/checkpoint
-      LAYA_MODELS: multimodal
-      HF_HUB_OFFLINE: "1"
-      TRANSFORMERS_OFFLINE: "1"
-    volumes:
-      - type: bind
-        source: "${LAYA_MULTIMODAL_MODEL_DIR:?Set LAYA_MULTIMODAL_MODEL_DIR to a local merged checkpoint directory}"
-        target: /opt/laya/checkpoint
-        read_only: true
-        bind:
-          create_host_path: false
+  laya: *checkpoint
+  laya-serve: *checkpoint

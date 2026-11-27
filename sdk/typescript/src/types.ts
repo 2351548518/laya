@@ -38,9 +38,8 @@ export type MultimodalMedia =
   | { image: Uint8Array; audio?: never; video?: never }
   | { audio: Uint8Array; image?: never; video?: never }
   | { video: Uint8Array; image?: never; audio?: never };
-export type ModelName = 'english' | 'multilingual' | 'typed-decisions';
-export type ModelAlias = ModelName | 'en' | 'laya' | 'default' | 'multi' | 'ml' | 'laya-multilingual'
-  | 'typed' | 'typed_decisions' | 'laya-typed-decisions' | 'decisions';
+export type ModelName = 'multimodal' | 'vega';
+export type ModelAlias = ModelName | 'laya' | 'default';
 
 /** Per-option-count abstention thresholds: `bucket -> threshold`, keyed by core's `temp_bucket`
  *  spelling (`"choice:2"`, `"choice:3-5"`, `"score:6-10"`, `"noul:2"`, ...) plus an optional
@@ -183,8 +182,8 @@ export interface LanguageDetection {
   mixed_segment: string | null;
 }
 export interface RouteDecision {
-  model: ModelName;
-  repo: string;
+  model: string;
+  repo: string | null;
   reason: string;
   detection: LanguageDetection | null;
   workflow: string | null;
@@ -261,7 +260,7 @@ export interface BatchPrediction<Q extends Questions = Questions> {
  */
 export interface Health {
   status: 'ok';
-  loaded?: (ModelName | 'multimodal')[];
+  loaded?: string[];
   device?: string;
 }
 

@@ -203,12 +203,16 @@ v6 设定 `grounding_slots=1`，架构名为 `single-v1`。`GroundingHead` 用�
 
 ### 一次参数更新
 
+当前代码在 `laya/train.py` 把硬标签和软标签转换成候选概率，再统一执行决策和单框训练。下方源码链接对应 v6 运行时锁定的版本。
+[当前训练接口](../reference/train.md)
+
 1. 读取一个最多 64 条记录的优化器窗口。`_rank_window` 根据准入长度和模态在四个 rank 间分配工作量。大 JSONL 由主 rank 校验并建立偏移索引，再共享给其余 rank。
 2. 每张卡使用实际处理后的序列长度组批。补齐后的 `B × L` 上限为 16,384。两条 8,178 与 8,150 token 的同类样本可组成 `input_ids [2, 8178]`，占 16,356 token，骨干输出 `[2, 8178, 2560]`。如果两条样本分别长 5,000 和 10,000 token，合批后要补齐到 `[2, 10000]`，因此分开执行。
 3. 对可交换的 Choice 候选重排，计算损失前按原始次序还原 logits。每个微批的平均损失先乘 `B/N` 再反向，其中 `N` 是全局窗口的实际样本数。完整窗口中两条微批的权重是 `2/64`，SFT 最后一个窗口有 32 条，分母相应为 32。
 4. 四张卡以 FP32 对累积梯度求和，按范数上限 1.0 裁剪，再更新一次 AdamW。SFT 使用激活检查点。补齐后的微批达到 3,072 token 时，反向所需的保存张量卸载到 CPU。Qwen 的分块扫描优化作用于训练梯度路径。
 
-[微批划分与激活卸载](https://github.com/2351548518/laya/blob/4f7e045725adf8c7c7067dfc404de1e54f68b05b/laya/grounding_train.py#L352) · [梯度求和](https://github.com/2351548518/laya/blob/4f7e045725adf8c7c7067dfc404de1e54f68b05b/laya/multimodal_distributed.py#L60) · [梯度更新](https://github.com/2351548518/laya/blob/4f7e045725adf8c7c7067dfc404de1e54f68b05b/laya/grounding_train.py#L813)
+当前源码在 `laya/train.py` 划分微批并更新参数。`laya/multimodal_distributed.py` 中的
+`DistributedContext.sum_gradients` 负责跨卡求和。[训练接口](../reference/train.md)
 
 看到训练日志的 `grounding step` 递增一次，就表示四张卡一起完成了这套流程。用 `30,720 ÷ 64 = 480` 核对预热步数，用 `ceil(1,500,000 ÷ 64) = 23,438` 核对 SFT 步数。CPU 演示可以单独查看两个头的反向结果，真实四卡日志可以用来识别优化器步和开发集评测。 [运行演示](multimodal.md#cpu-walkthrough) · [读训练日志](multimodal.md#resume)
 

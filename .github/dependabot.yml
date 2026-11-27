@@ -8,12 +8,6 @@ updates:
     labels: [dependencies]
 
   - package-ecosystem: npm
-    directory: "/laya-ts"
-    schedule:
-      interval: weekly
-    labels: [dependencies]
-
-  - package-ecosystem: npm
     directory: "/sdk/typescript"
     schedule:
       interval: weekly

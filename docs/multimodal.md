@@ -65,7 +65,7 @@ also reuse identical visual features across questions about that state during in
 For runnable file-based examples and a checkpoint smoke test, use the examples and verification
 commands from the repository root. [Native example](https://github.com/2351548518/laya/blob/main/examples/README.md) ·
 [Checkpoint smoke test](https://github.com/2351548518/laya/blob/main/verify/README.md) ·
-[Native CLI](cli-mcp.md#native-multimodal-checkpoint) · [Python API](reference/multimodal.md)
+[Native CLI](cli-mcp.md) · [Python API](reference/multimodal.md)
 
 ## From input to answer
 
@@ -152,8 +152,8 @@ records into a padded micro-batch. A single input can run independently up to `m
 
 ## Head warmup and LoRA training
 
-The reusable joint trainer is `laya.grounding_train.finetune_grounding`. It supports `head`,
-`lora` and `full` modes. The standalone entry point is `scripts/multimodal/train.py`.
+The joint trainer is `laya.train.finetune_grounding`. It supports `head`, `lora` and `full` modes.
+Run it with `laya-train`, `laya train` or `python scripts/multimodal/train.py`.
 
 The supplied recipes use a global batch size of 64 records across all GPUs. Each rank packs up
 to four records per microbatch within a budget of 16,384 padded tokens. A microbatch contributes
@@ -184,7 +184,7 @@ Omit `--visual-only` and select a Gemma 4 backbone to train on audio and video w
 soundtrack. The Qwen LoRA recipe trains the language adapters, visual merger, and decision
 and box readouts while keeping the visual encoder frozen.
 
-The starter recipes use supervised losses in `laya/grounding_train.py`.
+The starter recipes use supervised losses in `laya/train.py`.
 
 - A hard label such as `inspect` gives all cross-entropy weight to that option. A soft target
   of `[0.2, 0.8]` weights the log probabilities of `continue` and `inspect` by 0.2 and 0.8.
@@ -223,8 +223,17 @@ The snapshot restores AdamW, the current epoch order, the per-rank random states
 best checkpoint selected at that step. Use the same `--deterministic` setting for the original
 training and its continuation when comparing exact updates. Deterministic kernels can cost throughput.
 
-Use `laya-mm-train --help` for the decision-only trainer's JSONL, checkpoint selection,
-calibration and resume options.
+### SwanLab reporting
+
+Install `.[multimodal,swanlab]` and add `--swanlab local` to the joint training command to record
+metrics under `OUT/swanlog`. Use `--swanlab online --swanlab-project PROJECT` after authenticating
+to open the account dashboard. Rank zero records the actual loss, gradient norm, optimizer
+learning rates and development metrics. Final evaluation has its own metric group. A continuation
+creates a separate experiment in the same group with the original optimizer step numbers.
+[SwanLab tutorial](project-readme/multimodal.md#swanlab)
+
+Use `laya-train` for the joint v6 recipe. `laya-mm-train` runs native decision distillation
+and reference-KL experiments. Both commands load the same native backbone and decision readout.
 
 ## Calibration and evaluation
 
@@ -249,7 +258,7 @@ named suite from a checked manifest. It reports accuracy and calibration by moda
 source and task when provided, and includes normalized score MAE and RPS.
 Set `--video-cache-size 24` to reuse decoded clips during serial evaluation. Requests sharing the
 same frame selection are evaluated together, with their results returned in the dataset's order.
-[Native accuracy and latency](benchmarks.md#native-multimodal-checkpoints)
+[Native accuracy and latency](benchmarks.md)
 
 ## Source and local workspace layout
 

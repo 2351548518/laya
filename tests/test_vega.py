@@ -1,4 +1,4 @@
-"""`laya.Agent(vegaml=True)`: vega's engine behind laya's surface (laya/vega.py).
+"""`laya.VegaAgent(vegaml=True)`: vega's engine behind laya's surface (laya/vega.py).
 
 Two layers, so the suite is useful on every machine that runs it:
 
@@ -371,7 +371,7 @@ def test_agent_new_does_not_divert_without_the_argument():
 @pytest.mark.skipif(VEGA, reason="vegaml is installed here; the ImportError path needs it absent")
 def test_without_vegaml_the_argument_fails_with_the_install_hint():
     with pytest.raises(ImportError, match=r"pip install -U laya"):
-        laya.Agent(vegaml=True)
+        laya.VegaAgent(vegaml=True)
     with pytest.raises(ImportError, match=r"pip install -U laya"):
         laya.load(vegaml=True)
 
@@ -427,7 +427,7 @@ def test_vllm_teacher_is_vegamls_self_hosted_teacher(monkeypatch):
 
 def test_vega_agent_is_exported_and_is_an_agent_subclass():
     assert laya.VegaAgent is lv.VegaAgent
-    assert issubclass(lv.VegaAgent, laya.Agent)
+    assert issubclass(lv.VegaAgent, lv.DecisionAgent)
     assert "VegaAgent" in laya.__all__
 
 
@@ -608,7 +608,7 @@ needs_model = pytest.mark.skipif(
 def agent():
     if not MODEL_TESTS:
         pytest.skip("model tests off")
-    return laya.Agent(vegaml=True)
+    return laya.VegaAgent(vegaml=True)
 
 
 @needs_model
@@ -664,7 +664,7 @@ def _synthetic_rows(n=28):
 
 @needs_model
 def test_fit_calibrate_save_reload_roundtrip():
-    a = laya.Agent(vegaml=True)
+    a = laya.VegaAgent(vegaml=True)
     rows = _synthetic_rows()
     rep = a.fit(rows)
     assert rep["n_rows"] == len(rows) and "dept" in rep["heads"]
@@ -678,7 +678,7 @@ def test_fit_calibrate_save_reload_roundtrip():
     with tempfile.TemporaryDirectory() as d:
         saved = a.save_calibration(d)
         assert saved["calibrated"] and os.path.exists(os.path.join(d, "heads.npz"))
-        b = laya.Agent(vegaml=True)
+        b = laya.VegaAgent(vegaml=True)
         loaded = b.load_calibration(d)
         assert loaded["calibrated"] and set(loaded["heads"]) == set(saved["heads"])
         again = b.predict(rows[0]["state"], {"dept": Q["dept"]})
@@ -1164,35 +1164,11 @@ def _vegaml_present(monkeypatch, present=True):
                         lambda name, *a: (object() if present else None) if name == "vegaml" else real(name, *a))
 
 
-def test_no_checkpoint_named_means_vega(monkeypatch):
-    from laya.agent import wants_vega
+def test_vega_can_be_loaded_explicitly(monkeypatch):
+    from unittest.mock import Mock
 
-    _vegaml_present(monkeypatch)
-    assert wants_vega((), {}) is True
-    assert wants_vega((), {"device": "cpu", "hooks": []}) is True
-    built = []
-    monkeypatch.setattr(lv.VegaAgent, "__init__", lambda self, *a, **k: built.append(k))
-    assert isinstance(laya.Agent(device="cpu"), lv.VegaAgent) and built == [{"device": "cpu"}]
-    assert type(laya.Agent.__new__(laya.Agent)) is laya.Agent             # the bare-object idiom still works
-
-
-def test_the_classic_encoder_is_one_argument_away(monkeypatch):
-    from laya.agent import wants_vega
-
-    _vegaml_present(monkeypatch)
-    assert wants_vega(("convaiinnovations/laya",), {}) is False          # a checkpoint named
-    assert wants_vega((), {"model_id_or_path": "multilingual"}) is False
-    assert wants_vega((), {"vegaml": False}) is False                    # said so
-    assert wants_vega((), {"backend": "onnx"}) is False                  # a classic-only option
-    assert wants_vega((), {"subfolder": "multilingual"}) is False
-    assert type(laya.Agent.__new__(laya.Agent, vegaml=False)) is laya.Agent
-    assert wants_vega((), {"vegaml": "4b"}) is True                      # an explicit ask names a reader
-
-
-def test_without_vegaml_the_default_falls_back_to_the_classic_encoder(monkeypatch):
-    import laya.agent as la
-
-    _vegaml_present(monkeypatch, present=False)
-    monkeypatch.setattr(la, "_warned_no_vegaml", [])
-    with pytest.warns(UserWarning, match="vegaml is not installed"):
-        assert la.wants_vega((), {}) is False
+    build = Mock()
+    monkeypatch.setattr(lv, "VegaAgent", build)
+    result = laya.load(vegaml="4b", device="cpu")
+    assert result is build.return_value
+    build.assert_called_once_with(None, device="cpu", vegaml="4b")

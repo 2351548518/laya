@@ -27,8 +27,9 @@ body:
       placeholder: |
         import laya
 
-        agent = laya.load("convaiinnovations/laya")
-        print(agent.system_one("...", {"q": {"type": "noul", "instructions": "?"}}))
+        agent = laya.load("./my-native-checkpoint", device="cpu")
+        questions = {"refund": {"type": "noul", "instructions": "Is this a refund request?"}}
+        print(agent.predict("I was billed twice. Please refund the duplicate charge.", questions))
     validations:
       required: true
 

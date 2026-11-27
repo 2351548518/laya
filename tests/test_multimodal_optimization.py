@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 import torch
 
-from laya.grounding_train import GroundingTrainConfig, _activation_context, _decision_microbatches, _rank_window
+from laya.train import GroundingTrainConfig, _activation_context, _decision_microbatches, _rank_window
 from laya._qwen_training import qwen_training_delta
 from laya.multimodal import MultimodalAgent
 from laya.multimodal_calibration import (fit_ordinal_calibration, ordinal_probabilities,

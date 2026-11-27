@@ -54,7 +54,7 @@ def audit(ctx):
         }, sys.stdout)
         sys.stdout.write("\n")
 
-laya.load("convaiinnovations/laya", on_predict_end=audit)
+laya.load( on_predict_end=audit)
 ```
 
 A hook fires once per call, and a `predict_batch` call carries every state in it, so the record is
@@ -79,7 +79,7 @@ def redact(ctx):
         for s in ctx.states
     ]
 
-laya.load("convaiinnovations/laya", on_predict_start=redact)
+laya.load( on_predict_start=redact)
 ```
 
 A redaction hook is a policy hook: keep `hooks_raise=True`, because a silently broken redactor
@@ -111,7 +111,7 @@ def write(ctx):
     for i, result in enumerate(ctx.results or []):
         CACHE[key(ctx, i)] = result
 
-laya.load("convaiinnovations/laya", on_predict_start=read, on_predict_end=write)
+laya.load( on_predict_start=read, on_predict_end=write)
 ```
 
 Hooks fire once per call, so keying on one state is not enough on `predict_batch`: `ctx.skip()`
@@ -135,7 +135,7 @@ def metrics(ctx):
     if ctx.elapsed_ms is not None:
         LATENCIES.append(ctx.elapsed_ms)
 
-laya.load("convaiinnovations/laya", on_predict_end=metrics, hooks_raise=False)
+laya.load( on_predict_end=metrics, hooks_raise=False)
 ```
 
 ### Guardrails
@@ -151,7 +151,7 @@ def guard(ctx):
     if any("ssn" in str(state).lower() for state in ctx.states):
         raise Blocked("possible PII in state")
 
-laya.load("convaiinnovations/laya", on_predict_start=guard)
+laya.load( on_predict_start=guard)
 ```
 
 Test it against the state shape. A guard that only reads `ctx.states[0]` blocks a single call and
@@ -170,7 +170,7 @@ def gate(ctx):
             answer["choice"] = "human-review"
             answer["gated"] = True
 
-laya.load("convaiinnovations/laya", on_predict_end=gate)
+laya.load( on_predict_end=gate)
 ```
 
 Mutate through `ctx.results`, which holds one dict per state of the call: gating only the first
@@ -189,14 +189,14 @@ class Pin:
     def on_route(self, ctx):
         if "refund" in str(ctx.states[0]).lower():
             ctx.decision = RouteDecision(
-                model="typed-decisions",
-                repo="convaiinnovations/laya/typed-decisions",
+                model="support",
+                repo="models/support",
                 reason="refund workflow",
                 detection=None,
                 workflow=None,
             )
 
-Router(hooks=[Pin()])
+Router(models={"support": "models/support"}, hooks=[Pin()])
 ```
 
 ### Model lifecycle
@@ -226,7 +226,7 @@ def make_audit(tenant):
         ship(tenant, ctx.run_id, ctx.results)
     return audit
 
-agent = laya.load("convaiinnovations/laya", on_predict_end=make_audit("acme"))
+agent = laya.load( on_predict_end=make_audit("acme"))
 ```
 
 ### Composition
@@ -238,7 +238,6 @@ per-call hooks.
 
 ```python
 agent = laya.load(
-    "convaiinnovations/laya",
     hooks=[Metrics(), Guardrail()],     # metrics first, then policy
     on_predict_start=redact,            # convenience callables appended after hooks
     hooks_raise=True,                   # policy failures are fatal
@@ -282,50 +281,23 @@ in tests so one test cannot leak a hook into the next.
 
 ### Token-budget shaping
 
-A start hook can raise the token budget for one call, for example when a question has many options
-and the default head budget would collapse the labels. Four details decide whether the hook helps
-or quietly makes the call worse:
-
-* A start hook's `ctx.head_max_len` *replaces* the budget for the call. What is in force before it
-  is the caller's own per-call value, or the checkpoint default in `ctx.agent.cfg` -- so compare
-  against that: writing a plain number can lower the budget a caller already set.
-* One call answers every question it carries, so size on the widest of them rather than on
-  whichever happens to come first.
-* Once the options no longer fit the head, `laya/common.py` gives each of them
-  `max(4, (head_max_len - 16) // k)` tokens. `16 + 4 * k` therefore lands exactly on that floor:
-  every label is still cut down to the tokens it shares with the others, which is the collapse the
-  hook was written to avoid. `16 + 8 * k` leaves them distinguishable.
-* The window defaults to `max(64, max_len - head_max_len - 8)`, floored at 64, and is then capped at
-  the room the questions actually leave for the state. So widening the head stops shaving the default
-  once it reaches the floor -- at `max_len=512` a `head_max_len=448` gives a 64-token window, not the
-  56 the unfloored subtraction gives -- while the room keeps shrinking underneath it, and a question
-  whose own head leaves less than 64 scans at that room. The floor does not rescue the state from its
-  options: widen `max_len` with the head, which is what the `need + 8 + 64` below does. And a head
-  that fills the whole sequence is refused outright -- `window_budget` raises rather than scanning at
-  the zero the subtraction would leave.
+A start hook can raise `ctx.max_len` for a request with a large option set. The native
+budget covers the entire input prompt, including instructions, options and state.
 
 ```python
-def widen_for_high_cardinality(ctx):
-    k = max((len(q.get("criteria", {}) or {}) for q in ctx.questions.values()), default=0)
-    if k < 50:
-        return
-    cfg = getattr(ctx.agent, "cfg", None) or {}
-    head = ctx.head_max_len if ctx.head_max_len is not None else cfg.get("head_max_len", 192)
-    window = ctx.max_len if ctx.max_len is not None else cfg.get("max_len", 512)
-    need = 16 + 8 * k                          # 8 tokens per label, not the core's floor of 4
-    if need > head:                            # only ever widen, never lower
-        ctx.head_max_len = need
-        ctx.max_len = max(window, need + 8 + 64)   # 8 reserved, then room for the state
+def widen_for_many_options(ctx):
+    option_count = max(
+        (len(q.get("criteria") or ()) for q in ctx.questions.values() if q.get("type") == "choice"),
+        default=0,
+    )
+    if option_count >= 50:
+        ctx.max_len = max(ctx.agent.max_len, ctx.max_len or 0, 8192)
 
-agent = laya.load("convaiinnovations/laya", on_predict_start=widen_for_high_cardinality)
+agent = laya.load(on_predict_start=widen_for_many_options)
 ```
 
-This does not touch the shared agent config, so concurrent calls are unaffected. The same knobs are
-available per call: `agent.system_one(state, questions, head_max_len=512, max_len=1024)`.
-
-Widening is not free: a longer window means a larger tensor, and the checkpoints were trained at
-512 (`laya`) and 1,024 tokens. Past that, narrowing the candidates with
-[`predict_shortlist`](../reference/helpers.md) beats stretching the budget.
+This hook controls the single call's prompt budget. For very large option sets,
+evaluate a [shortlist or tournament](../evals.md) on labelled examples.
 
 ## Anti-patterns
 
@@ -451,10 +423,10 @@ rejected. Use `on_predict_start=` / `on_predict_end=`.
 
 ```python
 # bad: TypeError
-laya.load("convaiinnovations/laya", hooks=[lambda ctx: None])
+laya.load( hooks=[lambda ctx: None])
 
 # good
-laya.load("convaiinnovations/laya", on_predict_end=lambda ctx: None)
+laya.load( on_predict_end=lambda ctx: None)
 ```
 
 ### Assuming results exist in end hooks

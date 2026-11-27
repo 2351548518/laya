@@ -1,37 +1,9 @@
-"""laya-eval: an independent, reproducible evaluation harness for Laya checkpoints.
+"""Evaluate the frozen MASSIVE intent test split with a native decision checkpoint.
 
-Why this exists
----------------
-The repository's own benchmark scripts are research code: they load everything,
-run all parts, and print tables. There is no small, reproducible harness a third
-party can point at a Laya checkpoint to get a per-language accuracy and ECE
-report plus machine-readable per-case output. This is that harness.
+    python -m research.eval.laya_eval --model ./local-checkpoint --langs en,de,ro \
+        --out ./report.json
 
-Provenance
-----------
-The prompt format, sampling and metrics follow ``research/scripts/bench_local.py``
-so that results are comparable with the published tables:
-
-* dataset      ``mteb/amazon_massive_intent``, split ``test``
-* sampling     first ``--per-lang`` rows, ``random.Random(SEED)`` fresh per language
-* options      ``--n-opts`` labels: the gold one plus ``rng.sample`` of the rest
-* prompt       "What is the user asking for in `utterance`?"
-* rendering    option keys with ``_`` -> `` `` and ``.`` -> ``: ``
-* metrics      accuracy, macro-F1, ECE (15 bins) on the temperature-scaled softmax
-
-Verified against ``research/results/cpu_51_language_sweep.json``: with the raw
-pre-clamp temperatures, ``en`` reproduces n=100 / accuracy 0.82 / macro_f1 0.7876
-/ ece 0.1789 / mean_confidence 0.9989 exactly.
-
-Usage
------
-    python -m laya_eval --model convaiinnovations/laya --langs en,de,ro
-    python -m laya_eval --model ./local-checkpoint --langs all --out report.json
-    python -m laya_eval --model convaiinnovations/laya --subfolder multilingual --langs all
-
-Output is a JSON document with a ``config`` block, a per-language ``report`` and
-a ``cases`` list carrying every individual decision, so a number in the report can
-be re-derived without re-running the model.
+The report includes per-language accuracy, calibration and per-case decisions.
 """
 from __future__ import annotations
 
@@ -117,54 +89,21 @@ def available_languages() -> List[str]:
 
 
 # ---------------------------------------------------------------------- scoring
-def internal_question(qdef: Dict[str, Any]) -> Dict[str, Any]:
-    """The `build_sequence` question dict for one harness question definition.
-
-    Shared with the metamorphic budget probe so a diagnostic measures exactly the
-    question that gets scored.
-    """
-    return {"t": qdef["type"], "ins": qdef["instructions"], "crit": qdef.get("criteria")}
-
-
 def score_cases(agent, cases) -> List[Any]:
-    """Raw marker logits per case, from one collated forward pass.
-
-    Mirrors bench_local.py:54-97: build every sequence, collate, run the model
-    once, and slice each row to its own marker count. No temperature is applied
-    here so the caller can score under more than one regime from one pass.
-    """
+    """Read native decision logits in the order of each question's options."""
     import torch
-    from laya.common import QTYPES, build_sequence, collate_items, render_options, uses_parallel_layout
+    from laya.common import render_options, unpermute_probs
 
-    max_len = agent.cfg.get("max_len", 512)
-    head_max_len = agent.cfg.get("head_max_len", 192)
-    parallel = uses_parallel_layout(agent.cfg)
-    items = []
-    for state, questions in cases:
-        for _qid, qdef in questions.items():
-            q = internal_question(qdef)
-            ids, markers, *layout = build_sequence(agent.tok, state, q, max_len, head_max_len,
-                                                   return_layout=parallel)
-            if len(markers) != len(render_options(q)):
-                raise ValueError("marker/option count mismatch; question exceeds head_max_len")
-            item = {"ids": ids, "markers": markers, "qtype": QTYPES[q["t"]]}
-            if layout:
-                item["layout"] = layout[0]
-            items.append(item)
-    batch = collate_items([items], agent.tok.pad_token_id)
-    extra = ({"position_ids": batch["position_ids"].to(agent.device),
-              "option_ids": batch["option_ids"].to(agent.device)} if parallel else {})
-    with torch.no_grad():
-        logits, _ = agent.model(
-            batch["input_ids"].to(agent.device),
-            batch["attention_mask"].to(agent.device),
-            batch["marker_pos"].to(agent.device),
-            batch["marker_mask"].to(agent.device),
-            batch["qtype"].to(agent.device),
-            **extra,
-        )
-    logits = logits.float().cpu().numpy()
-    return [logits[i, :len(it["markers"])] for i, it in enumerate(items)]
+    agent.model.eval()
+    rows = []
+    with torch.inference_mode():
+        for state, questions in cases:
+            request = agent._input(state)
+            for question in questions.values():
+                inputs, q, _ = agent._prepare(request, question)
+                logits = agent._logits(inputs, len(render_options(q)))[0].float().cpu().numpy()
+                rows.append(unpermute_probs(logits, q.get("option_order")))
+    return rows
 
 
 def softmax_t(z, temperature: float = 1.0):
@@ -174,19 +113,14 @@ def softmax_t(z, temperature: float = 1.0):
     return e / e.sum()
 
 
-def temperature_for(agent, qtype: int, k: int, unclamped: bool = False) -> float:
-    """The temperature to score this bucket with.
-
-    By default this is what ``Agent`` applies, i.e. the checkpoint's bucket clamped
-    to ``[TEMP_MIN, TEMP_MAX]``. With ``unclamped=True`` it is the checkpoint's raw
-    value, which is what the committed pre-#42 sweep was produced with.
-    """
+def temperature_for(agent, qtype: int, k: int) -> float:
+    """Use the loaded checkpoint's text calibration for this option count."""
     from laya.common import temp_bucket
-    bucket = temp_bucket(qtype, k)
-    if unclamped:
-        return float(agent.temperature_by_options_raw.get(
-            bucket, agent.temperature_raw[qtype]))
-    return float(agent.temperature_by_options.get(bucket, agent.temperature[qtype]))
+
+    calibration = getattr(agent, "modality_calibration", {}).get("text", {})
+    buckets = calibration.get("temperature_by_options", agent.temperature_by_options)
+    temperatures = calibration.get("temperature", agent.temperature)
+    return float(buckets.get(temp_bucket(qtype, k), temperatures[qtype]))
 
 
 def ece(confidence, correct, bins: int = ECE_BINS) -> float:
@@ -244,8 +178,7 @@ def summarise(confidences, corrects, golds, preds) -> Dict[str, float]:
 
 
 # ------------------------------------------------------------------------ runner
-def run_language(agent, lang: str, per_lang: int, n_opts: int, seed: int = SEED,
-                 unclamped: bool = False) -> Dict[str, Any]:
+def run_language(agent, lang: str, per_lang: int, n_opts: int, seed: int = SEED) -> Dict[str, Any]:
     """Evaluate one language and return its report plus per-case records."""
     import numpy as np
     from laya.common import QTYPES
@@ -258,7 +191,7 @@ def run_language(agent, lang: str, per_lang: int, n_opts: int, seed: int = SEED,
     confidences, corrects, preds, records = [], [], [], []
     for i, z in enumerate(logits):
         k = len(z)
-        temperature = temperature_for(agent, QTYPES["choice"], k, unclamped)
+        temperature = temperature_for(agent, QTYPES["choice"], k)
         probs = softmax_t(z, temperature)
         pred = int(np.argmax(probs))
         correct = int(pred == gold[i])
@@ -284,7 +217,7 @@ def run_language(agent, lang: str, per_lang: int, n_opts: int, seed: int = SEED,
 
     report = summarise(confidences, corrects, gold, preds)
     report["temperature"] = round(
-        float(temperature_for(agent, QTYPES["choice"], n_opts, unclamped)), 6)
+        float(temperature_for(agent, QTYPES["choice"], n_opts)), 6)
     return {"report": report, "cases": records}
 
 
@@ -292,10 +225,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="laya-eval",
         description="Per-language accuracy and calibration report for a Laya checkpoint.")
-    parser.add_argument("--model", default="convaiinnovations/laya",
-                        help="checkpoint repo id or local path")
-    parser.add_argument("--subfolder", default=None,
-                        help="checkpoint subfolder, e.g. multilingual")
+    parser.add_argument("--model", help="trained native checkpoint directory or Hub ID")
     parser.add_argument("--device", default=None, help="cpu, cuda, mps (default: auto)")
     parser.add_argument("--langs", default="en",
                         help="comma-separated configs, or 'all'")
@@ -305,10 +235,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--out", default=None, help="write the JSON report here")
     parser.add_argument("--no-cases", action="store_true",
                         help="omit per-case records (smaller file)")
-    parser.add_argument("--unclamped", action="store_true",
-                        help="score with the checkpoint's RAW bucket temperatures instead "
-                             "of the clamped ones Agent applies. This is what reproduces "
-                             "the committed pre-#42 sweep")
     args = parser.parse_args(argv)
 
     if args.langs.strip().lower() == "all":
@@ -324,25 +250,26 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
 
     import laya
+    from laya.revisions import default_checkpoint
 
+    source = args.model or default_checkpoint()
     started = time.time()
-    agent = laya.load(args.model, device=args.device, subfolder=args.subfolder)
+    agent = laya.load(source, device=args.device)
     agent.model.eval()
     payload: Dict[str, Any] = {
         "config": {
-            "model": args.model,
-            "subfolder": args.subfolder,
+            "model": source,
+            "revision": agent.checkpoint_revision,
             "device": str(agent.device),
             "max_len": agent.cfg.get("max_len"),
-            "head_max_len": agent.cfg.get("head_max_len"),
             "dataset": DATASET,
             "split": "test",
             "per_lang": args.per_lang,
             "n_opts": args.n_opts,
             "seed": args.seed,
             "instructions": INSTRUCTIONS,
-            "temperatures": dict(agent.temperature_by_options_raw) if args.unclamped
-            else dict(agent.temperature_by_options),
+            "temperatures": dict(agent.modality_calibration.get("text", {}).get(
+                "temperature_by_options", agent.temperature_by_options)),
             "laya_version": getattr(laya, "__version__", "unknown"),
         },
         "report": {},
@@ -353,7 +280,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         t0 = time.time()
         try:
             out = run_language(agent, lang, args.per_lang, args.n_opts,
-                               args.seed, args.unclamped)
+                               args.seed)
         except Exception as exc:
             print("  %-8s FAILED: %s" % (lang, str(exc)[:110]), file=sys.stderr)
             payload["report"][lang] = {"error": str(exc)[:200]}

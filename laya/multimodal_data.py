@@ -202,3 +202,37 @@ def can_shuffle_choice(question):
         if _POSITIONAL_OPTION.search(text) or _LETTER_PAIR.search(text):
             return False
     return True
+
+
+def collate_multimodal_inputs(examples, pad_token_id):
+    """Left-pad text and concatenate padded native media tensors in request order.
+
+    Each request was processed independently, so image patches and audio features can have
+    different lengths. Position padding is -1, which the Gemma processor uses for absent patches.
+    """
+    import torch
+    from torch.nn import functional as F
+
+    result = {}
+    sequence_keys = {"input_ids", "attention_mask", "mm_token_type_ids", "token_type_ids"}
+    for key in set().union(*(example.keys() for example in examples)):
+        values = [example[key] for example in examples if key in example]
+        if key == "_candidate_positions":
+            length = max(example["input_ids"].shape[-1] for example in examples)
+            values = [torch.where(example[key] < 0, example[key], example[key] + length - example["input_ids"].shape[-1])
+                      for example in examples]
+        if not all(isinstance(value, torch.Tensor) for value in values):
+            raise ValueError("cannot batch a non-tensor processor field: " + key)
+        if any(value.ndim != values[0].ndim for value in values):
+            raise ValueError("inconsistent processor dimensions for " + key)
+        sizes = [max(value.shape[axis] for value in values) for axis in range(1, values[0].ndim)]
+        padded = []
+        for value in values:
+            widths = []
+            for axis in reversed(range(1, value.ndim)):
+                difference = sizes[axis - 1] - value.shape[axis]
+                widths.extend([difference, 0] if key in sequence_keys else [0, difference])
+            fill = pad_token_id if key == "input_ids" else -1 if key in {"image_position_ids", "video_position_ids", "_candidate_positions"} else 0
+            padded.append(F.pad(value, widths, value=fill) if widths else value)
+        result[key] = torch.cat(padded, dim=0)
+    return result

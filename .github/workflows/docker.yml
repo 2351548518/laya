@@ -59,12 +59,6 @@ jobs:
           docker compose -f compose.yaml -f compose.cuda.yaml config --quiet
           docker compose -f compose.yaml -f compose.http.yaml config --quiet
           docker compose -f compose.yaml -f compose.http.yaml -f compose.cuda.yaml config --quiet
-          # ModelScope prefetch, alone and stacked on top of every other combination a
-          # deployment reaches for.
-          docker compose -f compose.yaml -f compose.modelscope.yaml config --quiet
-          docker compose -f compose.yaml -f compose.http.yaml -f compose.modelscope.yaml config --quiet
-          docker compose -f compose.yaml -f compose.http.yaml -f compose.cuda.yaml -f compose.modelscope.yaml config --quiet
-          docker compose -f compose.yaml -f compose.http.yaml -f compose.spark.yaml -f compose.modelscope.yaml config --quiet
           docker build --pull -t laya:smoke .
       - name: Check installed runtime and fresh cache permissions
         run: |
@@ -77,7 +71,7 @@ jobs:
           cache = pathlib.Path(os.environ["HF_HOME"])
           (cache / "write-test").write_text("cache survives container replacement")
           request = json.loads(pathlib.Path("/opt/laya/examples/request.json").read_text())
-          assert Router().route(request["state"], request["questions"]).model == "english"
+          assert Router().route(request["state"], request["questions"]).model == "multimodal"
           '
       - name: Check cache survives container replacement
         run: |
@@ -91,9 +85,9 @@ jobs:
       - name: Run existing tests without model downloads
         run: |
           docker run --rm --network none -v "$PWD:/workspace:ro" -w /workspace \
-            laya:smoke python tests/test_router.py
+            laya:smoke python tests/test_checkpoint_safety.py
           docker run --rm --network none -v "$PWD:/workspace:ro" -w /workspace \
-            laya:smoke python tests/test_criteria.py
+            laya:smoke python -c 'from laya import Agent, MultimodalAgent; assert Agent is MultimodalAgent'
       - name: Test secret-file configuration
         run: |
           docker run --rm --network none -v "$PWD:/workspace:ro" -w /workspace \
@@ -134,15 +128,15 @@ jobs:
           docker compose -f compose.yaml -f compose.http.yaml -f compose.multimodal.yaml -f compose.cuda.yaml config --quiet
       - name: Build and check the native media runtime
         run: |
-          docker build --build-arg LAYA_MULTIMODAL=1 -t laya:native-media .
-          docker run --rm --network none laya:native-media sh -ec '
+          docker compose build laya-serve
+          docker compose run --rm --no-deps laya-serve sh -ec '
             ffmpeg -version
             ffprobe -version
             python -c "from laya import MultimodalAgent; import soundfile, torchvision"
             pip check
           '
       - name: Start laya-serve and wait until healthy
-        run: docker compose up --build -d --wait --wait-timeout 300 laya-serve
+        run: docker compose up --no-build -d --wait --wait-timeout 300 laya-serve
       - name: Check binding, health and bearer auth
         run: |
           docker compose port laya-serve 8000 | grep -q '^127.0.0.1:'

@@ -28,16 +28,17 @@ python -m unittest discover -s research/benchmarks/feishu_zh/tests -v
 
 ## 自己跑一遍
 
-按英文说明下载/准备本地多语言checkpoint，然后先试两题：
+把 `CHECKPOINT` 设为本地[原生模型检查点](../../../README.md#quickstart)，先跑两条用例。
 
 ```bash
-PYTHONPATH=. python research/benchmarks/feishu_zh/run.py --backend laya \
+python research/benchmarks/feishu_zh/run.py --backend laya \
   --checkpoint "$CHECKPOINT" --device cpu --limit 2 --repeats 1 --modes choice \
-  --output /tmp/feishu-laya-smoke
-python research/benchmarks/feishu_zh/audit.py --run-dir /tmp/feishu-laya-smoke
+  --output _local/feishu-laya-smoke
+python research/benchmarks/feishu_zh/audit.py --run-dir _local/feishu-laya-smoke
 ```
 
-完整评测省略limit/repeats/modes参数。可将device改为mps或cuda；每次使用新输出目录。脚本不自动下载模型，记录实际代码/权重哈希，不沿用历史版本信息。Jev比较是可选且收费的，详见[英文入口](README.md#optional-jev-comparison)。
+省略 `--limit`、`--repeats` 和 `--modes` 即可跑完整评测。每次使用新输出目录，报告会记录
+本次的代码、权重哈希、版本和设备。Jev 横评是可选的付费调用。[Jev 横评命令](README.md#optional-jev-comparison)
 
 ## 这套测试的几个小设计
 

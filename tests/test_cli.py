@@ -164,8 +164,8 @@ code, out, err, stub = run_session(["quit"], [], router=AlwaysBrokenRouter())
 check("interactive: leaving the prompt before a request exits 0", code == 0, "got %r" % code)
 
 # --------------------------------------------------------------------- explicit flags
-code, out, err, stub = run_cli(["--model", "english", "charged twice"])
-check("flags: --model forwarded", stub.route_calls[0][1]["model"] == "english")
+code, out, err, stub = run_cli(["--model", "multimodal", "charged twice"])
+check("flags: --model forwarded", stub.route_calls[0][1]["model"] == "multimodal")
 
 # ------------------------------------------------- --model is core's registry, not a copy of it
 # `choices=` compared strings exactly, so the flag knew three spellings while the router it feeds
@@ -193,8 +193,7 @@ for name in sorted(DEFAULT_MODELS):
 for alias, canonical in sorted(_ALIASES.items()):
     got = parse_model(["t", "--model", alias])
     check("model: alias %s is %s" % (alias, canonical), got == canonical, repr(got))
-for spelling, want in (("EN", "english"), (" Multilingual ", "multilingual"),
-                       ("Typed-Decisions", "typed-decisions"), ("laya-MULTILINGUAL", "multilingual")):
+for spelling, want in ((" MULTIMODAL ", "multimodal"), ("DEFAULT", "multimodal"), (" LAYA ", "multimodal")):
     got = parse_model(["t", "--model", spelling])
     check("model: casing and spacing %r" % spelling, got == want, repr(got))
 for auto in ("auto", "AUTO", " Auto "):
@@ -215,16 +214,16 @@ except SystemExit:
 text = err.getvalue()
 check("model: error names the checkpoints",
       all(n in text for n in sorted(DEFAULT_MODELS)), text)
-check("model: error names the aliases", "alias" in text and "'en'" in text, text)
+check("model: error names the aliases", "alias" in text and "'default'" in text, text)
 check("model: error names auto", "'auto'" in text, text)
 
 # And what reaches the router is the canonical name, whichever spelling was typed.
-code, out, err, stub = run_cli(["charged twice", "--model", "en"])
+code, out, err, stub = run_cli(["charged twice", "--model", "default"])
 check("model: alias forwarded canonical to route",
-      code == 0 and stub.route_calls[0][1]["model"] == "english", str(stub.route_calls))
-code, out, err, stub = run_cli(["charged twice", "--predict", "--model", "ML"])
+      code == 0 and stub.route_calls[0][1]["model"] == "multimodal", str(stub.route_calls))
+code, out, err, stub = run_cli(["charged twice", "--predict", "--model", "LAYA"])
 check("model: alias forwarded canonical to predict",
-      code == 0 and stub.predict_calls[0][1]["model"] == "multilingual", str(stub.predict_calls))
+      code == 0 and stub.predict_calls[0][1]["model"] == "multimodal", str(stub.predict_calls))
 code, out, err, stub = run_cli(["charged twice", "--model", "auto"])
 check("model: auto forwarded as no pin",
       code == 0 and stub.route_calls[0][1]["model"] is None, str(stub.route_calls))
@@ -374,11 +373,11 @@ requests = stub.predict_batch_calls[0][0]
 check("batch preset: state key follows the preset",
       all(set(r["state"]) == {"message"} for r in requests), str([r["state"] for r in requests]))
 
-code, out, err, stub = run_batch_cli(["--batch", path, "--predict", "--model", "english",
+code, out, err, stub = run_batch_cli(["--batch", path, "--predict", "--model", "multimodal",
                                       "--lang", "de"])
 first = stub.predict_batch_calls[0][0][0]
 check("batch flags: model/lang forwarded onto every request",
-      first.get("model") == "english" and first.get("lang") == "de", str(first))
+      first.get("model") == "multimodal" and first.get("lang") == "de", str(first))
 
 code, out, err, stub = run_batch_cli(["--batch", os.path.join(tmp, "missing.txt")])
 check("batch missing file: exit 2 with a named failure",
@@ -592,19 +591,6 @@ with open(os.path.join(_ROOT, "docs", "laya-guide.md"), encoding="utf-8") as han
     readme = handle.read()
 
 
-def section(heading):
-    return readme.split(heading, 1)[1].split("\n## ", 1)[0]
-
-
-cli_page = section("### Command line")
-check("sort: the page that teaches `laya --batch` teaches the grouping and its condition",
-      "--batch-size" in cli_page and "--sort-by-length" in cli_page and "1 < N <" in cli_page,
-      repr(cli_page[:120]))
-server_page = section("## Try it locally: web GUI + JSON API")
-check("sort: the server page teaches both body fields",
-      "/predict/batch" in server_page and "batch_size" in server_page
-      and "sort_by_length" in server_page, repr(server_page[:120]))
-
 # --------------------------------------------------------------------- --questions FILE
 # The CLI could only ever answer the five built-in presets, while the library's whole input is a
 # user-written question dict. A file is the only way to get one onto the command line, so the
@@ -764,9 +750,9 @@ check("questions: --json prints the raw answers", code == 0 and '"intent"' in ou
       "code %r, out %r" % (code, out))
 
 # The same file answers every preset's questions too, so --questions replaces none of them.
-code, out, err, stub = run_cli(["hi", "--questions", INTENTS_PATH, "--model", "english"],
+code, out, err, stub = run_cli(["hi", "--questions", INTENTS_PATH, "--model", "multimodal"],
                                router=QuestionRecorder())
-check("questions: --model still forwarded", stub.kwargs.get("model") == "english", str(stub.kwargs))
+check("questions: --model still forwarded", stub.kwargs.get("model") == "multimodal", str(stub.kwargs))
 
 # --------------------------------------------------------------------- the token budget
 # `--questions` is what makes a many-label question reachable from the shell, and a many-label
@@ -963,7 +949,7 @@ check("threshold: --json still carries the raw key",
 
 # --------------------------------------------------------------------- train subcommand
 code, out, err, stub = run_cli(["train", "--help"])
-check("train subcommand: dispatches to train_cli and shows help", code == 0 and "laya-train" in out, out)
+check("train subcommand: dispatches to train_cli and shows help", code == 0 and "laya-train" in out and "--train-split" in out, out)
 
 # Drift pin, the other direction: every control `predict` takes that the parser can name must
 # arrive in the call, and the ones it cannot name must be the accepted three. A control added to
@@ -972,7 +958,7 @@ check("train subcommand: dispatches to train_cli and shows help", code == 0 and 
 PREDICT_CONTROLS = {p for p in inspect.signature(_Router.predict).parameters
                     if p not in ("self", "state", "questions")}
 NAMED = set(vars(cli.build_parser().parse_args(["hi"])))
-code, out, err, stub = run_cli(["--predict", "--model", "english", "--task", "multi",
+code, out, err, stub = run_cli(["--predict", "--model", "multimodal", "--task", "multi",
                                 "--lang", "de", "--max-len", "1024", "--head-max-len", "512",
                                 "--min-confidence", "0.5", "hello"], router=GatedRouter(mark=False))
 check("drift: every control the parser names a flag for arrives in the call",

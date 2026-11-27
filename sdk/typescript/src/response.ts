@@ -8,7 +8,7 @@ function expect(condition: unknown, field: string): asserts condition {
 const number = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 const count = (value: unknown): value is number => Number.isInteger(value);
 const probability = (value: unknown) => number(value) && value >= 0 && value <= 1;
-const model = (value: unknown) => typeof value === 'string' && ['english', 'multilingual', 'typed-decisions'].includes(value);
+const model = (value: unknown) => typeof value === 'string' && value.length > 0;
 
 export function validateRouteSnapshot(value: unknown, explain: boolean): void {
   expect(isRecord(value), 'route snapshot');
@@ -33,7 +33,8 @@ export function validateRouteSnapshot(value: unknown, explain: boolean): void {
 
 export function validateRoute(value: unknown): void {
   expect(isRecord(value), 'routing');
-  expect(model(value.model) && typeof value.repo === 'string' && typeof value.reason === 'string', 'routing model/repo/reason');
+  expect(model(value.model) && (value.repo === null || typeof value.repo === 'string') &&
+    typeof value.reason === 'string', 'routing model/repo/reason');
   expect(value.workflow === null || typeof value.workflow === 'string', 'routing workflow');
   const detection = value.detection;
   if (detection === null) return;
@@ -60,7 +61,7 @@ export function validateHealth(value: unknown): void {
   expect(isRecord(value) && value.status === 'ok', 'health');
   if (value.device !== undefined) expect(typeof value.device === 'string', 'device');
   if (value.loaded !== undefined) {
-    expect(Array.isArray(value.loaded) && value.loaded.every(name => model(name) || name === 'multimodal'), 'loaded');
+    expect(Array.isArray(value.loaded) && value.loaded.every(model), 'loaded');
   }
 }
 

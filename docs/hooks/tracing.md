@@ -15,7 +15,7 @@ bookkeeping.
 ## run_id
 
 - A `uuid4().hex` string, created once per public call (`predict_batch`, `system_one`,
-  `Router.predict`, `ONNXAgent.system_one`). `Router.predict_batch` creates one per request
+  `Router.predict`). `Router.predict_batch` creates one per request
   instead, the `run_id` a `Router.predict` call for that request would have had.
 - Shared by every predict-event hook of that call: `on_predict_start`, `on_predict_end` and
   `on_error` see one `PredictContext`, so one `run_id`.
@@ -72,7 +72,7 @@ class Tracer:
         # or close it here if you prefer.
         pass
 
-agent = laya.load("convaiinnovations/laya", hooks=[Tracer()])
+agent = laya.load( hooks=[Tracer()])
 ```
 
 Because `on_predict_end` always runs, it is the natural place to close a span, and it can see
@@ -140,7 +140,7 @@ class OTelHooks:
             span.set_status(trace.Status(trace.StatusCode.ERROR))
         span.end()
 
-laya.load("convaiinnovations/laya", hooks=[OTelHooks()], hooks_raise=False)
+laya.load( hooks=[OTelHooks()], hooks_raise=False)
 ```
 
 Set `hooks_raise=False` so a tracer outage never fails a request.

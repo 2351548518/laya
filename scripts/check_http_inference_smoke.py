@@ -17,12 +17,12 @@ from http_inference_smoke import check_answers, check_checkpoint, SmokeFailure
 
 
 PIN = "1" * 40
-HEALTH = {"status": "ok", "loaded": ["english"], "revisions": {"english": PIN},
-          "device_is_preference": False, "checkpoint_devices": {"english": "cpu"},
-          "cpu_fallbacks": {"english": {"count": 0, "last_reason": None}}}
+HEALTH = {"status": "ok", "loaded": ["multimodal"], "revisions": {"multimodal": PIN},
+          "device_is_preference": False, "checkpoint_devices": {"multimodal": "cpu"},
+          "cpu_fallbacks": {"multimodal": {"count": 0, "last_reason": None}}}
 QUESTION = {"team": {"type": "choice", "instructions": "Which team?",
                      "criteria": {"billing": "money", "technical": "bugs"}}}
-ANSWER = {"model": "laya-rl-agent", "answers": {
+ANSWER = {"model": "fixture-native", "answers": {
     "team": {"type": "choice", "choice": "billing", "confidence": 0.9,
              "probabilities": {"billing": 0.9, "technical": 0.1}}}}
 
@@ -31,16 +31,16 @@ class Checks(unittest.TestCase):
     def test_live_empty_service_is_not_qualified(self):
         empty = {"status": "ok", "loaded": [], "device_is_preference": True}
         with self.assertRaises(SmokeFailure):
-            check_checkpoint(empty, "english", PIN, "cpu")
+            check_checkpoint(empty, "multimodal", PIN, "cpu")
 
     def test_revision_device_and_fallback_must_match(self):
-        for field, value in [("revisions", {"english": "2" * 40}),
-                             ("checkpoint_devices", {"english": "cpu"}),
-                             ("cpu_fallbacks", {"english": {"count": 1, "last_reason": "OOM"}})]:
+        for field, value in [("revisions", {"multimodal": "2" * 40}),
+                             ("checkpoint_devices", {"multimodal": "cpu"}),
+                             ("cpu_fallbacks", {"multimodal": {"count": 1, "last_reason": "OOM"}})]:
             health = copy.deepcopy(HEALTH)
             health[field] = value
             with self.subTest(field=field), self.assertRaises(SmokeFailure):
-                check_checkpoint(health, "english", PIN, "cuda" if field == "checkpoint_devices" else "cpu")
+                check_checkpoint(health, "multimodal", PIN, "cuda" if field == "checkpoint_devices" else "cpu")
 
     def test_wrong_keys_option_and_nonfinite_values_are_rejected(self):
         for change in [{"choice": "invented"}, {"probabilities": {"billing": float("nan"), "technical": 0.1}},
@@ -70,7 +70,7 @@ class Checks(unittest.TestCase):
                 if self.headers.get("Authorization") != "Bearer fixture":
                     self.respond(401, {})
                     return
-                assert body["model"] == "english"
+                assert body["model"] == "multimodal"
                 assert body["questions"] == QUESTION
                 self.respond(500 if self.fail else 200, {} if self.fail else ANSWER)
 

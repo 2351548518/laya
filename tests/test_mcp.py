@@ -126,7 +126,7 @@ def test_device():
     ok("device/report_cuda_bool", isinstance(rep["torch_cuda"], bool))
 
     # The auto-detect branch is a second implementation of the availability chain inside
-    # `laya/agent.py::Agent.__init__`, so it has to be exercised on devices the runner does not have.
+    # `laya/multimodal.py::MultimodalAgent.__init__`, so it has to be exercised on devices the runner does not have.
     # `resolve_device` imports torch inside its body, which makes the module the seam: a fake
     # here forces every branch without CUDA, MPS or XPU hardware. Before this block the only
     # auto-detect assertion was the domain check above, and it passed on a narrower chain.
@@ -254,7 +254,7 @@ def test_schema():
     expect_tool_error("schema/preset_bad", lambda: validate_preset("nope"), "invalid_preset")
     ok("schema/model_none_auto", validate_model(None) == "auto")
     ok("schema/model_auto", validate_model("auto") == "auto")
-    ok("schema/model_multilingual", validate_model("multilingual") == "multilingual")
+    ok("schema/model_multilingual", validate_model("multimodal") == "multimodal")
     expect_tool_error("schema/model_bad", lambda: validate_model("gpt4"), "invalid_model")
 
 
@@ -273,7 +273,7 @@ def test_model_names():
     for alias, canonical in sorted(_ALIASES.items()):
         got = validate_model(alias)
         ok("model/alias_%s" % alias, got == canonical, "got %r want %r" % (got, canonical))
-    for spelling in ("EN", " Multilingual ", "Typed-Decisions", "AUTO"):
+    for spelling in ("DEFAULT", " Multimodal ", "Laya", "AUTO"):
         want = "auto" if spelling.strip().lower() == "auto" else normalise_name(spelling)
         ok("model/casing_and_spacing_%r" % spelling, validate_model(spelling) == want)
     for auto in (None, "auto", "Auto", " auto "):
@@ -290,7 +290,7 @@ def test_model_names():
     except ToolError as exc:
         message = exc.message
     ok("model/error_lists_checkpoints", all(n in message for n in sorted(DEFAULT_MODELS)), repr(message))
-    ok("model/error_lists_aliases", "alias" in message and "'en'" in message, repr(message))
+    ok("model/error_lists_aliases", "alias" in message and all(repr(alias) in message for alias in _ALIASES), repr(message))
     ok("model/error_keeps_auto", "'auto'" in message, repr(message))
 
 
@@ -387,7 +387,7 @@ def test_model_forwarding():
     """An alias reaches core canonical, and changes nothing else about the answer."""
 
     class EchoRouter:
-        _agents = {"english": FakeAgent()}
+        _agents = {"multimodal": FakeAgent()}
 
         def __init__(self):
             self.calls = []
@@ -400,10 +400,10 @@ def test_model_forwarding():
 
     router = EchoRouter()
     by_alias = laya_predict(STATE, QUESTIONS, model="laya", router=router)
-    by_name = laya_predict(STATE, QUESTIONS, model="english", router=router)
-    ok("forward/model_seen_by_core", [c.get("model") for c in router.calls] == ["english", "english"],
+    by_name = laya_predict(STATE, QUESTIONS, model="multimodal", router=router)
+    ok("forward/model_seen_by_core", [c.get("model") for c in router.calls] == ["multimodal", "multimodal"],
        repr(router.calls))
-    ok("forward/reports_canonical", by_alias["routing"]["model"] == "english", repr(by_alias["routing"]))
+    ok("forward/reports_canonical", by_alias["routing"]["model"] == "multimodal", repr(by_alias["routing"]))
     ok("forward/answers_identical", by_alias["answers"] == by_name["answers"])
 
     laya_predict(STATE, QUESTIONS, model=None, router=router)
@@ -441,7 +441,7 @@ class FakeAgentDirect:
 
 
 class FakeRouter:
-    _agents = {"english": FakeAgent()}
+    _agents = {"multimodal": FakeAgent()}
 
     def predict(self, state, questions, **kwargs):
         answers = {}
@@ -452,11 +452,11 @@ class FakeRouter:
                 answers[name] = {"score": 1.84, "confidence": 0.8, "distribution": [0.1, 0.3, 0.6]}
             else:
                 answers[name] = {"noul": 0.892, "confidence": 0.89}
-        return {"answers": answers, "routing": {"model": "english", "repo": "fake/laya", "reason": "latin script"}}
+        return {"answers": answers, "routing": {"model": "multimodal", "repo": "fake/laya", "reason": "latin script"}}
 
     def route(self, state, questions):
         class D:
-            model = "multilingual"
+            model = "multimodal"
             reason = "non-Latin script (devanagari)"
             repo = "fake/repo"
         return D()
@@ -476,7 +476,7 @@ def test_shape():
     ok("shape/predict_keys", set(out) >= {"answers", "routing", "latency_ms"})
     ok("shape/predict_choice", out["answers"]["department"]["choice"] == "billing")
     ok("shape/predict_noul_float", isinstance(out["answers"]["churn_risk"]["noul"], float))
-    ok("shape/predict_routing", out["routing"]["model"] == "english")
+    ok("shape/predict_routing", out["routing"]["model"] == "multimodal")
     # The device is the real device of the answering checkpoint (Agent.device),
     # not a guess; it is omitted when it cannot be read.
     ok("shape/predict_device", out["device"] == "cpu", repr(out.get("device")))
@@ -484,13 +484,13 @@ def test_shape():
 
     class RouterNoAgents:
         def predict(self, state, questions, **kwargs):
-            return {"answers": {}, "routing": {"model": "english"}}
+            return {"answers": {}, "routing": {"model": "multimodal"}}
 
     out = laya_predict(STATE, QUESTIONS, model="auto", router=RouterNoAgents())
     ok("shape/predict_device_absent_when_unreadable", "device" not in out, repr(set(out)))
 
     out = laya_route(STATE, QUESTIONS, router=FakeRouter())
-    ok("shape/route_dict", out == {"model": "multilingual", "repo": "fake/repo",
+    ok("shape/route_dict", out == {"model": "multimodal", "repo": "fake/repo",
                                    "reason": "non-Latin script (devanagari)"})
 
     def builder(attr):
@@ -500,13 +500,13 @@ def test_shape():
     out = laya_preset("triage", {"message": "help"}, router=FakeRouter(), preset_builder=builder)
     ok("shape/preset_answers", "intent" in out["answers"])
 
-    out = laya_status(router=FakeRouter(), loaded=["english"], preload=True)
+    out = laya_status(router=FakeRouter(), loaded=["multimodal"], preload=True)
     ok("shape/status_ready", out["router_ready"] is True)
-    ok("shape/status_loaded", out["loaded"] == ["english"])
+    ok("shape/status_loaded", out["loaded"] == ["multimodal"])
     ok("shape/status_versions", "laya" in out["package_versions"])
     ok("shape/status_device", out["device"] == "cpu", repr(out.get("device")))
     ok("shape/status_device_is_fact", out["device_is_preference"] is False)
-    ok("shape/status_checkpoint_devices", out["checkpoint_devices"] == {"english": "cpu"},
+    ok("shape/status_checkpoint_devices", out["checkpoint_devices"] == {"multimodal": "cpu"},
        repr(out.get("checkpoint_devices")))
     out = laya_status(router=None, loaded=None, preload=True)
     ok("shape/status_pref_before_load",
@@ -540,9 +540,9 @@ def test_shape():
        repr(out.get("routing")))
     ok("shape/predict_auto_fallback_answers", out["answers"]["department"]["choice"] == "billing")
     # an explicit checkpoint still names itself in the same fallback.
-    out = laya_predict(STATE, QUESTIONS, model="english", router=FakeRouterNoRouting())
+    out = laya_predict(STATE, QUESTIONS, model="multimodal", router=FakeRouterNoRouting())
     ok("shape/predict_explicit_fallback_names_checkpoint",
-       out["routing"] == {"model": "english", "repo": None, "reason": "explicit model"},
+       out["routing"] == {"model": "multimodal", "repo": None, "reason": "explicit model"},
        repr(out.get("routing")))
 
 
@@ -604,8 +604,8 @@ def test_option_order_forwarding():
 
     # Shortlist passthrough (n <= k): the question is answered as given, so the order applies
     # and nothing was dropped.
-    router = ShortlistRouter({"english": ShortlistAgent()})
-    out = laya_shortlist(STATE, order_q, model="english", k=5, router=router, embed_fn=_raising_embed)
+    router = ShortlistRouter({"multimodal": ShortlistAgent()})
+    out = laya_shortlist(STATE, order_q, model="multimodal", k=5, router=router, embed_fn=_raising_embed)
     ok("option_order/shortlist_passthrough_forwarded",
        router.seen_questions["team"].get("option_order") == [2, 0, 1], repr(router.seen_questions))
     ok("option_order/shortlist_passthrough_no_drop_signal",
@@ -614,9 +614,9 @@ def test_option_order_forwarding():
     # longer describes it. Core drops the order rather than remapping it (#1063), so the call
     # answers over the kept labels and the wrapper reports the drop per question, with the old
     # and kept option counts: core's RuntimeWarning never reaches an MCP client.
-    router = ShortlistRouter({"english": ShortlistAgent()})
+    router = ShortlistRouter({"multimodal": ShortlistAgent()})
     narrowed = {"topic": dict(SHORTLIST_QUESTIONS["topic"], option_order=[4, 3, 2, 1, 0])}
-    out = laya_shortlist(STATE, narrowed, model="english", k=2,
+    out = laya_shortlist(STATE, narrowed, model="multimodal", k=2,
                          router=router, embed_fn=_tie_embed)
     ok("option_order/shortlist_narrowed_answers",
        out["answers"]["topic"]["choice"] == "billing", repr(out["answers"]))
@@ -633,18 +633,18 @@ def test_option_order_forwarding():
     import io
 
     buf = io.StringIO()
-    router = ShortlistRouter({"english": ShortlistAgent()})
+    router = ShortlistRouter({"multimodal": ShortlistAgent()})
     with contextlib.redirect_stdout(buf):
-        laya_shortlist(STATE, narrowed, model="english", k=2,
+        laya_shortlist(STATE, narrowed, model="multimodal", k=2,
                        router=router, embed_fn=_tie_embed)
     ok("option_order/shortlist_narrowed_stdout_clean",
        buf.getvalue() == "", repr(buf.getvalue()[:100]))
     # A structurally invalid order (not a permutation) is still refused up front, before any
     # predict: only a valid order on a narrowed question reaches the drop path.
-    router = ShortlistRouter({"english": ShortlistAgent()})
+    router = ShortlistRouter({"multimodal": ShortlistAgent()})
     bad = {"topic": dict(SHORTLIST_QUESTIONS["topic"], option_order=[0, 0, 0, 0, 0])}
     expect_tool_error("option_order/shortlist_invalid_rejected",
-                      lambda: laya_shortlist(STATE, bad, model="english", k=2,
+                      lambda: laya_shortlist(STATE, bad, model="multimodal", k=2,
                                              router=router, embed_fn=_tie_embed),
                       "invalid_questions")
     ok("option_order/shortlist_invalid_not_called", router.seen_questions is None)
@@ -654,17 +654,17 @@ def test_option_order_forwarding():
 
     from laya.mcp import server as server_mod
 
-    router = ShortlistRouter({"english": ShortlistAgent()})
+    router = ShortlistRouter({"multimodal": ShortlistAgent()})
     payload = json.loads(server_mod._wrap(
-        laya_shortlist, state=STATE, questions=narrowed, model="english", k=2,
+        laya_shortlist, state=STATE, questions=narrowed, model="multimodal", k=2,
         router=router, embed_fn=_tie_embed))
     ok("option_order/shortlist_narrowed_mcp_json_drop_signal",
        payload.get("option_order_dropped") == {"topic": {"n": 5, "kept": 2}},
        repr(payload.get("option_order_dropped")))
     # Non-choice questions are never narrowed, so their order is forwarded whatever k is.
-    router = ShortlistRouter({"english": ShortlistAgent()})
+    router = ShortlistRouter({"multimodal": ShortlistAgent()})
     scored = {"urgency": dict(SHORTLIST_QUESTIONS["urgency"], option_order=[1, 0])}
-    out = laya_shortlist(STATE, scored, model="english", k=1, router=router, embed_fn=_raising_embed)
+    out = laya_shortlist(STATE, scored, model="multimodal", k=1, router=router, embed_fn=_raising_embed)
     ok("option_order/shortlist_non_choice_forwarded",
        router.seen_questions["urgency"].get("option_order") == [1, 0], repr(router.seen_questions))
     ok("option_order/shortlist_non_choice_no_drop_signal",
@@ -685,23 +685,23 @@ def test_real_device():
 
     # router_agent: read-only on the _agents mapping, never load() (which
     # reorders the LRU and would rebuild an evicted checkpoint).
-    ok("device/router_agents", router_agent(FakeRouter(), "english") is not None)
-    ok("device/router_agents_missing", router_agent(FakeRouter(), "typed-decisions") is None)
-    # Aliased name, resolved with the core normaliser (English -> english).
-    ok("device/router_normalised_alias", router_agent(FakeRouter(), "English") is not None)
-    ok("device/router_bare", router_agent(type("Bare", (), {})(), "english") is None)
-    ok("device/router_none", router_agent(None, "english") is None)
+    ok("device/router_agents", router_agent(FakeRouter(), "multimodal") is not None)
+    ok("device/router_agents_missing", router_agent(FakeRouter(), "support") is None)
+    # The core normalizer resolves the alias to the checkpoint's canonical name.
+    ok("device/router_normalised_alias", router_agent(FakeRouter(), "Default") is not None)
+    ok("device/router_bare", router_agent(type("Bare", (), {})(), "multimodal") is None)
+    ok("device/router_none", router_agent(None, "multimodal") is None)
 
     # A router whose load() raises must still yield the right device: proof
     # that the device read never calls load().
     class RouterLoadIsASideEffect:
-        _agents = {"english": FakeAgent()}
+        _agents = {"multimodal": FakeAgent()}
 
         def load(self, name):
             raise AssertionError("router_agent must not call load()")
 
         def predict(self, state, questions, **kwargs):
-            return {"answers": {}, "routing": {"model": "english"}}
+            return {"answers": {}, "routing": {"model": "multimodal"}}
 
     out = laya_predict(STATE, QUESTIONS, model="auto", router=RouterLoadIsASideEffect())
     ok("device/load_never_called", out.get("device") == "cpu", repr(out.get("device")))
@@ -730,17 +730,17 @@ def test_private_contract():
         type = "mps"
 
     fake = type("Agent", (), {"device": MpsDevice()})()
-    r.attach("english", fake)  # public API: registers under the normalised name
-    ok("contract/attach_resident", list(r.loaded) == ["english"], repr(list(r.loaded)))
-    ok("contract/router_agents_readable", router_agent(r, "english") is fake)
-    ok("contract/agent_device_mps", agent_device(router_agent(r, "english")) == "mps")
+    r.attach("multimodal", fake)  # public API: registers under the normalised name
+    ok("contract/attach_resident", list(r.loaded) == ["multimodal"], repr(list(r.loaded)))
+    ok("contract/router_agents_readable", router_agent(r, "multimodal") is fake)
+    ok("contract/agent_device_mps", agent_device(router_agent(r, "multimodal")) == "mps")
     out = laya_status(router=r, preload=False)
     ok("contract/status_mps",
-       out.get("checkpoint_devices") == {"english": "mps"}
+       out.get("checkpoint_devices") == {"multimodal": "mps"}
        and out.get("device") == "mps" and out.get("device_is_preference") is False,
        repr(out.get("checkpoint_devices")))
     # attach() normalises the name, so the alias must read it back too.
-    ok("contract/alias_english", router_agent(r, "English") is fake)
+    ok("contract/alias_english", router_agent(r, "Default") is fake)
 
 
 # --- shortlist tool (mocked router/agent, no weights) -------------------------
@@ -778,7 +778,7 @@ class ShortlistDirectAgent(ShortlistAgent):
 class ShortlistRouter:
     """Fake router recording what predict received (no weights, no torch)."""
 
-    def __init__(self, agents, routed="english"):
+    def __init__(self, agents, routed="multimodal"):
         self._agents = dict(agents)
         self._routed = routed
         self.seen_questions = None
@@ -801,14 +801,14 @@ class ShortlistRouter:
             else:
                 answers[name] = {"noul": 0.7, "confidence": 0.9}
         return {"answers": answers,
-                "routing": {"model": kwargs.get("model", "english"), "repo": "fake/repo",
+                "routing": {"model": kwargs.get("model", "multimodal"), "repo": "fake/repo",
                             "reason": "explicit model"}}
 
 
 class LoadingRouter(ShortlistRouter):
     """ShortlistRouter plus the on-demand load() Router.predict relies on."""
 
-    def __init__(self, agents, routed="english"):
+    def __init__(self, agents, routed="multimodal"):
         super().__init__(agents, routed)
         self.load_calls = []
 
@@ -840,20 +840,20 @@ def test_shortlist():
         expect_tool_error("shortlist/k_bad_%r" % (bad_k,),
                           lambda b=bad_k: laya_shortlist(
                               STATE, SHORTLIST_QUESTIONS, k=b,
-                              router=ShortlistRouter({"english": ShortlistAgent()})),
+                              router=ShortlistRouter({"multimodal": ShortlistAgent()})),
                           "invalid_k")
     expect_tool_error("shortlist/auto_needs_router",
                       lambda: laya_shortlist(STATE, SHORTLIST_QUESTIONS), "models_not_ready")
     # Explicit model whose checkpoint is neither resident nor loadable.
     expect_tool_error("shortlist/explicit_not_loaded",
-                      lambda: laya_shortlist(STATE, SHORTLIST_QUESTIONS, model="english",
+                      lambda: laya_shortlist(STATE, SHORTLIST_QUESTIONS, model="multimodal",
                                              router=ShortlistRouter({})),
                       "models_not_ready")
 
     # Passthrough: every choice has <= k labels, so embed_fn is never called.
     small = {"dept": {"type": "choice", "instructions": "pick", "criteria": {"a": "A", "b": "B"}}}
-    router = ShortlistRouter({"english": ShortlistAgent()})
-    out = laya_shortlist(STATE, small, model="english", k=5, router=router, embed_fn=_raising_embed)
+    router = ShortlistRouter({"multimodal": ShortlistAgent()})
+    out = laya_shortlist(STATE, small, model="multimodal", k=5, router=router, embed_fn=_raising_embed)
     meta = out["shortlist"]["dept"]
     ok("shortlist/passthrough_meta", meta["passthrough"] is True and meta["scores"] is None
        and meta["k"] == 5 and meta["n"] == 2, repr(meta))
@@ -862,7 +862,7 @@ def test_shortlist():
     ok("shortlist/passthrough_forwarded", list(router.seen_questions["dept"]["criteria"]) == ["a", "b"])
     ok("shortlist/passthrough_device", out.get("device") == "cpu", repr(out.get("device")))
     ok("shortlist/passthrough_routing",
-       out["routing"] == {"model": "english", "repo": None, "reason": "explicit model"},
+       out["routing"] == {"model": "multimodal", "repo": None, "reason": "explicit model"},
        repr(out["routing"]))
     ok("shortlist/passthrough_latency", isinstance(out["latency_ms"], float))
 
@@ -871,10 +871,10 @@ def test_shortlist():
     # make this assert a stale value against a tool layer that moved correctly.
     from laya.shortlist import DEFAULT_SHORTLIST_K
 
-    router = ShortlistRouter({"english": ShortlistAgent()})
+    router = ShortlistRouter({"multimodal": ShortlistAgent()})
     three = {"dept": {"type": "choice", "instructions": "pick",
                       "criteria": {"a": "A", "b": "B", "c": "C"}}}
-    out = laya_shortlist(STATE, three, model="english", router=router, embed_fn=_raising_embed)
+    out = laya_shortlist(STATE, three, model="multimodal", router=router, embed_fn=_raising_embed)
     ok("shortlist/default_k_passthrough", out["shortlist"]["dept"]["k"] == DEFAULT_SHORTLIST_K
        and out["shortlist"]["dept"]["passthrough"] is True, repr(out["shortlist"]))
 
@@ -885,8 +885,8 @@ def test_shortlist():
         calls.append(list(texts))
         return _tie_embed(texts)
 
-    router = ShortlistRouter({"english": ShortlistAgent()})
-    out = laya_shortlist(STATE, SHORTLIST_QUESTIONS, model="english", k=2,
+    router = ShortlistRouter({"multimodal": ShortlistAgent()})
+    out = laya_shortlist(STATE, SHORTLIST_QUESTIONS, model="multimodal", k=2,
                          router=router, embed_fn=recording_embed)
     meta = out["shortlist"]["topic"]
     ok("shortlist/meta_shape", meta["k"] == 2 and meta["n"] == 5 and meta["passthrough"] is False,
@@ -908,24 +908,24 @@ def test_shortlist():
 
     # Auto mode: route once, then answer with an explicit model= so the forward
     # pass does not re-route; the reported routing is the real route decision.
-    router = ShortlistRouter({"multilingual": ShortlistAgent()}, routed="multilingual")
+    router = ShortlistRouter({"multimodal": ShortlistAgent()}, routed="multimodal")
     out = laya_shortlist(STATE, SHORTLIST_QUESTIONS, k=2, router=router, embed_fn=_tie_embed)
     ok("shortlist/auto_routing_reported",
-       out["routing"] == {"model": "multilingual", "repo": "fake/repo", "reason": "unit-test route"},
+       out["routing"] == {"model": "multimodal", "repo": "fake/repo", "reason": "unit-test route"},
        repr(out["routing"]))
-    ok("shortlist/auto_explicit_model", router.seen_kwargs == {"model": "multilingual"},
+    ok("shortlist/auto_explicit_model", router.seen_kwargs == {"model": "multimodal"},
        repr(router.seen_kwargs))
 
     # Lazy server (LAYA_PRELOAD=0): a routed checkpoint that is not resident is
     # loaded on demand, the same on-demand build Router.predict performs.
-    router = LoadingRouter({}, routed="multilingual")
+    router = LoadingRouter({}, routed="multimodal")
     out = laya_shortlist(STATE, SHORTLIST_QUESTIONS, k=2, router=router, embed_fn=_tie_embed)
-    ok("shortlist/lazy_load_once", router.load_calls == ["multilingual"], repr(router.load_calls))
+    ok("shortlist/lazy_load_once", router.load_calls == ["multimodal"], repr(router.load_calls))
     ok("shortlist/lazy_device", out.get("device") == "cpu", repr(out.get("device")))
 
     # Direct agent injection (no router), mirroring laya_predict's agent= path.
     agent = ShortlistDirectAgent()
-    out = laya_shortlist(STATE, small, model="english", k=5, agent=agent, embed_fn=_raising_embed)
+    out = laya_shortlist(STATE, small, model="multimodal", k=5, agent=agent, embed_fn=_raising_embed)
     ok("shortlist/direct_agent", out["answers"]["dept"]["choice"] == "a"
        and out["routing"]["reason"] == "explicit model", repr(out["routing"]))
 
@@ -949,7 +949,7 @@ class BatchRouter(FakeRouter):
             else:
                 answers[name] = {"noul": 0.7, "confidence": 0.9}
         return {"answers": answers,
-                "routing": {"model": request.get("model") or "english",
+                "routing": {"model": request.get("model") or "multimodal",
                             "repo": "fake/laya", "reason": "batch route"}}
 
     def predict_batch(self, requests, batch_size=None, **kwargs):
@@ -958,7 +958,7 @@ class BatchRouter(FakeRouter):
 
     def route_batch(self, requests, hooks_timeout=None):
         self.route_batch_calls.append((list(requests), hooks_timeout))
-        return [{"model": request.get("model") or "english", "repo": "fake/laya",
+        return [{"model": request.get("model") or "multimodal", "repo": "fake/laya",
                  "reason": "batch route"} for request in requests]
 
 
@@ -982,14 +982,14 @@ class StrictRouteRouter:
     """
 
     def route_batch(self, requests):
-        return [{"model": "english", "repo": "fake/laya",
+        return [{"model": "multimodal", "repo": "fake/laya",
                  "reason": "strict route"} for _ in requests]
 
 
 BATCH_REQUESTS = [
     {"state": {"body": "refund please"}, "questions": QUESTIONS},
     {"state": {"body": "please refund invoice 2"}, "questions": QUESTIONS,
-     "model": "english", "task": "massive", "lang": "en"},
+     "model": "multimodal", "task": "massive", "lang": "en"},
     {"state": {"body": "mera account double charge hua"},
      "questions": {"triage": {"type": "noul", "instructions": "Leaving?"}},
      "lang": "hi"},
@@ -1022,7 +1022,7 @@ class TournamentAgent:
 
 class TournamentRouter:
     def __init__(self, decision=None):
-        self.decision = decision or {"model": "english", "repo": "fake/repo", "reason": "original request"}
+        self.decision = decision or {"model": "multimodal", "repo": "fake/repo", "reason": "original request"}
         self.routes = []
         self.agent = TournamentAgent()
         self._agents = {self.decision["model"]: self.agent}
@@ -1051,7 +1051,7 @@ def test_tournament():
         questions["flag"] = {"type": "noul", "instructions": "Is this urgent?"}
         original = copy.deepcopy(questions)
         agent = TournamentAgent()
-        out = laya_tournament(STATE, questions, model="english", agent=agent)
+        out = laya_tournament(STATE, questions, model="multimodal", agent=agent)
         ok("tournament/%d_balanced" % n,
            [len(q["criteria"]) for q in agent.calls[0][1].values()] == sizes)
         ok("tournament/%d_rounds_and_calls" % n,
@@ -1079,7 +1079,7 @@ def test_tournament():
 
     with warnings.catch_warnings(record=True) as seen:
         warnings.simplefilter("always")
-        out = laya_tournament(STATE, questions, model="en", agent=agent, group_size=4,
+        out = laya_tournament(STATE, questions, model="default", agent=agent, group_size=4,
                               lang="de", max_len=1024, head_max_len=384, min_confidence=0.95)
     ok("tournament/order_drop_once", len(seen) == 1 and "option_order" in str(seen[0].message))
     ok("tournament/order_drop_report", out["option_order_dropped"] == {"intent": {"n": 40, "kept": 3}})
@@ -1093,18 +1093,18 @@ def test_tournament():
     ok("tournament/low_confidence_final", out["answers"]["intent"]["low_confidence"] is True)
     ok("tournament/custom_size_rounds", len(agent.calls) == 3 and out["tournament"]["intent"]["rounds"] == 2)
 
-    for model in ("english", None, "auto"):
+    for model in ("multimodal", None, "auto"):
         agent = TournamentAgent()
         small = tournament_questions(2)
         out = laya_tournament(STATE, small, model=model, agent=agent)
         ok("tournament/%r_passthrough" % model, len(agent.calls) == 1 and agent.calls[0][1] == small)
         ok("tournament/%r_zero_round_metadata" % model,
            out["tournament"] == {"intent": {"labels": ["opt0", "opt1"], "n": 2, "rounds": 0}})
-        ok("tournament/%r_direct_routing" % model, out["routing"]["model"] == ("english" if model == "english" else None))
+        ok("tournament/%r_direct_routing" % model, out["routing"]["model"] == ("multimodal" if model == "multimodal" else None))
         ok("tournament/%r_no_order_drop" % model, "option_order_dropped" not in out)
     agent = TournamentAgent()
     out = laya_tournament(STATE, {"flag": {"type": "noul", "instructions": "Is this urgent?"}},
-                          model="english", agent=agent)
+                          model="multimodal", agent=agent)
     ok("tournament/non_choice_one_call", len(agent.calls) == 1 and out["tournament"] == {})
 
 
@@ -1124,7 +1124,7 @@ def test_tournament_rejects_broken_winners():
         agent = BrokenAgent()
         expect_tool_error("tournament/broken_winner_%r" % bad,
                           lambda: laya_tournament(STATE, tournament_questions(40),
-                                                 model="english", agent=agent), "internal_error")
+                                                 model="multimodal", agent=agent), "internal_error")
         ok("tournament/broken_winner_stops_round_%r" % bad, len(agent.calls) == 1)
 
     class BrokenRecursiveAgent(TournamentAgent):
@@ -1137,39 +1137,39 @@ def test_tournament_rejects_broken_winners():
     agent = BrokenRecursiveAgent()
     expect_tool_error("tournament/recursive_out_of_group_winner",
                       lambda: laya_tournament(STATE, tournament_questions(257),
-                                             model="english", agent=agent), "internal_error")
+                                             model="multimodal", agent=agent), "internal_error")
     ok("tournament/recursive_broken_winner_stops_round", len(agent.calls) == 2)
 
 
 def test_tournament_routing_and_validation():
     questions = tournament_questions(40)
     for detection in ({"language": "de"}, SimpleNamespace(language="de")):
-        router = TournamentRouter({"model": "multilingual", "repo": "fake/ml", "reason": "German",
+        router = TournamentRouter({"model": "multimodal", "repo": "fake/ml", "reason": "German",
                                    "detection": detection})
         unused = TournamentAgent()
         out = laya_tournament(STATE, questions, router=router, agent=unused,
-                              task="typed_decisions", lang_guess="de", max_len=1024)
-        ok("tournament/auto_original_request", router.routes == [(STATE, questions, {"task": "typed_decisions", "lang_guess": "de"})])
+                              task="laya", lang_guess="de", max_len=1024)
+        ok("tournament/auto_original_request", router.routes == [(STATE, questions, {"task": "laya", "lang_guess": "de"})])
         ok("tournament/auto_pinned_every_round",
-           all(kwargs == {"model": "multilingual", "lang": "de", "max_len": 1024}
+           all(kwargs == {"model": "multimodal", "lang": "de", "max_len": 1024}
                for _s, _qs, kwargs in router.agent.calls))
-        ok("tournament/auto_preserves_route", out["routing"] == {"model": "multilingual", "repo": "fake/ml", "reason": "German"})
+        ok("tournament/auto_preserves_route", out["routing"] == {"model": "multimodal", "repo": "fake/ml", "reason": "German"})
         ok("tournament/auto_uses_routed_agent", unused.calls == [] and out["device"] == "cpu")
-        router = TournamentRouter({"model": "multilingual", "reason": "German", "detection": detection})
+        router = TournamentRouter({"model": "multimodal", "reason": "German", "detection": detection})
         laya_tournament(STATE, questions, router=router, lang="fr")
         ok("tournament/explicit_lang_wins", all(k["lang"] == "fr" for _s, _qs, k in router.agent.calls))
 
     router = TournamentRouter()
-    out = laya_tournament(STATE, questions, model="EN", router=router)
-    ok("tournament/pin_skips_selection", router.routes == [] and out["routing"]["model"] == "english")
-    ok("tournament/pin_no_unset_controls", all(k == {"model": "english"} for _s, _qs, k in router.agent.calls))
+    out = laya_tournament(STATE, questions, model="DEFAULT", router=router)
+    ok("tournament/pin_skips_selection", router.routes == [] and out["routing"]["model"] == "multimodal")
+    ok("tournament/pin_no_unset_controls", all(k == {"model": "multimodal"} for _s, _qs, k in router.agent.calls))
     for args, code in (({"state": []}, "invalid_state"), ({"questions": {}}, "invalid_questions"),
                        ({"model": "gpt4"}, "invalid_model"), ({"task": "bad"}, "invalid_task"),
                        ({"lang": 3}, "invalid_lang"), ({"lang_guess": 3}, "invalid_lang_guess"),
                        ({"max_len": 0}, "invalid_max_len"), ({"head_max_len": "384"}, "invalid_head_max_len"),
                        ({"min_confidence": 2}, "invalid_min_confidence"),
-                       ({"model": "english", "task": "typed"}, "invalid_task"),
-                       ({"model": "english", "lang_guess": "de"}, "invalid_lang_guess")):
+                       ({"model": "multimodal", "task": "default"}, "invalid_task"),
+                       ({"model": "multimodal", "lang_guess": "de"}, "invalid_lang_guess")):
         router = TournamentRouter()
         params = {"state": STATE, "questions": questions, "router": router, **args}
         expect_tool_error("tournament/invalid_%r" % args, lambda: laya_tournament(**params), code)
@@ -1179,7 +1179,7 @@ def test_tournament_routing_and_validation():
                           lambda: laya_tournament(STATE, questions, group_size=size), "invalid_group_size")
     expect_tool_error("tournament/not_ready", lambda: laya_tournament(STATE, questions), "models_not_ready")
     expect_tool_error("tournament/pinned_not_ready",
-                      lambda: laya_tournament(STATE, questions, model="english"), "models_not_ready")
+                      lambda: laya_tournament(STATE, questions, model="multimodal"), "models_not_ready")
     bad = tournament_questions(40)
     bad["intent"]["option_order"] = [0]
     expect_tool_error("tournament/bad_order_before_rounds",
@@ -1215,7 +1215,7 @@ def test_batch_validation():
     ok("batch/validation_preserves_order", [item["state"] for item in out]
        == [request["state"] for request in BATCH_REQUESTS])
     ok("batch/validation_keeps_overrides",
-       out[1].get("model") == "english" and out[1].get("task") == "massive"
+       out[1].get("model") == "multimodal" and out[1].get("task") == "massive"
        and out[1].get("lang") == "en" and out[2].get("lang") == "hi", repr(out[1]))
     # "auto" is the same thing as absent: Router.route resolves the checkpoint.
     out = validate_batch_requests([{"state": STATE, "questions": QUESTIONS, "model": "auto"}])
@@ -1240,7 +1240,7 @@ def test_batch_validation():
                           "invalid_%s" % key)
     # The message that lists the accepted keys must list the ones the validator keeps --
     # a client reads that list as the schema. Both directions, derived from the validator.
-    probe = {"state": STATE, "questions": QUESTIONS, "model": "english", "task": "massive",
+    probe = {"state": STATE, "questions": QUESTIONS, "model": "multimodal", "task": "massive",
              "lang": "en", "lang_guess": "de", "max_len": 5, "head_max_len": 5}
     kept = set(validate_batch_requests([probe])[0])
     ok("batch/validation_covers_every_override",
@@ -1319,10 +1319,10 @@ def test_batch_predict():
                                      for entry in out["requests"]] == [None, None, 0.7],
        repr(out["requests"]))
     ok("batch/predict_department", out["requests"][0]["answers"]["department"]["choice"] == "billing")
-    ok("batch/predict_routing", out["requests"][1]["routing"]["model"] == "english")
+    ok("batch/predict_routing", out["requests"][1]["routing"]["model"] == "multimodal")
     ok("batch/predict_device_resident", out["requests"][0].get("device") == "cpu",
        repr(out["requests"][0].get("device")))
-    ok("batch/predict_counts", out["model_counts"] == {"english": 3}, repr(out["model_counts"]))
+    ok("batch/predict_counts", out["model_counts"] == {"multimodal": 3}, repr(out["model_counts"]))
     ok("batch/predict_latency", out["total_latency_ms"] >= 0
        and abs(out["per_request_latency_ms"] - out["total_latency_ms"] / 3) < 0.01,
        repr(out["per_request_latency_ms"]))
@@ -1504,7 +1504,7 @@ def test_batch_route():
     ok("batch/route_one_call", len(router.route_batch_calls) == 1)
     ok("batch/route_decisions", len(out["decisions"]) == 3
        and set(out["decisions"][0]) == {"model", "repo", "reason"}, repr(out["decisions"][0]))
-    ok("batch/route_counts", out["model_counts"] == {"english": 3}, repr(out["model_counts"]))
+    ok("batch/route_counts", out["model_counts"] == {"multimodal": 3}, repr(out["model_counts"]))
     # Route-only never predicts.
     ok("batch/route_no_forward", router.predict_batch_calls == [])
     # Unset must not shadow the Router's own timeout: the tool layer only
@@ -1518,7 +1518,7 @@ def test_batch_route():
     try:
         strict_out = laya_route_batch(BATCH_REQUESTS, router=StrictRouteRouter())
         strict_ok = (len(strict_out["decisions"]) == 3
-                     and strict_out["model_counts"] == {"english": 3})
+                     and strict_out["model_counts"] == {"multimodal": 3})
         detail = repr(strict_out)
     except TypeError as exc:
         strict_ok = False
@@ -1657,8 +1657,8 @@ def test_batch_unknown_task_is_invalid_task():
                           [{"state": STATE, "questions": QUESTIONS, "model": "auto",
                             "task": "not-a-checkpoint"}]),
                       "invalid_task")
-    out = validate_batch_requests([{"state": STATE, "questions": QUESTIONS, "task": "typed_decisions"}])
-    ok("batch_task/known_task_kept_as_spelled", out[0].get("task") == "typed_decisions", repr(out[0]))
+    out = validate_batch_requests([{"state": STATE, "questions": QUESTIONS, "task": "laya"}])
+    ok("batch_task/known_task_kept_as_spelled", out[0].get("task") == "laya", repr(out[0]))
 
 
 # --- decide tool (mocked router, no weights) ----------------------------------
@@ -1708,7 +1708,7 @@ def test_decide():
        repr(out["probabilities"]["urgency"]))
     ok("decide/score_level_from_probs", out["values"]["urgency"] == 2, repr(out["values"]))
     ok("decide/device", out.get("device") == "cpu", repr(out.get("device")))
-    ok("decide/routing", out["routing"]["model"] == "english")
+    ok("decide/routing", out["routing"]["model"] == "multimodal")
 
     # Same values the core decide() returns for the same runner: the tool is a
     # thin MCP surface over the documented schema projection, not a second one.
@@ -1758,9 +1758,9 @@ def test_decide():
                     answers[name] = {"type": "noul", "noul": 0.2, "confidence": 0.8}
             return {"answers": answers}
 
-    out = laya_decide(STATE, DECIDE_SCHEMA, model="english", agent=BareAgent())
+    out = laya_decide(STATE, DECIDE_SCHEMA, model="multimodal", agent=BareAgent())
     ok("decide/direct_agent", out["values"]["department"] == "billing"
-       and out["routing"] == {"model": "english", "repo": None, "reason": "explicit model"},
+       and out["routing"] == {"model": "multimodal", "repo": None, "reason": "explicit model"},
        repr(out["routing"]))
     ok("decide/direct_agent_device", out.get("device") == "cpu", repr(out.get("device")))
 
@@ -1774,30 +1774,30 @@ def test_shortlist_lang_parity():
     class DetectingRouter(ShortlistRouter):
         def route(self, state, questions):
             return {
-                "model": "multilingual",
+                "model": "multimodal",
                 "repo": "fake/repo",
                 "reason": "Latin script but language looks like 'de'",
                 "detection": {"language": "de", "script": "Latin"},
             }
 
-    router = DetectingRouter({"multilingual": ShortlistAgent()}, routed="multilingual")
+    router = DetectingRouter({"multimodal": ShortlistAgent()}, routed="multimodal")
     out = laya_shortlist(STATE, SHORTLIST_QUESTIONS, k=2, router=router, embed_fn=_tie_embed)
     ok("shortlist_lang/auto_forwards_lang", (router.seen_kwargs or {}).get("lang") == "de",
        repr(router.seen_kwargs))
     ok("shortlist_lang/auto_still_explicit_model",
-       (router.seen_kwargs or {}).get("model") == "multilingual", repr(router.seen_kwargs))
+       (router.seen_kwargs or {}).get("model") == "multimodal", repr(router.seen_kwargs))
     ok("shortlist_lang/auto_routes_once",
-       out["routing"]["model"] == "multilingual", repr(out["routing"]))
+       out["routing"]["model"] == "multimodal", repr(out["routing"]))
 
     # A decision without a usable language must not invent one.
-    plain = ShortlistRouter({"english": ShortlistAgent()}, routed="english")
+    plain = ShortlistRouter({"multimodal": ShortlistAgent()}, routed="multimodal")
     laya_shortlist(STATE, SHORTLIST_QUESTIONS, k=2, router=plain, embed_fn=_tie_embed)
-    ok("shortlist_lang/no_detection_adds_nothing", plain.seen_kwargs == {"model": "english"},
+    ok("shortlist_lang/no_detection_adds_nothing", plain.seen_kwargs == {"model": "multimodal"},
        repr(plain.seen_kwargs))
 
     # Explicit-model mode is unchanged: no routing, so no language to forward.
     agent = ShortlistDirectAgent()
-    laya_shortlist(STATE, SHORTLIST_QUESTIONS, k=2, model="multilingual", agent=agent,
+    laya_shortlist(STATE, SHORTLIST_QUESTIONS, k=2, model="multimodal", agent=agent,
                    embed_fn=_tie_embed)
     ok("shortlist_lang/explicit_model_untouched", agent.seen is not None)
 
@@ -1805,24 +1805,10 @@ def test_shortlist_lang_parity():
 def test_shortlist_embed_cache():
     """A fixed option list must not be re-embedded on every call.
 
-    Uses the answering checkpoint's own encoder (no injected embed_fn) through a
-    weight-free fake tokenizer/encoder, so the number of tokenizer batches is a
-    direct count of embedding work.
+    Uses the checkpoint's native tokenizer and input embeddings. The tokenizer
+    batches count exactly which rows were embedded.
     """
     import torch
-
-    class _Out:
-        def __init__(self, hidden):
-            self.last_hidden_state = hidden
-
-    class CountingEncoder:
-        def __init__(self):
-            self.calls = 0
-
-        def __call__(self, input_ids=None, attention_mask=None):
-            self.calls += 1
-            ids = input_ids.float()
-            return _Out(torch.stack([ids, torch.ones_like(ids)], dim=-1))
 
     class CacheTok:
         def __init__(self):
@@ -1841,12 +1827,10 @@ def test_shortlist_embed_cache():
                     "attention_mask": torch.tensor(mask, dtype=torch.long)}
 
     def make_agent():
-        enc = CountingEncoder()
-        tok = CacheTok()
+        embeddings = torch.nn.Embedding(6, 2)
         agent = ShortlistAgent()
-        agent.tok = tok
-        agent.encoder = enc
-        agent.model = type("M", (), {"encoder": enc})()
+        agent.tok = CacheTok()
+        agent.model = SimpleNamespace(get_input_embeddings=lambda: embeddings)
         agent.device = torch.device("cpu")
         return agent
 
@@ -1854,12 +1838,12 @@ def test_shortlist_embed_cache():
     # Count embedded texts, not tokenizer batches: the whole set fits in one batch
     # either way, so batch count cannot tell the two cases apart.
     agent = make_agent()
-    router = ShortlistRouter({"english": agent})
+    router = ShortlistRouter({"multimodal": agent})
 
     def texts_since(mark):
         return sum(len(b) for b in agent.tok.batches[mark:])
 
-    laya_shortlist(STATE, SHORTLIST_QUESTIONS, k=2, model="english", router=router)
+    laya_shortlist(STATE, SHORTLIST_QUESTIONS, k=2, model="multimodal", router=router)
     first_texts = texts_since(0)
     ok("shortlist_cache/first_call_embeds_query_and_options", first_texts == 6,
        "texts=%d batches=%r" % (first_texts, agent.tok.batches))
@@ -1867,7 +1851,7 @@ def test_shortlist_embed_cache():
     # An identical repeat call embeds nothing at all: the query text is the same
     # too, and cached_embed_fn matches on exact strings.
     mark = len(agent.tok.batches)
-    laya_shortlist(STATE, SHORTLIST_QUESTIONS, k=2, model="english", router=router)
+    laya_shortlist(STATE, SHORTLIST_QUESTIONS, k=2, model="multimodal", router=router)
     ok("shortlist_cache/identical_repeat_embeds_nothing", texts_since(mark) == 0,
        "texts=%d batches=%r" % (texts_since(mark), agent.tok.batches[mark:]))
 
@@ -1875,29 +1859,28 @@ def test_shortlist_embed_cache():
     # query alone and reuses the five cached option rows.
     mark = len(agent.tok.batches)
     laya_shortlist({"text": "a completely different customer message"},
-                   SHORTLIST_QUESTIONS, k=2, model="english", router=router)
+                   SHORTLIST_QUESTIONS, k=2, model="multimodal", router=router)
     ok("shortlist_cache/new_state_still_embedded", texts_since(mark) == 1,
        "texts=%d batches=%r" % (texts_since(mark), agent.tok.batches[mark:]))
 
     # A different answering checkpoint must not share another one's embeddings.
     other = make_agent()
-    other_router = ShortlistRouter({"multilingual": other})
-    laya_shortlist(STATE, SHORTLIST_QUESTIONS, k=2, model="multilingual", router=other_router)
+    other_router = ShortlistRouter({"multimodal": other})
+    laya_shortlist(STATE, SHORTLIST_QUESTIONS, k=2, model="multimodal", router=other_router)
     ok("shortlist_cache/other_checkpoint_embeds_its_own",
        sum(len(b) for b in other.tok.batches) == 6,
        "texts=%d" % sum(len(b) for b in other.tok.batches))
-    ok("shortlist_cache/other_checkpoint_encoder_used", other.encoder.calls == 1,
-       "calls=%d" % other.encoder.calls)
+    other_batches = len(other.tok.batches)
 
     # Replacing the agent (a reload) starts a fresh cache rather than reusing rows.
     reloaded = make_agent()
-    laya_shortlist(STATE, SHORTLIST_QUESTIONS, k=2, model="english",
-                   router=ShortlistRouter({"english": reloaded}))
+    laya_shortlist(STATE, SHORTLIST_QUESTIONS, k=2, model="multimodal",
+                   router=ShortlistRouter({"multimodal": reloaded}))
     ok("shortlist_cache/reloaded_agent_re_embeds",
        sum(len(b) for b in reloaded.tok.batches) == 6,
        "texts=%d" % sum(len(b) for b in reloaded.tok.batches))
     ok("shortlist_cache/other_checkpoint_still_cached",
-       other.encoder.calls == 1, "calls=%d" % other.encoder.calls)
+       len(other.tok.batches) == other_batches)
 
     # An injected embed_fn stays the caller's own, uncached.
     calls = []
@@ -1906,10 +1889,10 @@ def test_shortlist_embed_cache():
         calls.append(list(texts))
         return [[0.0, 0.0] for _ in texts]
 
-    inj_router = ShortlistRouter({"english": make_agent()})
-    laya_shortlist(STATE, SHORTLIST_QUESTIONS, k=2, model="english", router=inj_router,
+    inj_router = ShortlistRouter({"multimodal": make_agent()})
+    laya_shortlist(STATE, SHORTLIST_QUESTIONS, k=2, model="multimodal", router=inj_router,
                    embed_fn=counting_embed)
-    laya_shortlist(STATE, SHORTLIST_QUESTIONS, k=2, model="english", router=inj_router,
+    laya_shortlist(STATE, SHORTLIST_QUESTIONS, k=2, model="multimodal", router=inj_router,
                    embed_fn=counting_embed)
     ok("shortlist_cache/injected_embed_not_wrapped", len(calls) == 2,
        "calls=%d" % len(calls))
@@ -1946,10 +1929,10 @@ class LongAgent:
 class LongRouter:
     """Fake router with predict_long: records the scan kwargs, answers from window 0."""
 
-    def __init__(self, routed="english"):
+    def __init__(self, routed="multimodal"):
         self.routed = routed
         self.seen = None
-        self._agents = {"english": LongAgent()}
+        self._agents = {"multimodal": LongAgent()}
 
     def predict_long(self, state, questions, **kwargs):
         self.seen = kwargs
@@ -1989,16 +1972,16 @@ def test_predict_long():
                                                           router=LongRouter()),
                           "invalid_stride")
     expect_tool_error("long/task_with_pinned_model",
-                      lambda: laya_predict_long(STATE, LONG_QUESTIONS, model="english",
+                      lambda: laya_predict_long(STATE, LONG_QUESTIONS, model="multimodal",
                                                task="triage", router=LongRouter()),
                       "invalid_task")
     expect_tool_error("long/auto_needs_router",
                       lambda: laya_predict_long(STATE, LONG_QUESTIONS), "models_not_ready")
     expect_tool_error("long/explicit_not_loaded",
-                      lambda: laya_predict_long(STATE, LONG_QUESTIONS, model="english"),
+                      lambda: laya_predict_long(STATE, LONG_QUESTIONS, model="multimodal"),
                       "models_not_ready")
     expect_tool_error("long/no_scan_method",
-                      lambda: laya_predict_long(STATE, LONG_QUESTIONS, model="english",
+                      lambda: laya_predict_long(STATE, LONG_QUESTIONS, model="multimodal",
                                                agent=NoScanAgent()),
                       "internal_error")
 
@@ -2013,7 +1996,7 @@ def test_predict_long():
                                               "token_end": 10, "count": 3},
        repr(out["answers"]))
     ok("long/windows", out["windows"] == 3, repr(out))
-    ok("long/routing", out["routing"]["model"] == "english", repr(out["routing"]))
+    ok("long/routing", out["routing"]["model"] == "multimodal", repr(out["routing"]))
     ok("long/device", out.get("device") == "cpu", repr(out.get("device")))
     ok("long/latency", isinstance(out["latency_ms"], float))
 
@@ -2025,19 +2008,19 @@ def test_predict_long():
 
     # Explicit model pins the scan: task would have nothing to route, the model rides along.
     router = LongRouter()
-    out = laya_predict_long(STATE, LONG_QUESTIONS, model="english", task=None, router=router)
-    ok("long/explicit_model_forwarded", router.seen == {"model": "english"}, repr(router.seen))
+    out = laya_predict_long(STATE, LONG_QUESTIONS, model="multimodal", task=None, router=router)
+    ok("long/explicit_model_forwarded", router.seen == {"model": "multimodal"}, repr(router.seen))
     ok("long/explicit_routing",
-       out["routing"] == {"model": "english", "repo": None, "reason": "explicit model"},
+       out["routing"] == {"model": "multimodal", "repo": None, "reason": "explicit model"},
        repr(out["routing"]))
 
     # Explicit model with an injected agent answers directly, device read off it.
     agent = LongAgent()
-    out = laya_predict_long(STATE, LONG_QUESTIONS, model="english", agent=agent)
+    out = laya_predict_long(STATE, LONG_QUESTIONS, model="multimodal", agent=agent)
     ok("long/agent_answers", out["answers"]["refund"]["noul"] == 0.8, repr(out["answers"]))
     ok("long/agent_scan_kwargs", agent.seen == {}, repr(agent.seen))
     ok("long/agent_routing",
-       out["routing"] == {"model": "english", "repo": None, "reason": "explicit model"},
+       out["routing"] == {"model": "multimodal", "repo": None, "reason": "explicit model"},
        repr(out["routing"]))
     ok("long/agent_device", out.get("device") == "cpu", repr(out.get("device")))
     ok("long/agent_windows", out["windows"] == 3, repr(out))
@@ -2055,7 +2038,7 @@ def test_predict_long():
     # as a raw TypeError (an opaque internal_error over the tool boundary) instead of an answer.
     # This is the branch the pinned-model guard at the top of the tool never reaches.
     agent = LongAgent()
-    out = laya_predict_long(STATE, LONG_QUESTIONS, task="typed_decisions", agent=agent)
+    out = laya_predict_long(STATE, LONG_QUESTIONS, task="laya", agent=agent)
     ok("long/bare_agent_task_dropped", "task" not in agent.seen, repr(agent.seen))
     ok("long/bare_agent_task_answers", out["answers"]["refund"]["noul"] == 0.8, repr(out))
 
@@ -2070,7 +2053,7 @@ class ControlRouter:
     `_overrides` promises.
     """
 
-    def __init__(self, routed="english"):
+    def __init__(self, routed="multimodal"):
         self._agents = {routed: ShortlistAgent()}
         self.routed = routed
         self.predict_calls = []
@@ -2128,7 +2111,7 @@ def test_controls_validation():
     # The underscore form is what the CLI and the question ids use, and `Router._route` remaps it
     # before it looks anything up. The tool remaps the same way but forwards the caller's own
     # spelling, so `routing.reason` still reads as the request that was made.
-    for spelling in ("typed_decisions", "TYPED_DECISIONS", " typed_decisions ", "typed-decisions"):
+    for spelling in ("laya", "LAYA", " laya ", "default"):
         got = validate_task(spelling)
         ok("task/workflow_%r" % spelling, got == spelling, repr(got))
     for bad in ("nope", "", "   ", "english-ish", 5, [], {}, True):
@@ -2179,15 +2162,15 @@ def test_controls_predict():
     router = ControlRouter()
     laya_predict(STATE, QUESTIONS, router=router)
     ok("predict/no_controls_call", router.predict_calls == [{}], repr(router.predict_calls))
-    laya_predict(STATE, QUESTIONS, model="english", router=router)
-    ok("predict/pinned_model_only_kwarg", router.predict_calls[-1] == {"model": "english"},
+    laya_predict(STATE, QUESTIONS, model="multimodal", router=router)
+    ok("predict/pinned_model_only_kwarg", router.predict_calls[-1] == {"model": "multimodal"},
        repr(router.predict_calls[-1]))
 
     router = ControlRouter()
-    out = laya_predict(STATE, QUESTIONS, task="typed_decisions", lang="de",
+    out = laya_predict(STATE, QUESTIONS, task="laya", lang="de",
                        max_len=1024, head_max_len=512, router=router)
     ok("predict/all_controls_forwarded",
-       router.predict_calls == [{"task": "typed_decisions", "lang": "de",
+       router.predict_calls == [{"task": "laya", "lang": "de",
                                  "max_len": 1024, "head_max_len": 512}],
        repr(router.predict_calls))
     ok("predict/answers_untouched", out["answers"]["department"]["choice"] == "billing")
@@ -2202,11 +2185,11 @@ def test_controls_predict():
 
     # A pinned checkpoint plus a task is two answers to one question: `Router._route` checks model
     # first and never reads the task, and `Agent.system_one` does not accept it at all.
-    for model in ("english", "laya", "ML"):
+    for model in ("multimodal", "laya", "DEFAULT"):
         router = ControlRouter()
         expect_tool_error("predict/model_plus_task_%s" % model,
                           lambda m=model: laya_predict(STATE, QUESTIONS, model=m,
-                                                       task="typed_decisions", router=router),
+                                                       task="laya", router=router),
                           "invalid_task")
         ok("predict/model_plus_task_no_call_%s" % model, router.predict_calls == [],
            repr(router.predict_calls))
@@ -2225,24 +2208,24 @@ def test_controls_predict():
 
     # The agent branch: budget and lang reach a checkpoint directly, task cannot mean anything.
     agent = ControlAgent()
-    laya_predict(STATE, QUESTIONS, model="english", agent=agent)
+    laya_predict(STATE, QUESTIONS, model="multimodal", agent=agent)
     ok("predict/agent_no_controls_call", agent.calls == [{}], repr(agent.calls))
     agent = ControlAgent()
-    out = laya_predict(STATE, QUESTIONS, model="english", lang="de", max_len=1024,
+    out = laya_predict(STATE, QUESTIONS, model="multimodal", lang="de", max_len=1024,
                        head_max_len=512, agent=agent)
     ok("predict/agent_budget_forwarded",
        agent.calls == [{"lang": "de", "max_len": 1024, "head_max_len": 512}], repr(agent.calls))
-    ok("predict/agent_routing_recorded", out["routing"]["model"] == "english", repr(out["routing"]))
+    ok("predict/agent_routing_recorded", out["routing"]["model"] == "multimodal", repr(out["routing"]))
     agent = ControlAgent()
     expect_tool_error("predict/agent_task_refused",
-                      lambda a=agent: laya_predict(STATE, QUESTIONS, model="english",
-                                                   task="typed_decisions", agent=a),
+                      lambda a=agent: laya_predict(STATE, QUESTIONS, model="multimodal",
+                                                   task="laya", agent=a),
                       "invalid_task")
     ok("predict/agent_task_no_call", agent.calls == [], repr(agent.calls))
 
     # A router whose predict() accepts only state and questions still answers a plain call.
     class LegacyRouter:
-        _agents = {"english": FakeAgent()}
+        _agents = {"multimodal": FakeAgent()}
 
         def predict(self, state, questions):
             return {"answers": {"department": {"choice": "other", "confidence": 0.6}}}
@@ -2253,14 +2236,14 @@ def test_controls_predict():
 
 def test_controls_route():
     """`laya_route` takes the routing overrides, so a route can explain a pinned predict."""
-    router = ControlRouter(routed="multilingual")
+    router = ControlRouter(routed="multimodal")
     laya_route(STATE, QUESTIONS, router=router)
     ok("route/no_overrides_call", router.route_calls == [{}], repr(router.route_calls))
 
-    router = ControlRouter(routed="multilingual")
-    out = laya_route(STATE, QUESTIONS, task="typed_decisions", lang="de", router=router)
+    router = ControlRouter(routed="multimodal")
+    out = laya_route(STATE, QUESTIONS, task="laya", lang="de", router=router)
     ok("route/overrides_forwarded",
-       router.route_calls == [{"task": "typed_decisions", "lang": "de"}], repr(router.route_calls))
+       router.route_calls == [{"task": "laya", "lang": "de"}], repr(router.route_calls))
     ok("route/decision_shape", set(out) == {"model", "repo", "reason"}, repr(out))
 
     # `auto` is this layer's sentinel and core has no such name: it means "do not pin", so it is
@@ -2270,13 +2253,13 @@ def test_controls_route():
         laya_route(STATE, QUESTIONS, model=unset, router=router)
         ok("route/auto_is_absent_%r" % (unset,), router.route_calls == [{}], repr(router.route_calls))
     router = ControlRouter()
-    laya_route(STATE, QUESTIONS, model="en", router=router)
-    ok("route/model_canonical", router.route_calls == [{"model": "english"}],
+    laya_route(STATE, QUESTIONS, model="default", router=router)
+    ok("route/model_canonical", router.route_calls == [{"model": "multimodal"}],
        repr(router.route_calls))
     router = ControlRouter()
     expect_tool_error("route/model_plus_task",
-                      lambda: laya_route(STATE, QUESTIONS, model="english",
-                                         task="typed_decisions", router=router),
+                      lambda: laya_route(STATE, QUESTIONS, model="multimodal",
+                                         task="laya", router=router),
                       "invalid_task")
     ok("route/refused_before_core", router.route_calls == [], repr(router.route_calls))
     for bad in ("nope", 5, []):
@@ -2303,49 +2286,49 @@ def test_controls_shortlist():
     small = {"dept": {"type": "choice", "instructions": "pick",
                       "criteria": {"a": "A", "b": "B", "c": "C", "d": "D", "e": "E"}}}
 
-    router = ControlRouter(routed="multilingual")
+    router = ControlRouter(routed="multimodal")
     laya_shortlist(STATE, small, k=2, router=router, embed_fn=_tie_embed)
     ok("shortlist/no_controls_route", router.route_calls == [{}], repr(router.route_calls))
-    ok("shortlist/no_controls_predict", router.predict_calls == [{"model": "multilingual"}],
+    ok("shortlist/no_controls_predict", router.predict_calls == [{"model": "multimodal"}],
        repr(router.predict_calls))
 
-    router = ControlRouter(routed="multilingual")
-    out = laya_shortlist(STATE, small, k=2, task="typed_decisions", lang="de",
+    router = ControlRouter(routed="multimodal")
+    out = laya_shortlist(STATE, small, k=2, task="laya", lang="de",
                          max_len=1024, head_max_len=384, router=router, embed_fn=_tie_embed)
     ok("shortlist/route_sees_task",
-       router.route_calls == [{"task": "typed_decisions", "lang": "de"}], repr(router.route_calls))
+       router.route_calls == [{"task": "laya", "lang": "de"}], repr(router.route_calls))
     ok("shortlist/predict_sees_budget",
-       router.predict_calls == [{"model": "multilingual", "lang": "de",
+       router.predict_calls == [{"model": "multimodal", "lang": "de",
                                  "max_len": 1024, "head_max_len": 384}],
        repr(router.predict_calls))
     ok("shortlist/shortlist_still_ran", out["shortlist"]["dept"]["k"] == 2
        and len(out["shortlist"]["dept"]["labels"]) == 2, repr(out["shortlist"]["dept"]))
 
-    router = ControlRouter(routed="multilingual")
-    laya_shortlist(STATE, small, k=2, model="english", lang="de", head_max_len=384,
+    router = ControlRouter(routed="multimodal")
+    laya_shortlist(STATE, small, k=2, model="multimodal", lang="de", head_max_len=384,
                    router=router, embed_fn=_tie_embed)
     ok("shortlist/pinned_skips_route", router.route_calls == [], repr(router.route_calls))
     ok("shortlist/pinned_budget",
-       router.predict_calls == [{"model": "english", "lang": "de", "head_max_len": 384}],
+       router.predict_calls == [{"model": "multimodal", "lang": "de", "head_max_len": 384}],
        repr(router.predict_calls))
 
     router = ControlRouter()
     expect_tool_error("shortlist/pinned_plus_task",
-                      lambda: laya_shortlist(STATE, small, k=2, model="english",
-                                             task="typed_decisions", router=router,
+                      lambda: laya_shortlist(STATE, small, k=2, model="multimodal",
+                                             task="laya", router=router,
                                              embed_fn=_tie_embed),
                       "invalid_task")
     ok("shortlist/pinned_plus_task_no_call", router.predict_calls == [], repr(router.predict_calls))
 
     agent = ControlAgent()
-    laya_shortlist(STATE, small, k=2, model="english", agent=agent, lang="de",
+    laya_shortlist(STATE, small, k=2, model="multimodal", agent=agent, lang="de",
                    head_max_len=384, embed_fn=_tie_embed)
     ok("shortlist/agent_budget", agent.calls == [{"lang": "de", "head_max_len": 384}],
        repr(agent.calls))
     agent = ControlAgent()
     expect_tool_error("shortlist/agent_task_refused",
-                      lambda a=agent: laya_shortlist(STATE, small, k=2, model="english",
-                                                     task="typed", agent=a, embed_fn=_tie_embed),
+                      lambda a=agent: laya_shortlist(STATE, small, k=2, model="multimodal",
+                                                     task="default", agent=a, embed_fn=_tie_embed),
                       "invalid_task")
     ok("shortlist/agent_task_no_call", agent.calls == [], repr(agent.calls))
 
@@ -2374,10 +2357,10 @@ def test_controls_preset():
     ok("preset/no_controls_call", router.predict_calls == [{}], repr(router.predict_calls))
 
     router = ControlRouter()
-    out = laya_preset("guard", STATE, task="typed_decisions", lang="de", max_len=1024,
+    out = laya_preset("guard", STATE, task="laya", lang="de", max_len=1024,
                       head_max_len=384, router=router, preset_builder=builder)
     ok("preset/controls_forwarded",
-       router.predict_calls == [{"task": "typed_decisions", "lang": "de",
+       router.predict_calls == [{"task": "laya", "lang": "de",
                                  "max_len": 1024, "head_max_len": 384}],
        repr(router.predict_calls))
     # The questions the preset builder produced are what core was asked, alongside the controls --
@@ -2501,9 +2484,9 @@ def test_lang_guess_control():
     ok("predict/langguess_forwarded", router.predict_calls == [{"lang_guess": "de"}],
        repr(router.predict_calls))
     router = ControlRouter()
-    laya_predict(STATE, QUESTIONS, lang_guess="de", task="typed_decisions", router=router)
+    laya_predict(STATE, QUESTIONS, lang_guess="de", task="laya", router=router)
     ok("predict/langguess_alongside_task",
-       router.predict_calls == [{"task": "typed_decisions", "lang_guess": "de"}],
+       router.predict_calls == [{"task": "laya", "lang_guess": "de"}],
        repr(router.predict_calls))
     # An explicit lang and a soft hint are distinct keywords: both reach core, and core orders them.
     router = ControlRouter()
@@ -2512,7 +2495,7 @@ def test_lang_guess_control():
        router.predict_calls == [{"lang": "fr", "lang_guess": "de"}], repr(router.predict_calls))
 
     # Pinned: refused before core, exactly like task -- there is nothing to route.
-    for model in ("english", "laya", "ML"):
+    for model in ("multimodal", "laya", "DEFAULT"):
         router = ControlRouter()
         expect_tool_error("predict/model_plus_langguess_%s" % model,
                           lambda m=model: laya_predict(STATE, QUESTIONS, model=m,
@@ -2537,14 +2520,14 @@ def test_lang_guess_control():
        repr(agent.calls))
 
     # laya_route: a routing tool, so lang_guess reaches route and is refused on a pin.
-    router = ControlRouter(routed="multilingual")
+    router = ControlRouter(routed="multimodal")
     out = laya_route(STATE, QUESTIONS, lang_guess="de", router=router)
     ok("route/langguess_forwarded", router.route_calls == [{"lang_guess": "de"}],
        repr(router.route_calls))
     ok("route/langguess_decision_shape", set(out) == {"model", "repo", "reason"}, repr(out))
     router = ControlRouter()
     expect_tool_error("route/model_plus_langguess",
-                      lambda: laya_route(STATE, QUESTIONS, model="english",
+                      lambda: laya_route(STATE, QUESTIONS, model="multimodal",
                                          lang_guess="de", router=router),
                       "invalid_lang_guess")
     ok("route/refused_langguess_before_core", router.route_calls == [], repr(router.route_calls))
@@ -2553,15 +2536,15 @@ def test_lang_guess_control():
     # the answering pass (which pins the routed model, so the hint has nothing left to decide).
     small = {"dept": {"type": "choice", "instructions": "pick",
                       "criteria": {"a": "A", "b": "B", "c": "C", "d": "D", "e": "E"}}}
-    router = ControlRouter(routed="multilingual")
+    router = ControlRouter(routed="multimodal")
     laya_shortlist(STATE, small, k=2, lang_guess="de", router=router, embed_fn=_tie_embed)
     ok("shortlist/route_sees_langguess", router.route_calls == [{"lang_guess": "de"}],
        repr(router.route_calls))
     ok("shortlist/predict_drops_langguess",
-       router.predict_calls == [{"model": "multilingual"}], repr(router.predict_calls))
+       router.predict_calls == [{"model": "multimodal"}], repr(router.predict_calls))
     router = ControlRouter()
     expect_tool_error("shortlist/pinned_plus_langguess",
-                      lambda: laya_shortlist(STATE, small, k=2, model="english",
+                      lambda: laya_shortlist(STATE, small, k=2, model="multimodal",
                                              lang_guess="de", router=router,
                                              embed_fn=_tie_embed),
                       "invalid_lang_guess")
@@ -2638,19 +2621,19 @@ def test_min_confidence_control():
                       "invalid_min_confidence")
     ok("predict/bad_minconf_no_call", router.predict_calls == [], repr(router.predict_calls))
     agent = ControlAgent()
-    laya_predict(STATE, QUESTIONS, model="english", min_confidence=0.5, agent=agent)
+    laya_predict(STATE, QUESTIONS, model="multimodal", min_confidence=0.5, agent=agent)
     ok("predict/agent_minconf", agent.calls == [{"min_confidence": 0.5}], repr(agent.calls))
 
     # laya_shortlist carries it to the answering pass beside the budget (route stays budget-free).
     small = {"dept": {"type": "choice", "instructions": "pick",
                       "criteria": {"a": "A", "b": "B", "c": "C", "d": "D", "e": "E"}}}
-    router = ControlRouter(routed="multilingual")
+    router = ControlRouter(routed="multimodal")
     laya_shortlist(STATE, small, k=2, head_max_len=384, min_confidence=0.8,
                    router=router, embed_fn=_tie_embed)
     ok("shortlist/minconf_reaches_predict",
-       router.predict_calls == [{"model": "multilingual", "head_max_len": 384,
+       router.predict_calls == [{"model": "multimodal", "head_max_len": 384,
                                  "min_confidence": 0.8}], repr(router.predict_calls))
-    router = ControlRouter(routed="multilingual")
+    router = ControlRouter(routed="multimodal")
     laya_shortlist(STATE, small, k=2, router=router, embed_fn=_tie_embed)
     ok("shortlist/minconf_unset_absent",
        "min_confidence" not in router.predict_calls[0], repr(router.predict_calls))
@@ -2880,13 +2863,13 @@ def test_a_bad_question_is_a_caller_error_not_a_server_fault():
                                 for qid in questions}}
 
     class Router:
-        loaded = ["english"]
+        loaded = ["multimodal"]
 
         def predict(self, state, questions, model=None, **kwargs):
             return ValidatingAgent().predict(state, questions)
 
         def route(self, state, questions, **kwargs):
-            return {"model": "english", "repo": "r", "reason": "stub"}
+            return {"model": "multimodal", "repo": "r", "reason": "stub"}
 
     for label, qdef in (
         ("noul_criteria_bad_key", {"type": "noul", "instructions": "is true?",
@@ -2906,7 +2889,7 @@ def test_a_bad_question_is_a_caller_error_not_a_server_fault():
     ):
         try:
             server_mod._wrap(server_mod.laya_predict, state=STATE, questions={"q": qdef},
-                             model="english", router=Router())
+                             model="multimodal", router=Router())
             ok("caller_error/rejected_%s" % label, False, "no error raised")
         except Exception as exc:  # noqa: BLE001 -- the wrapper raises McpToolError
             payload = getattr(exc, "message", None) or str(exc)
@@ -3014,112 +2997,41 @@ def test_cli_mcp_page_batch_rows():
 
 
 def test_models_from_env():
-    old = os.environ.get("LAYA_MODELS")
-    try:
+    from unittest.mock import patch
+
+    with patch.dict(os.environ):
         os.environ.pop("LAYA_MODELS", None)
-        ok("models/mcp_default", _models_from_env() == ["english", "multilingual"])
+        ok("models/default_registry", _models_from_env() is None)
         os.environ["LAYA_MODELS"] = ""
-        ok("models/empty_default", _models_from_env() == ["english", "multilingual"])
-        os.environ["LAYA_MODELS"] = " english , multilingual "
-        ok("models/whitespace", _models_from_env() == ["english", "multilingual"])
-        os.environ["LAYA_MODELS"] = "typed-decisions"
-        ok("models/explicit_single", _models_from_env() == ["typed-decisions"])
-        os.environ["LAYA_MODELS"] = "english, multilingual, typed-decisions,"
-        ok("models/trailing_comma", _models_from_env() == ["english", "multilingual", "typed-decisions"])
-    finally:
-        if old is None:
-            os.environ.pop("LAYA_MODELS", None)
-        else:
-            os.environ["LAYA_MODELS"] = old
+        ok("models/empty_default", _models_from_env() is None)
+        os.environ["LAYA_MODELS"] = " multimodal , support, "
+        ok("models/explicit_names", _models_from_env() == ["multimodal", "support"])
 
 
-def test_auto_task_env():
-    """LAYA_AUTO_TASK must reach the Router the MCP server builds, as it does the serve one.
+def test_retired_auto_task_keeps_native_routing():
+    """An old LAYA_AUTO_TASK setting still resolves to the current native checkpoint."""
+    from unittest.mock import patch
 
-    README's MCP section says these variables follow the contract at the top of laya.serve, so the
-    check is built through both surfaces' real builders -- `laya.mcp.server._ensure_router()` and
-    `laya.serve.build_router()` -- rather than by reading a flag off a hand-made Router.
-    `Router.route()` delegates to the private `_route`, documented as deciding "without loading or
-    running anything", so no checkpoint is downloaded here.
-    """
-    import laya.mcp.server as mcp_mod  # the module, not the MCPServer instance
-    from laya.router import _TYPED_DECISION_WORKFLOWS
+    import laya.mcp.server as mcp_mod
     from laya.serve import build_router
 
-    state = {"body": "I was charged twice, please refund the duplicate"}
-    schemas = {name: {qid: {"type": "choice", "options": ["yes", "no"]}
-                      for qid in sorted(ids)}
-               for name, ids in sorted(_TYPED_DECISION_WORKFLOWS.items())}
-    saved = {k: os.environ.get(k) for k in ("LAYA_AUTO_TASK", "LAYA_PRELOAD")}
-    saved_router = mcp_mod._ROUTER
-    try:
-        os.environ["LAYA_PRELOAD"] = "0"  # neither surface may build a checkpoint here
-
-        def build(value):
-            if value is None:
-                os.environ.pop("LAYA_AUTO_TASK", None)
-            else:
-                os.environ["LAYA_AUTO_TASK"] = value
-            mcp_mod._ROUTER = None  # the server caches the Router it built
-            return mcp_mod._ensure_router(), build_router()
-
-        for value, label in ((None, "unset"), ("0", "off"), ("1", "on"), ("true", "true")):
-            mcp_router, serve_router = build(value)
-            want = value in ("1", "true")
-            ok("auto_task/%s_mcp" % label, mcp_router.auto_task_detection is want,
-               repr(mcp_router.auto_task_detection))
-            # The parity the README claims: one variable, one meaning on both surfaces.
-            ok("auto_task/%s_matches_serve" % label,
-               mcp_router.auto_task_detection == serve_router.auto_task_detection,
-               "mcp=%r serve=%r" % (mcp_router.auto_task_detection,
-                                    serve_router.auto_task_detection))
-
-        # And the decision each workflow actually gets, on every workflow rather than one.
-        on_mcp, on_serve = build("1")
-        off_mcp, off_serve = build(None)
-        for name, questions in sorted(schemas.items()):
-            on_got = on_mcp.route(state, questions)["model"]
-            off_got = off_mcp.route(state, questions)["model"]
-            on_serve_got = on_serve.route(state, questions)["model"]
-            off_serve_got = off_serve.route(state, questions)["model"]
-            ok("auto_task/on_routes_typed_decisions_%s" % name, on_got == "typed-decisions",
-               "got %r" % on_got)
-            ok("auto_task/on_parity_%s" % name, on_got == on_serve_got,
-               "mcp=%r serve=%r" % (on_got, on_serve_got))
-            ok("auto_task/off_parity_%s" % name, off_got == off_serve_got,
-               "mcp=%r serve=%r" % (off_got, off_serve_got))
-            ok("auto_task/off_not_typed_%s" % name, off_got != "typed-decisions",
-               "got %r" % off_got)
-    finally:
-        mcp_mod._ROUTER = saved_router
-        for key, value in saved.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
+    with patch.dict(os.environ, LAYA_PRELOAD="0", LAYA_AUTO_TASK="1"), patch.object(mcp_mod, "_ROUTER", None):
+        mcp_router, serve_router = mcp_mod._ensure_router(), build_router()
+        ok("routing/native_default", mcp_router.route(STATE).model == serve_router.route(STATE).model == "multimodal")
+        ok("routing/no_load", mcp_router.loaded == serve_router.loaded == [])
 
 
 def test_default_model_env():
-    """LAYA_DEFAULT_MODEL has to reach both servers' Routers, with one meaning.
-
-    README's MCP section says these variables follow the contract at the top of laya.serve, so
-    both halves are built through the real builders -- `laya.mcp.server._ensure_router()` and
-    `laya.serve.build_router()` -- and read off the Router each one actually returns. The
-    variable itself is the routing fallback README prescribes for a mostly-non-English deployment
-    (`Router(default="multilingual")`), which until now only examples/server.py could be told.
-    The one place the two surfaces part is what an unresolvable name costs: serve refuses to
-    start, a stdio server has no startup to refuse, so MCP has to carry the same words in a
-    tool error.
-    """
+    """Local MCP and HTTP share the configured native checkpoint and registry."""
     import laya.mcp.server as mcp_mod  # the module, not the MCPServer instance
     from laya.serve import build_router
 
     saved = {k: os.environ.get(k)
-             for k in ("LAYA_DEFAULT_MODEL", "LAYA_PRELOAD", "LAYA_AUTO_TASK")}
+             for k in ("LAYA_DEFAULT_MODEL", "LAYA_PRELOAD", "LAYA_EXTRA_MODELS")}
     saved_router = mcp_mod._ROUTER
     try:
         os.environ["LAYA_PRELOAD"] = "0"    # neither surface may build a checkpoint here
-        os.environ["LAYA_AUTO_TASK"] = "0"  # leaves the fallback the only thing moving
+        os.environ["LAYA_EXTRA_MODELS"] = '{"support": "models/support"}'
 
         def build(value):
             if value is None:
@@ -3137,10 +3049,10 @@ def test_default_model_env():
                 ("unset", None, _stock),
                 ("empty", "", _stock),
                 ("blank", "   ", _stock),
-                ("canonical", "multilingual", "multilingual"),
-                ("alias", "ml", "multilingual"),
-                ("padded_upper", " MULTI ", "multilingual"),
-                ("typed", "typed-decisions", "typed-decisions")):
+                ("canonical", "multimodal", "multimodal"),
+                ("alias", "laya", "multimodal"),
+                ("padded_upper", " DEFAULT ", "multimodal"),
+                ("registered", "support", "support")):
             try:
                 mcp_router, serve_router = build(value)
             except (Exception, SystemExit) as exc:  # noqa: BLE001 -- every value here is valid
@@ -3156,23 +3068,12 @@ def test_default_model_env():
                mcp_router.default == serve_router.default,
                "mcp=%r serve=%r" % (mcp_router.default, serve_router.default))
 
-        # What the setting decides, at `route()` rather than at the attribute. `route` is
-        # documented as deciding "without loading or running anything", so nothing is downloaded.
-        stock_mcp, stock_serve = build(None)
-        nonenglish_mcp, nonenglish_serve = build("multilingual")
-        for index, state in enumerate(("12345 !!!", "Quero cancelar")):
-            ok("default_model/stock_%d" % index,
-               stock_mcp.route(state).model == _stock == stock_serve.route(state).model,
-               "mcp=%r serve=%r" % (stock_mcp.route(state).model, stock_serve.route(state).model))
-            ok("default_model/fallback_multilingual_%d" % index,
-               nonenglish_mcp.route(state).model == "multilingual"
-               == nonenglish_serve.route(state).model,
-               "mcp=%r serve=%r" % (nonenglish_mcp.route(state).model,
-                                    nonenglish_serve.route(state).model))
-        # A fallback, not a pin, on both surfaces.
-        ok("default_model/placed_text_unaffected",
-           nonenglish_mcp.route({"body": "Please refund the duplicate charge"}).model == "english"
-           == nonenglish_serve.route({"body": "Please refund the duplicate charge"}).model)
+        custom_mcp, custom_serve = build("support")
+        for state in ("12345 !!!", "Quero cancelar", "Please refund the duplicate charge"):
+            ok("default_model/custom_source_%s" % state,
+               custom_mcp.route(state).model == custom_serve.route(state).model == "support")
+        out = laya_route(STATE, QUESTIONS, model="support", router=custom_mcp)
+        ok("default_model/accepts_registered_checkpoint", out["model"] == "support")
 
         serve_message = mcp_message = ""
         os.environ["LAYA_DEFAULT_MODEL"] = "mutli-lingual"
@@ -3232,7 +3133,7 @@ def test_server_registration():
         # The guardrails constant is on the decision tools only;
         # laya_status reports instead of deciding.
         if t.name in decision:
-            ok("server/desc_%s_guardrail" % t.name, "do not use" in desc)
+            ok("server/desc_%s_guardrail" % t.name, "text generation is unavailable" in desc)
         if t.name == "laya_predict":
             ok("server/desc_noul_labels", "optional labels" in desc)
         if t.name.endswith("_batch"):
@@ -3263,7 +3164,7 @@ def test_server_tournament():
         server_mod._ROUTER = router
         result = asyncio.run(mcp_server.call_tool("laya_tournament", {
             "state": STATE, "questions": tournament_questions(40), "group_size": 4,
-            "task": "typed_decisions", "lang_guess": "de", "lang": "fr",
+            "task": "laya", "lang_guess": "de", "lang": "fr",
             "max_len": 1024, "head_max_len": 384, "min_confidence": 0.95,
         }))
         payload = json.loads(result.content[0].text)
@@ -3271,11 +3172,11 @@ def test_server_tournament():
         ok("server/tournament_custom_group", payload["tournament"]["intent"]["rounds"] == 2
            and len(router.agent.calls) == 3)
         ok("server/tournament_controls_reach_each_round",
-           all(k == {"model": "english", "lang": "fr", "max_len": 1024,
+           all(k == {"model": "multimodal", "lang": "fr", "max_len": 1024,
                      "head_max_len": 384, "min_confidence": 0.95}
                for _s, _qs, k in router.agent.calls))
         ok("server/tournament_route_controls", router.routes[0][2] == {
-            "task": "typed_decisions", "lang_guess": "de", "lang": "fr"})
+            "task": "laya", "lang_guess": "de", "lang": "fr"})
         ok("server/tournament_final_low_confidence", payload["answers"]["intent"]["low_confidence"])
         try:
             server_mod.laya_tournament_tool(STATE, tournament_questions(40), group_size=1)
@@ -3527,7 +3428,7 @@ test_timeout_removed()
 test_models_from_env()
 test_batch_item_shape_as_documented()
 test_cli_mcp_page_batch_rows()
-test_auto_task_env()
+test_retired_auto_task_keeps_native_routing()
 test_default_model_env()
 test_server_registration()
 test_server_tournament()

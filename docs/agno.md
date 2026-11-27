@@ -1,37 +1,27 @@
 # Agno Integration
 
-Laya provides sub-35ms, non-autoregressive decision components for **Agno** multi-agent teams and workflows (single-question latency measured at **32.8 ms** with `laya-multilingual` and **39.5 ms** with `laya` on a Tesla T4 GPU; **37.3 ms** on Apple Silicon M5; 193–464 ms on generic x86 CPU):
+Use locally hosted native decisions with Agno teams.
 
-* **`LayaAgnoRouter`**: Sub-35ms agent router replacing slow leader LLMs in Agno `Team(mode="route")` or standalone multi-agent pipelines.
+* **`LayaAgnoRouter`**: agent router replacing slow leader LLMs in Agno `Team(mode="route")` or standalone multi-agent pipelines.
 * **`LayaAgnoGuardrail`**: Pre-execution message guardrail screening incoming queries for jailbreaks, injections, and policy violations before agents call tools or downstream models.
 
-Both take core's per-call decision controls -- the two token budgets (`max_len`, `head_max_len`), the language and abstention controls (`lang`, `min_confidence`), and the five prediction-hook arguments (`hooks`, `on_predict_start`, `on_predict_end`, `hooks_raise`, `hooks_timeout`) -- see [Per-call decision controls](#5-per-call-decision-controls).
+Both take core's per-call decision controls -- the input token budget (`max_len`), the language and abstention controls (`lang`, `min_confidence`), and the five prediction-hook arguments (`hooks`, `on_predict_start`, `on_predict_end`, `hooks_raise`, `hooks_timeout`) -- see [Per-call decision controls](#5-per-call-decision-controls).
 
-Supports both **local in-process inference** (`Agent` or `Router`) and **remote HTTP inference** against your own `laya-serve` instance without requiring PyTorch on edge clients.
-
-### Hardware Latency Observations
-
-| Platform / Accelerator | Architecture | Single-Decision Routing (`route`) | Pre-Execution Guardrail (`screen`) |
-|---|---|---|---|
-| **Tesla T4 GPU** | CUDA (Server) | **32.8 – 39.5 ms** | **35 – 45 ms** |
-| **Apple Silicon M5** | ARM64 (Local CPU) | **37.3 ms** (avg 38.0 ms) | **67.4 ms** (avg 78.8 ms) |
-| **Commodity Server** | Generic x86 CPU | **193 – 464 ms** | **210 – 520 ms** |
-
----
+Supports both **local in-process inference** (`Agent` or `Router`) and **remote HTTP inference** against your own `laya-serve` instance with weights hosted by the service.
 
 ## Installation
 
 ```bash
-pip install "laya[agno]"
+python -m pip install -e '.[multimodal,agno]'
 ```
 
 Requires **`agno>=1.1.14,<2`** (the release where Agno's dedicated `Team` class and `mode="route"` multi-agent routing were introduced).
 
 ---
 
-## 1. Sub-35ms Agent & Team Routing (`LayaAgnoRouter`)
+## 1. Agent & Team Routing (`LayaAgnoRouter`)
 
-In Agno multi-agent teams configured with `Team(mode="route")`, a leader LLM evaluates the user request and decides which specialist agent should answer. Autoregressive LLMs spend 2,000–4,000 ms generating text just to pick an agent name. `LayaAgnoRouter` evaluates incoming queries against agent roles and descriptions in **~33 ms** with zero token generation cost:
+In Agno multi-agent teams configured with `Team(mode="route")`, a leader LLM evaluates the user request and decides which specialist agent should answer. Autoregressive LLMs spend 2,000–4,000 ms generating text just to pick an agent name. `LayaAgnoRouter` evaluates incoming queries against agent roles and descriptions with zero token generation cost:
 
 ```python
 from agno.agent import Agent
@@ -57,7 +47,7 @@ writer = Agent(
 
 agents = [analyst, coder, writer]
 
-# Initialize sub-35ms router with confidence fallback
+# Initialize router with confidence fallback
 router = LayaAgnoRouter(
     confidence_threshold=0.80,   # If confidence < 0.80, delegate to fallback agent
     fallback_agent_index=0,
@@ -65,7 +55,7 @@ router = LayaAgnoRouter(
 
 query = "Write a Python function to reverse a linked list and handle edge cases."
 
-# Route and select agent in ~33ms:
+# Route and select agent:
 decision = router.route(query, agents)  # or equivalently: router.run(query, agents)
 print(f"Routed to: {decision.name} (Role: {decision.role}, Confidence: {decision.confidence:.3f})")
 
@@ -136,13 +126,13 @@ The remote client uses Python's standard library `urllib` with zero heavy depend
 
 ## 5. Per-call decision controls
 
-`LayaAgnoRouter` and `LayaAgnoGuardrail` take the same per-call arguments the core API does: the two token budgets (`max_len`, `head_max_len`), the language and abstention controls (`lang`, `min_confidence`), and the five prediction-hook arguments (`hooks`, `on_predict_start`, `on_predict_end`, `hooks_raise`, `hooks_timeout`). They are per instance, so a team with a large roster can be given room while the rest of the pipeline keeps the checkpoint's defaults.
+`LayaAgnoRouter` and `LayaAgnoGuardrail` take the same per-call arguments the core API does: the input token budget (`max_len`), the language and abstention controls (`lang`, `min_confidence`), and the five prediction-hook arguments (`hooks`, `on_predict_start`, `on_predict_end`, `hooks_raise`, `hooks_timeout`). They are per instance, so a team with a large roster can be given room while the rest of the pipeline keeps the checkpoint's defaults.
 
 ```python
 router = LayaAgnoRouter(
     confidence_threshold=0.80,
     max_len=1024,          # total window
-    head_max_len=512,      # tokens shared by the candidate roster
+
     lang="en",             # pin evaluation language
     min_confidence=0.3,    # abstain if model uncertainty is too high
 )

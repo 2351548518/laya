@@ -12,7 +12,7 @@ The npm package starts at version `0.1.0`, independently of Python releases.
 | `sdk/typescript` | Question/answer types, presets, validation, native fetch, errors and cancellation |
 | `laya/serve.py` | Existing HTTP endpoint, Bearer authentication, health and request limits |
 | `laya/router.py` | Checkpoint selection, loading and inference routing |
-| `laya/agent.py` | Tokenization, PyTorch inference and calibrated answer formatting |
+| `laya/multimodal.py` | Native input preparation, PyTorch inference and typed answers |
 | `laya/presets.py` | Source for the five generated TypeScript question presets |
 
 ```mermaid
@@ -24,9 +24,7 @@ flowchart LR
 
 The SDK exports `predict`, `predictBatch`, `predictImageAssets`, `predictMultimodal`, `route` and a Laya-only `health` probe. It ships ESM,
 CommonJS and declarations, retaining inferred question IDs and choice labels.
-Use `laya-client` when a JavaScript or TypeScript application talks over HTTP to
-self-hosted Python `laya-serve`. Use `laya-ts` when inference must run directly
-inside JavaScript through its local ONNX runtime, without a Python server.
+Use `laya-client` to send text and media to a self-hosted Python `laya-serve`.
 
 ## Shared contract
 

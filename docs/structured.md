@@ -17,7 +17,7 @@ schema = {
     },
 }
 
-agent = laya.load("convaiinnovations/laya")
+agent = laya.load()
 values = agent.decide("I was charged twice, refund me.", schema=schema)
 # {"department": "billing", "urgency": 2, "needs_human": True}
 ```
@@ -127,7 +127,7 @@ instead of projecting. Extra keyword arguments are forwarded to `predict`, so ho
 `task=` and the token budget all work:
 
 ```python
-router.decide(state, schema=Ticket, model="multilingual", hooks=[Metrics()])
+router.decide(state, schema=Ticket, model="multimodal", hooks=[Metrics()])
 ```
 
 ## Scoring many states
@@ -148,10 +148,10 @@ keywords reach `predict_batch` depends on who reads them. The call-level ones �
 token budget — `model=`, `task=`, `lang=`, `lang_guess=`, `max_len=`, `head_max_len=`, the tuple
 `laya/structured.py::_ROUTER_REQUEST_KEYS` names — are read off every *request* by a `Router`, whose
 `predict_batch` declares none of them, so `decide_batch` copies them onto each request instead; that
-is why `decide_batch(states, schema=..., model="multilingual")` pins a checkpoint the way `decide`
+is why `decide_batch(states, schema=..., model="multimodal")` pins a checkpoint the way `decide`
 does. On an `Agent`-like runner the split is visible: its `predict_batch` declares `batch_size=`,
 `hooks=` and `lang=` but no `model=` and swallows nothing, so `model=` there is a `TypeError`, not a
-silent extra keyword. `Agent`, `ONNXAgent` and `Router` all have it; a runner without `predict_batch` raises
+silent extra keyword. `Agent` and `Router` all have it; a runner without `predict_batch` raises
 `TypeError` rather than silently falling back to a loop — call `decide` per state there. Batching can shift borderline argmaxes the
 same way `predict_batch` does; the README records the measured speedups for both devices.
 
@@ -205,13 +205,8 @@ if result.answer_confidence["department"] < 0.6:
 `answer_confidence` being the right number to *filter* on is not the same as it being a trustworthy
 probability. Reading it as "about c of the answers returned at c are correct" holds only after
 temperatures have been fitted and validated on held-out data for that checkpoint and question shape.
-The shipped checkpoints are over-confident as shipped and `laya-multilingual` ships with no fitted
-temperatures at all — see the README's
-[Calibration](https://github.com/NandhaKishorM/laya#calibration) and
-[Honest limits](https://github.com/NandhaKishorM/laya#honest-limits) sections, and the
-[fine-tuning notebook](https://github.com/NandhaKishorM/laya/blob/main/notebooks/laya_finetune_typed_decisions_2xT4_kaggle.ipynb)
-for the fitting loop. Fit before you rely on the level; report it because it is the quantity the
-gate and the eval harness both use.
+Fit and validate the checkpoint's decision temperatures on separate data before using a
+threshold in the workflow. [Native calibration](multimodal.md#calibration-and-evaluation)
 
 ## How it maps internally
 

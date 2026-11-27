@@ -33,29 +33,20 @@ These are **archived 2026-09-21 results, not scores for the current main branch*
 
 ## Run Laya on your machine
 
-Use the repo's normal installation instructions. Download only the multilingual runtime files if you do not already have them (about 678 MB):
-
-```python
-from huggingface_hub import snapshot_download
-root = snapshot_download(
-    "convaiinnovations/laya",
-    revision="1c5edc17a7acd8701df6fc341c0d179f1c62c982",
-    allow_patterns=["multilingual/rl_agent_config.json", "multilingual/model.safetensors",
-                    "multilingual/encoder/*", "multilingual/tokenizer/*"],
-)
-print(root + "/multilingual")
-```
-
-Set `CHECKPOINT` to the printed local directory. Run a smoke test first:
+Set `CHECKPOINT` to the local [native checkpoint](../../../README.md#quickstart).
+Check two cases before running the full protocol.
 
 ```bash
-PYTHONPATH=. python research/benchmarks/feishu_zh/run.py --backend laya \
+python research/benchmarks/feishu_zh/run.py --backend laya \
   --checkpoint "$CHECKPOINT" --device cpu --limit 2 --repeats 1 --modes choice \
-  --output /tmp/feishu-laya-smoke
-python research/benchmarks/feishu_zh/audit.py --run-dir /tmp/feishu-laya-smoke
+  --output _local/feishu-laya-smoke
+python research/benchmarks/feishu_zh/audit.py --run-dir _local/feishu-laya-smoke
 ```
 
-For the full protocol, omit `--limit`, `--repeats` and `--modes` (defaults: 64 cases, 3 repeats, both modes). Select `--device mps` or `cuda` when available. Use a new output directory for every run. The runner records the actual source commit/file hashes, weight hash, device, versions and length diagnostics; it does not claim the archived version was used. `--checkpoint-revision` is an optional user-supplied provenance hint, not a substitute for the file hash. Loading/inference runs offline after local checkpoint preparation.
+Omit `--limit`, `--repeats` and `--modes` to evaluate all 64 cases in both modes for three repeats.
+Use a fresh output directory for each run. The report records the source commit, checkpoint
+artifact hashes, device, versions and prompt lengths. Supply `--checkpoint-revision` when the
+revision of a local copy is known.
 
 ## Optional Jev comparison
 

@@ -112,17 +112,17 @@ async function startServer(t, args = [],
   return { client, fixture };
 }
 
-test('JavaScript → HTTP → Python Router → real offline Agent inference', { timeout: 90_000 }, async t => {
+test('JavaScript → HTTP → Python Router → native offline inference', { timeout: 90_000 }, async t => {
   const { client, fixture } = await startServer(t);
-  const result = await client.predict(fixture.state, fixture.questions, { model: 'english' });
+  const result = await client.predict(fixture.state, fixture.questions, { model: 'multimodal' });
   assertPredictionParity(result, fixture.expected);
-  assert.equal(result.routing.model, 'english');
+  assert.equal(result.routing.model, 'multimodal');
   assert.equal(result.answers.single.choice, 'only');
   assert.equal(result.answers.single.probabilities.only, 1);
   assert.ok(result.usage.input_tokens > 0);
   assert.equal(result.usage.output_tokens, 0);
-  assert.equal((await client.predict({ text: 'मुझे पैसे वापस चाहिए' }, fixture.questions)).routing.model, 'multilingual');
-  assert.equal((await client.predict('hello', fixture.questions, { model: 'typed_decisions' })).routing.model, 'typed-decisions');
+  assert.equal((await client.predict({ text: 'मुझे पैसे वापस चाहिए' }, fixture.questions)).routing.model, 'multimodal');
+  assert.equal((await client.predict('hello', fixture.questions, { model: 'default' })).routing.model, 'multimodal');
 
   for (const preset of [triageQuestions, emailQuestions, guardQuestions, moderationQuestions, routerQuestions]) {
     const questions = preset();
@@ -141,7 +141,7 @@ test('JavaScript → HTTP → Python Router → real offline Agent inference', {
     const route = await client.route('hello', {}, { explain });
     assert.deepEqual(Object.keys(route).sort(),
       (explain ? ['model', 'repo', 'reason', 'diagnostic'] : ['model', 'repo', 'reason']).sort());
-    assert.equal(route.model, 'multilingual');
+    assert.equal(route.model, 'multimodal');
     if (explain) {
       assert.deepEqual(route.diagnostic, { stage: 'whole_state', reason: 'insufficient_words', source: null });
     }
@@ -183,17 +183,17 @@ for (const strict of [false, true]) {
         'different token lengths must make a reordered response observable');
       for (const item of fixture.batch_cases) {
         const options = Object.fromEntries(Object.entries(item.controls).map(([key, value]) => [names[key] ?? key, value]));
-        const out = await client.predictBatch(item.states, fixture.questions, { model: 'english', ...options });
+        const out = await client.predictBatch(item.states, fixture.questions, { model: 'multimodal', ...options });
         assertBatchParity(out, item.expected, strict);
       }
-      // The server runs tournament elimination per state, so these single calls are its oracle.
-      const large = { large: { type: 'choice', instructions: 'Pick',
-        criteria: Object.fromEntries(Array.from({ length: 5 }, (_, i) => [`option${i}`, `Option ${i}`])) } };
-      const expected = [];
-      for (const state of first.states) expected.push(await client.predict(state, large, { model: 'english' }));
-      const tournament = await client.predictBatch(first.states, large, { model: 'english', batchSize: 2, sortByLength: true });
-      assert.deepEqual(tournament.results, expected);
-      if (!strict) {
+      const large = fixture.tournament.questions;
+      const tournament = await client.predictBatch(first.states, large, { model: 'multimodal', batchSize: 2, sortByLength: true });
+      if (strict) {
+        assertBatchParity(tournament, fixture.tournament.expected, true);
+      } else {
+        const expected = [];
+        for (const state of first.states) expected.push(await client.predict(state, large, { model: 'multimodal' }));
+        assert.deepEqual(tournament.results, expected);
         for (const result of tournament.results) {
           const answer = result.answers.large;
           assert.ok(answer.x_tournament.finalists.length <= 2);
@@ -202,7 +202,7 @@ for (const strict of [false, true]) {
         }
       }
       const small = { refund: fixture.questions.refund };
-      const atLimit = await client.predictBatch(Array(64).fill('hello'), small, { model: 'english', batchSize: 8 });
+      const atLimit = await client.predictBatch(Array(64).fill('hello'), small, { model: 'multimodal', batchSize: 8 });
       assert.equal(atLimit.results.length, 64);
       assert.equal(atLimit.total_usage.input_tokens, atLimit.results.reduce((n, r) => n + r.usage.input_tokens, 0));
       for (const [states, options, status] of [
@@ -218,22 +218,6 @@ for (const strict of [false, true]) {
     });
 }
 
-test('batch HTTP works with the pinned v0.4.7 server',
-  { timeout: 90_000, skip: !process.env.LAYA_SDK_LEGACY_FIXTURE && 'set LAYA_SDK_LEGACY_FIXTURE to v0.4.7 fixture' },
-  async t => {
-    const { client, fixture } = await startServer(t, [], process.env.LAYA_SDK_LEGACY_FIXTURE);
-    await assert.rejects(client.route('hello'), error => error instanceof LayaAPIError && error.status === 404);
-    const states = ['hello', fixture.state, ['hello']];
-    const expected = [];
-    for (const state of states) expected.push(await client.predict(state, fixture.questions, { model: 'english' }));
-    // One-state inference batches match the old fixture's single-request numerical oracle.
-    const actual = await client.predictBatch(states, fixture.questions, { model: 'english', batchSize: 1 });
-    assert.deepEqual(actual.results, expected);
-    assert.equal(actual.total_usage.input_tokens, expected.reduce((n, r) => n + r.usage.input_tokens, 0));
-    const singleton = await client.predictBatch(states.slice(0, 1), fixture.questions, { model: 'english' });
-    assert.deepEqual(singleton.results, expected.slice(0, 1));
-  });
-
 const routeFixture = fileURLToPath(new URL('../../../tests/sdk_route_server_fixture.py', import.meta.url));
 
 test('route reads the deployed Router, custom models and final hooks without inference',
@@ -244,8 +228,7 @@ test('route reads the deployed Router, custom models and final hooks without inf
         [key === 'lang_guess' ? 'langGuess' : key, value]));
       assert.deepEqual(await client.route(item.state, item.questions, options), item.expected);
     }
-    // The deployed default is English even though the local library default is multilingual.
-    assert.equal(fixture.route_cases[0].expected.model, 'english');
+    assert.equal(fixture.route_cases[0].expected.model, 'multimodal');
     for (const diagnostic of [null, { source: null, custom: [false, 'operator'] }]) {
       assert.deepEqual(await client.route({ operator_diagnostic: diagnostic }, {}, { explain: true }),
         { model: 'support', repo: null, reason: 'operator override', diagnostic });
@@ -265,7 +248,7 @@ test('route reads the deployed Router, custom models and final hooks without inf
 test('route preserves an injected legacy Router refusal of explain without retrying',
   { timeout: 90_000 }, async t => {
     const { client, fixture } = await startServer(t, ['--legacy-router'], routeFixture);
-    assert.equal((await client.route('hello')).model, 'english');
+    assert.equal((await client.route('hello')).model, 'multimodal');
     await assert.rejects(client.route('hello', {}, { explain: true }), error =>
       error instanceof LayaAPIError && error.status === 422 && error.message.includes('explain'));
     assert.deepEqual(await (await fetch(`${fixture.baseURL}/fixture-counts`)).json(),

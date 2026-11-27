@@ -28,8 +28,8 @@ def main():
                                     detection={"diagnostic": state["operator_diagnostic"],
                                                "mixed_segment": "private input value"})
 
-    router = Router(default="english", hooks=[ObserveRoute()])
-    oracle = Router(default="english")
+    router = Router(hooks=[ObserveRoute()])
+    oracle = Router()
     for instance in (router, oracle):
         instance.register("support", "acme/support")
         instance.attach("resident", object())

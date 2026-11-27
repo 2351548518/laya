@@ -36,6 +36,12 @@ def _entry(state: str, reason: str, detail: Optional[Dict[str, Any]] = None) -> 
 
 def inspect_calibration(config: Dict[str, Any]) -> Dict[str, Any]:
     """Evidence state of the persisted calibration fit in a checkpoint config."""
+    if "backbone" in config and config.get("version") == 1:
+        if config.get("calibrated") is True:
+            modalities = sorted(config.get("modality_calibration") or {})
+            return _entry(PRESENT, "native checkpoint records a calibration fit",
+                          {"modalities": modalities})
+        return _entry(MISSING, "native checkpoint has no persisted calibration fit")
     training = config.get("training")
     if not isinstance(training, dict):
         return _entry(UNKNOWN, "legacy checkpoint: no training metadata persisted; cannot tell whether calibration ran")
@@ -57,10 +63,8 @@ def inspect_calibration(config: Dict[str, Any]) -> Dict[str, Any]:
             continue
         # Persisted issues are the authoritative limitation text (#933 writes
         # not-fitted/below-floor/clamped/unchanged-fit there); we do not keep a
-        # second numeric source of truth. `laya/calibrate.py::MIN_TYPE_N` and
-        # `laya/train.py::CALIB_WARN_N` could not be imported here even if a recomputed
-        # floor were wanted: both modules import torch at module scope, and this read-only
-        # path has to run without it.
+        # second numeric source of truth. The read-only path runs without importing torch
+        # or the calibration code that produced the checkpoint.
         issues = entry.get("issues")
         if not isinstance(issues, list):
             types[name] = _entry(UNKNOWN, "calibration entry has no issues list; cannot tell limitations")
@@ -207,9 +211,11 @@ def _read_json_object(path: str) -> Dict[str, Any]:
 
 def inspect_checkpoint(checkpoint_dir: str, report_path: Optional[str] = None) -> Dict[str, Any]:
     """Full read-only evidence inspection for one checkpoint (optionally one report)."""
-    config_path = os.path.join(checkpoint_dir, "rl_agent_config.json")
-    if not os.path.isdir(checkpoint_dir) or not os.path.isfile(config_path):
-        raise FileNotFoundError("no rl_agent_config.json under %r" % checkpoint_dir)
+    config_path = os.path.join(checkpoint_dir, "multimodal_config.json")
+    if not os.path.isfile(config_path):
+        config_path = os.path.join(checkpoint_dir, "rl_agent_config.json")
+    if not os.path.isfile(config_path):
+        raise FileNotFoundError("no multimodal_config.json or rl_agent_config.json under %r" % checkpoint_dir)
     config = _read_json_object(config_path)
     out: Dict[str, Any] = {"checkpoint": checkpoint_dir, "calibration": inspect_calibration(config)}
     if report_path is not None:

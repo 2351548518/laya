@@ -20,7 +20,7 @@
 | 从客户端提交文本、图片、视频或音频 | [System One 请求](multimodal.md#systemone-http) · [音频和视频扩展](multimodal.md#audio-and-video) | 本地 HTTP 服务和对应模态的检查点。 |
 | 对照每种模态和输出类型的完整样本 | [30 条 v6 请求和 Gemma 音频样例](multimodal-current-io-examples.md) | 可直接阅读请求和监督标签。 |
 | 检查任务来源、数量和多样性 | [64 类细任务与 192 条摘录](multimodal-current-examples.md) | 按模态和任务名查找。 |
-| 启动四卡训练或查看已有训练 | [复现两阶段训练](multimodal.md#reproduce) · [读日志与续训](multimodal.md#resume) | 原始 Qwen3.5-4B、v6 数据和可用 GPU。 |
+| 启动四卡训练或查看已有训练 | [复现两阶段训练](multimodal.md#reproduce) · [读日志与续训](multimodal.md#resume) · [SwanLab 实时曲线](multimodal.md#swanlab) | 原始 Qwen3.5-4B、v6 数据和可用 GPU。查看已有训练时使用它的日志。 |
 | 解释指标、比较检查点 | [评测与校准](multimodal.md#evaluate) · [同集结果](multimodal-current.md#matched-development) | 相同的分片、样本范围和指标定义。 |
 | 合并 LoRA、转 GGUF、选择量化版本 | [导出与部署](multimodal-release.md) | 本地训练检查点或已发布权重。 |
 

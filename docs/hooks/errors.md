@@ -20,18 +20,17 @@ is the exact policy.
 | `True` (default) | the hook exception propagates out of the call. |
 | `False` | the hook is skipped with a `RuntimeWarning` and the call continues. |
 
-It is set per instance and can be overridden per call on every public per-call surface of the
-three agents: `Agent.predict_batch`, `Agent.system_one`, `Agent.predict_long`, `Router.route`,
-`Router.route_batch`, `Router.predict`, `Router.predict_batch`, `Router.predict_long`,
-`ONNXAgent.system_one`, `ONNXAgent.predict_batch` and `ONNXAgent.predict_long` (as
-`hooks_raise=`). Per-call `None` means "use the instance value".
+It is set per instance and can be overridden on `Agent.predict`, `Agent.system_one`,
+`Agent.predict_batch`, `Router.route`, `Router.route_batch`, `Router.predict`,
+`Router.predict_batch` and `Router.predict_long` for backends with windowed inference.
+Per-call `None` uses the instance setting.
 
 ```python
 # strict: a broken audit hook fails the request
-laya.load("convaiinnovations/laya", on_predict_end=audit, hooks_raise=True)
+laya.load( on_predict_end=audit, hooks_raise=True)
 
 # lenient: telemetry must never take down a served request
-laya.load("convaiinnovations/laya", on_predict_end=metrics, hooks_raise=False)
+laya.load( on_predict_end=metrics, hooks_raise=False)
 ```
 
 `dispatch` catches `Exception`. Anything that is not an `Exception` (see
@@ -155,21 +154,14 @@ as a hook failure: `TimeoutError` when `hooks_raise=True`, a `RuntimeWarning` wh
 (the default) means no limit.
 
 ```python
-laya.load("convaiinnovations/laya", on_predict_end=metrics, hooks_timeout=2.0)
+laya.load( on_predict_end=metrics, hooks_timeout=2.0)
 ```
 
-It can be set per instance or overridden per call on every public per-call surface of the three
-agents: `Agent.predict_batch`, `Agent.system_one`, `Agent.predict_long`, `Router.route`,
-`Router.route_batch`, `Router.predict`, `Router.predict_batch`, `Router.predict_long`,
-`ONNXAgent.system_one`, `ONNXAgent.predict_batch` and `ONNXAgent.predict_long`. The value must be a
-positive finite number; `0`, a negative number, `inf`, `nan` and a bool each raise `ValueError` at
-the point it is set, rather than racing on a zero-length `join` -- passed straight to the underlying
-thread `join`, `nan` would raise `ValueError` and an infinite value `OverflowError`, so neither
-bounds the wait the way a limit is meant to. A bool is refused for its own reason: `float(True)` is
-`1.0`, so `hooks_timeout=True` would otherwise install a one-second deadline the caller never asked
-for, and `False` would be refused as a non-positive number rather than as a wrong type. Its message
-says `not a bool`, which is the only way a caller can tell the two refusals apart. `None` is how to
-ask for no limit, not an arbitrarily large number.
+It can be set per instance or overridden on `Agent.predict`, `Agent.system_one`,
+`Agent.predict_batch`, `Router.route`, `Router.route_batch`, `Router.predict`,
+`Router.predict_batch` and `Router.predict_long` for backends with windowed inference.
+Use a positive finite number of seconds. Zero, negative values, infinity, NaN and booleans
+raise `ValueError`. Use `None` for the instance default.
 
 A timed hook runs on a worker thread in a copy of the caller's `contextvars` context, so a
 request id or tracing span set by the caller is visible to the hook.

@@ -101,31 +101,17 @@ python -m unittest discover -s research/benchmarks/zh_short_commands/tests -v
 - 打分方式：使用 checkpoint 自带的分桶温度，并按 `Agent` 的方式做同样的钳制（归档里 `unclamped: false`），与 [`research/eval/laya_eval.py`](../../eval/laya_eval.py) 同一条代码路径。没有拟合任何阈值，也没有做微调。
 - 七个配置的完整扫描在 CPU 上约 20 秒。
 
-`research/eval/README.md` 对同一个文件记录的是另一个值——`sha256 b99c8bea…`。那个字符串是 Hub 仓库里**LFS 指针**的 git blob id（SHA-1），不是权重的 SHA-256：把指针文本 `version https://git-lfs.github.com/spec/v1\noid sha256:9d628fd9…\nsize 643835514\n` 按 git blob 规则哈希，得到的正是 `b99c8bea239c53f6f6bce734557dc6c403fa6b3e`。同一段里 `rl_agent_config.json` 的 `sha256 00e35f88…` 同样是该 JSON 自身的 blob id。任何人用 `sha256sum` 去核对都会看到不一致，从而误判"checkpoint 变了"。这里只做标记，不静默修改，因为那属于本贡献所不拥有的另一个文件的改动。
-
 ## 在自己的机器上运行
 
-如果本地还没有，只下载多语言运行时文件（约 614 MiB）：
-
-```python
-from huggingface_hub import snapshot_download
-root = snapshot_download(
-    "convaiinnovations/laya",
-    allow_patterns=["multilingual/*.json", "multilingual/model.safetensors",
-                    "multilingual/encoder/*", "multilingual/tokenizer/*"],
-)
-print(root + "/multilingual")
-```
-
-把 `CHECKPOINT` 设成该目录，核对文件，然后跑扫描。`--stub` 用固定伪随机向量代替 checkpoint，可离线跑通整条流水线；`--configs` 只跑子集：
+把 `CHECKPOINT` 设为本地[原生模型检查点](../../../README.md#quickstart)。脚本会记录用例、提示词、
+权重和原生配置的哈希。每次运行使用新的输出目录。`--stub` 可以离线检查流程，
+`--configs` 可以选择测试配置的子集。
 
 ```bash
 python research/benchmarks/zh_short_commands/run.py --checkpoint "$CHECKPOINT" \
-  --device cpu --out /tmp/zh-short-commands
-python research/benchmarks/zh_short_commands/audit.py --run-dir /tmp/zh-short-commands
+  --device cpu --out _local/zh-short-commands
+python research/benchmarks/zh_short_commands/audit.py --run-dir _local/zh-short-commands
 ```
-
-runner 会把用例、`prompts.py` 和 checkpoint 的 `model.safetensors` 哈希一并写入报告，所以来自另一台机器的归档可以与已提交的归档逐字段比对。每次运行请使用新的输出目录。`--unclamped` 复现旧提交扫描使用的原始未钳制温度；上面的归档数字用的是钳制后的值。
 
 ## 文件
 

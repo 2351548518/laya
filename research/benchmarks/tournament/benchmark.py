@@ -71,7 +71,7 @@ DATASETS = {
 def strategy(name, agent):
     """`(state, question) -> (answer, model calls)` for one strategy name."""
     if name in ("single", "wide"):
-        budget = {"head_max_len": 512, "max_len": 1024} if name == "wide" else {}
+        budget = {"max_len": max(agent.max_len, 8192)} if name == "wide" else {}
         return lambda state, q: (agent.predict(state, {"q": q}, **budget)["answers"]["q"], 1)
     if name == "shortlist":
         embed_fn = laya.cached_embed_fn(laya.embed_fn_from_agent(agent))
@@ -94,7 +94,7 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--strategies", default="single,wide,shortlist,tournament",
                     help="comma list of single, wide, shortlist, tournament, tournament-<group size>")
-    ap.add_argument("--model", default="english")
+    ap.add_argument("--model", help="trained native checkpoint directory or Hub ID")
     ap.add_argument("--device")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
@@ -105,13 +105,16 @@ def main():
         rows = random.Random(args.seed).sample(rows, args.limit)
     question = {"type": "choice", "instructions": instructions,
                 "criteria": {name.replace("_", " "): None for name in names}}
-    agent = laya.load(args.model, device=args.device)
+    from laya.revisions import default_checkpoint
+
+    source = args.model or default_checkpoint()
+    agent = laya.load(source, device=args.device)
     few = dict(question, criteria=dict(list(question["criteria"].items())[:8]))
     for text, _gold in rows[:3]:  # warm up before anything is timed
         agent.predict({"message": text}, {"q": few})
 
     report = {"dataset": args.dataset, "split": args.split, "rows": len(rows), "options": len(names),
-              "revisions": REVISIONS, "model": args.model, "device": str(agent.device),
+              "revisions": REVISIONS, "model": source, "model_revision": agent.checkpoint_revision, "device": str(agent.device),
               "laya": laya.__version__, "machine": platform.machine(), "strategies": {}}
     first = None
     for name in args.strategies.split(","):

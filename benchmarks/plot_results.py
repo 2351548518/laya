@@ -1,103 +1,63 @@
-#!/usr/bin/env python
-"""Render the historical RTX 4070 chart from the three committed result JSONs.
+#!/usr/bin/env python3
+"""Plot per-request latency from a native bench_multimodal.py report."""
 
-    python benchmarks/plot_results.py --out _local/bench-rtx4070.png
-
-Panels: (1) agent-level speedup per checkpoint, (2) router-layer mixed EN/Hindi
-states/s, (3) consistency max|dp| per checkpoint with the 2e-2 bar.
-"""
 import argparse
 import json
-import os
-import sys
-
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-
-HERE = os.path.dirname(os.path.abspath(__file__))
+import math
+from pathlib import Path
 
 
-def load(name):
-    with open(os.path.join(HERE, "results", name), encoding="utf-8") as f:
-        return json.load(f)
+TIMINGS = ("first_ms", "median_ms", "p95_ms")
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", default=os.path.join(os.path.dirname(HERE), "_local", "bench-rtx4070.png"))
+    parser.add_argument("report", type=Path, help="JSON produced by bench_multimodal.py")
+    parser.add_argument("--out", type=Path, required=True, help="figure path, such as latency.png or latency.svg")
     args = parser.parse_args(argv)
-    agent = load("results-rtx4070.json")
-    router = load("results-router-rtx4070.json")
-    consist = load("results-consistency-rtx4070.json")
+    if args.out.resolve() == args.report.resolve():
+        parser.error("write the figure to a different file from the JSON report")
+    try:
+        report = json.loads(args.report.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        parser.error(f"cannot read the benchmark report: {exc}")
 
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4.2))
-    fig.suptitle("Classic predict_batch benchmark on RTX 4070", fontsize=13, fontweight="bold")
+    cases = report.get("cases") if isinstance(report, dict) else None
+    if not isinstance(cases, list) or not cases or any(
+        not isinstance(case, dict) or any(not isinstance(case.get(key), str) for key in ("id", "modality"))
+        or any(type(case.get(key)) not in (int, float) or not math.isfinite(case[key]) or case[key] < 0
+               for key in TIMINGS)
+        for case in cases
+    ):
+        parser.error("expected per-request modality, ID and latency values from bench_multimodal.py")
 
-    # panel 1: agent-level speedup
-    ax = axes[0]
-    per_ckpt = {}
-    for row in agent["bench"]:
-        per_ckpt.setdefault(row["checkpoint"], []).append(row)
-    for ckpt, rows in per_ckpt.items():
-        rows.sort(key=lambda r: r["states"])
-        ax.plot([r["states"] for r in rows], [r["speedup"] for r in rows],
-                marker="o", label=ckpt)
-    ax.set_xscale("log", base=2)
-    ax.set_yscale("log", base=2)
-    ax.axhline(1.0, color="gray", lw=0.8, ls="--")
-    ax.set_xlabel("states per batch")
-    ax.set_ylabel("speedup (x)")
-    ax.set_title("Agent.predict_batch vs one-by-one\n(4 questions/state, median of 5)")
-    ax.legend(fontsize=8)
-    ax.grid(alpha=0.3)
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        parser.error("plotting requires matplotlib")
 
-    # panel 2: router mixed-language throughput
-    ax = axes[1]
-    rows = sorted(router["router"], key=lambda r: r["states"])
-    xs = [r["states"] for r in rows]
-    ax.plot(xs, [r["looped_sps"] for r in rows], marker="o", label="one predict() per request")
-    ax.plot(xs, [r["batched_sps"] for r in rows], marker="o", label="Router.predict_batch")
-    for r in rows:
-        ax.annotate("%.1fx" % r["speedup"], (r["states"], r["batched_sps"]),
-                    textcoords="offset points", xytext=(0, 7), fontsize=7, ha="center")
-    ax.set_xscale("log", base=2)
-    ax.set_xlabel("requests (50/50 EN/Hindi)")
-    ax.set_ylabel("states/s")
-    ax.set_title("Router layer: mixed EN/Hindi\n(regroups by checkpoint)")
-    ax.legend(fontsize=8)
-    ax.grid(alpha=0.3)
-
-    # panel 3: consistency
-    ax = axes[2]
-    rc = router.get("router_consistency", {})
-    entries = [(r["checkpoint"], r["max_delta"]) for r in consist["consistency"]]
-    if rc:
-        entries.append(("router\n(mixed EN/Hindi)", rc["max_delta"]))
-    names = [e[0] for e in entries]
-    deltas = [e[1] for e in entries]
-    bars = ax.bar(names, deltas, color=["#4c72b0", "#dd8452", "#55a868", "#c44e52"][:len(names)])
-    ax.axhline(0.02, color="red", ls="--", lw=1, label="2e-2 bar")
-    ax.set_ylabel("max |Δp| (label-attached)")
-    # Both halves of this claim are read from the JSONs being plotted.  "0 flips" used to be a
-    # literal in the title, so a regeneration on a run that did register a flip would have
-    # shipped a figure asserting the opposite of the data it was drawn from.
-    compared = sum(r["compared"] for r in consist["consistency"]) + rc.get("compared", 0)
-    flips = sum(r["flips"] for r in consist["consistency"]) + rc.get("flips", 0)
-    ax.set_title("batch vs single consistency\n(%d answers, %d flips)" % (compared, flips))
-    ax.legend(fontsize=8)
-    ax.grid(alpha=0.3, axis="y")
-    for bar, delta in zip(bars, deltas):
-        ax.text(bar.get_x() + bar.get_width() / 2, delta, "%.4f" % delta,
-                ha="center", va="bottom", fontsize=7)
-
-    plt.tight_layout(rect=[0, 0, 1, 0.94])
-    os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
-    plt.savefig(args.out, dpi=110)
-    print("consistency: %d answers, %d flips -> %s" % (compared, flips, "PASS" if flips == 0 else "FAIL"))
-    print("wrote %s" % args.out)
+    cases = sorted(cases, key=lambda case: case["modality"])
+    rows = range(len(cases))
+    fig, ax = plt.subplots(figsize=(9, max(3.5, 2 + .32 * len(cases))))
+    ax.hlines(rows, [case["median_ms"] for case in cases], [case["p95_ms"] for case in cases],
+              colors="#748da8", linewidth=1.5)
+    ax.scatter([case["first_ms"] for case in cases], rows, marker="x", color="#a54228", label="First call")
+    ax.scatter([case["p95_ms"] for case in cases], rows, marker="|", color="#426588", label="P95")
+    ax.scatter([case["median_ms"] for case in cases], rows, marker="o", color="#426588", label="Median")
+    ax.set_yticks(rows, [f'{case["modality"]} · {case["id"]}' for case in cases])
+    ax.invert_yaxis()
+    ax.set_xlim(left=0)
+    ax.set_title(f'Native decision latency · {report.get("device", "local device")}')
+    ax.set_xlabel("Latency (ms)")
+    ax.grid(axis="x", alpha=.25)
+    ax.legend(loc="lower center", bbox_to_anchor=(.5, 1.12), ncol=3, frameon=False)
+    fig.tight_layout()
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(args.out, dpi=150)
+    plt.close(fig)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

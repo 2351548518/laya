@@ -100,9 +100,7 @@ for label, cls in (("Agent", laya.Agent), ("Router", laya.Router)):
         check_kwonly("%s.decide" % label, fn, "questions")
         check_kwonly("%s.decide" % label, fn, "return_details")
 
-from laya.onnx_agent import ONNXAgent  # noqa: E402
 
-check_true("ONNXAgent.decide exists", callable(getattr(ONNXAgent, "decide", None)))
 
 # --------------------------------------------------------------- exports
 for name in ("decide", "DecisionResult"):

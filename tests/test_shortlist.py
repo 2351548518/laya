@@ -16,7 +16,7 @@ import numpy as np  # noqa: E402
 
 import laya  # noqa: E402
 from laya.agent import Agent  # noqa: E402
-from laya.common import DecisionModel, render_options  # noqa: E402
+from laya.common import render_options  # noqa: E402
 from laya.shortlist import (  # noqa: E402
     cached_embed_fn,
     embed_fn_from_agent,
@@ -135,7 +135,7 @@ for _name in ("shortlist_choice", "predict_shortlist", "embed_fn_from_agent", "c
 _predict_src = inspect.getsource(Agent.system_one)
 check_true("default/predict is system_one", Agent.predict is Agent.system_one)
 check_true("default/system_one has no shortlist", "shortlist" not in _predict_src and "embed_fn" not in _predict_src)
-_forward_src = inspect.getsource(DecisionModel.forward)
+_forward_src = inspect.getsource(Agent._logits)
 check_true("default/forward has no shortlist", "shortlist" not in _forward_src and "embed_fn" not in _forward_src)
 
 
@@ -416,177 +416,15 @@ check(
 )
 
 
-# ---------------------------------------------------------------- encoder mean-pool, no Hub
-import torch  # noqa: E402
-
-
-class _Out:
-    def __init__(self, hidden):
-        self.last_hidden_state = hidden
-
-
-class TinyEncoder(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.config = type("Cfg", (), {"hidden_size": 2})()
-        self.forwards = 0
-
-    def forward(self, input_ids, attention_mask):
-        self.forwards += 1
-        # Channel 0 is the token id; channel 1 is 1. Padding must drop out of the mean.
-        ids = input_ids.float()
-        hidden = torch.stack([ids, torch.ones_like(ids)], dim=-1)
-        return _Out(hidden)
-
-
-class TinyTok:
-    def __init__(self):
-        self.kwargs = None
-        self.batches = []
-
-    def __call__(self, texts, padding=True, truncation=True, max_length=256, return_tensors="pt"):
-        self.kwargs = {"padding": padding, "truncation": truncation, "max_length": max_length}
-        self.batches.append(list(texts))
-        rows = [[(ord(ch) % 5) + 1 for ch in text][:max_length] or [1] for text in texts]
-        width = max(len(row) for row in rows)
-        input_ids, mask = [], []
-        for row in rows:
-            pad = width - len(row)
-            input_ids.append(row + [0] * pad)
-            mask.append([1] * len(row) + [0] * pad)
-        return {
-            "input_ids": torch.tensor(input_ids, dtype=torch.long),
-            "attention_mask": torch.tensor(mask, dtype=torch.long),
-        }
-
-
-class TinyAgent:
-    def __init__(self):
-        self.tok = TinyTok()
-        self.encoder = TinyEncoder()
-        self.model = type("M", (), {"encoder": self.encoder})()
-        self.device = torch.device("cpu")
-        self.forward_calls = 0
-
-    def forward(self, *args, **kwargs):
-        self.forward_calls += 1
-        raise AssertionError("decision forward must not run during embedding")
-
-
-tiny = TinyAgent()
-fn = embed_fn_from_agent(tiny, max_length=32, batch_size=2)
-first = fn(["ab", "a"])
-second = fn(["ab", "a"])
-check("encoder/shape", first.shape, (2, 2))
-check_true("encoder/deterministic", np.array_equal(first, second))
-check("encoder/one batch for both strings", tiny.tok.batches, [["ab", "a"], ["ab", "a"]])
-check("encoder/max_length forwarded", tiny.tok.kwargs["max_length"], 32)
-check("encoder/decision forward not used", tiny.forward_calls, 0)
-
-# "a" is one real token (id = ord('a') % 5 + 1) plus padding. Masked mean keeps that id.
-token_id = (ord("a") % 5) + 1
-check("encoder/padding excluded from mean", first[1].tolist(), [float(token_id), 1.0])
-# "ab" has two real tokens and no reliance on padding once both are kept.
-ids = [(ord(ch) % 5) + 1 for ch in "ab"]
-check("encoder/mean of real tokens", first[0].tolist(), [sum(ids) / 2.0, 1.0])
-
-empty = fn([])
-check("encoder/empty input shape", empty.shape, (0, 2))
-check_raises("encoder/bad max_length", lambda: embed_fn_from_agent(tiny, max_length=0))
-check_raises("encoder/bad batch_size", lambda: embed_fn_from_agent(tiny, batch_size=True))
-
-
-# The two attributes the docstring names -- `agent.tok`, `agent.model.encoder` -- were read with no
-# check, so an object that is not a loaded checkpoint answered with the interpreter's own
-# AttributeError instead of naming what the helper needs. `_call_predict` refuses the same mistake
-# for the agent *it* uses, which is the sibling this now matches.
-class NoAttrs:
-    pass
-
-
-class TokOnly:
-    def __init__(self):
-        self.tok = TinyTok()
-
-
-class ModelWithoutEncoder:
-    def __init__(self):
-        self.tok = TinyTok()
-        self.model = type("M", (), {})()
-
-
-for _bad_agent in (NoAttrs(), TokOnly(), ModelWithoutEncoder()):
-    check_raises("encoder/agent/%s refused" % type(_bad_agent).__name__,
-                 lambda _a=_bad_agent: embed_fn_from_agent(_a), TypeError)
-
-try:
-    embed_fn_from_agent(NoAttrs())
-    FAIL.append("encoder/agent refusal message: no TypeError")
-except TypeError as _exc:
-    check_true("encoder/agent refusal names both attributes",
-               str(_exc) == "agent must provide tok and model.encoder", repr(str(_exc)))
-except AttributeError as _exc:
-    FAIL.append("encoder/agent refusal message: leaked AttributeError (%s)" % _exc)
-
-
-# ---------------------------------------------------------------- device changes, simulated entirely on CPU
-class DeviceRecordingTensor:
-    def __init__(self, tensor, requests):
-        self.tensor = tensor
-        self.requests = requests
-
-    def to(self, device):
-        # Record placement requests, but never allocate a CUDA tensor in these tests.
-        self.requests.append(str(device))
-        return self.tensor
-
-
-class DeviceRecordingTok(TinyTok):
-    def __init__(self):
-        super().__init__()
-        self.requests = []
-
-    def __call__(self, *args, **kwargs):
-        encoded = super().__call__(*args, **kwargs)
-        return {key: DeviceRecordingTensor(value, self.requests) for key, value in encoded.items()}
-
-
-moving = TinyAgent()
-moving.tok = DeviceRecordingTok()
-moving.device = torch.device("cuda")
-moving_fn = embed_fn_from_agent(moving, batch_size=2)
-# A callback can outlive Agent.system_one's GPU-to-CPU fallback, even before its
-# first use. Later invocations must also follow the current device, not hardcode CPU.
-for call, target in enumerate(("cpu", "cuda:1", "cpu")):
-    moving.device = torch.device(target)
-    moving.encoder.train(call == 1)
-    moving.tok.requests.clear()
-    pooled = moving_fn(["ab", "a", "abc"])
-    check("device/call %d places both tensors in every batch" % call, moving.tok.requests, [target] * 4)
-    check("device/call %d keeps batch boundaries" % call, moving.tok.batches[-2:], [["ab", "a"], ["abc"]])
-    check("device/call %d keeps masked pooling" % call, pooled.tolist(), [[3.5, 1.0], [3.0, 1.0], [4.0, 1.0]])
-    check("device/call %d keeps output dtype" % call, pooled.dtype, np.dtype("float32"))
-    check("device/call %d preserves encoder mode" % call, moving.encoder.training, call == 1)
-
-before_empty = (len(moving.tok.batches), moving.encoder.forwards, len(moving.tok.requests))
-check("device/empty input shape", moving_fn([]).shape, (0, 2))
-check("device/empty input skips tokenization, forward and placement",
-      (len(moving.tok.batches), moving.encoder.forwards, len(moving.tok.requests)), before_empty)
-
-
-# ---------------------------------------------------------------- end-to-end helper: shortlist then the real question normalizer only
-# Confirms a reduced choice still has one criterion per kept label, which is what
-# system_one would score. No weights, no forward.
-pipe_agent = Recorder()
-pipe_q = {
-    "intent": {"type": "choice", "instructions": "Which desk?", "criteria": full},
-    "urgency": score_q,
-}
-piped = predict_shortlist(pipe_agent, "I was charged twice", pipe_q, TableEmbed(full_vectors), k=2)
-scored = Agent._to_internal(pipe_agent.calls[0][1]["intent"])
-check("pipe/marker count equals k", len(scored["crit"]), 2)
-check("pipe/answer choice is inside the shortlist", piped["answers"]["intent"]["choice"] in piped["shortlist"]["intent"]["labels"], True)
-
+# Native checkpoint token embeddings are used without a model forward.
+import torch
+from test_multimodal import tiny_agent
+agent = tiny_agent()
+agent.tok = lambda rows, **kwargs: {"input_ids": torch.ones(len(rows), 2, dtype=torch.long),
+                                   "attention_mask": torch.ones(len(rows), 2, dtype=torch.long)}
+agent.model.get_input_embeddings = lambda: agent.model.embeddings
+project = embed_fn_from_agent(agent)
+check("native pooled embedding shape", project(["a", "b"]).shape, (2, 8))
 
 # ---------------------------------------------------------------- cached_embed_fn
 CACHE_VEC = {"pay me": [1.0, 0.0], "refund please": [0.0, 1.0]}

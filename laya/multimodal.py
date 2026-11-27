@@ -26,12 +26,13 @@ import time
 import numpy as np
 import torch
 
-from .agent import Agent
+from .agent import DecisionAgent
 from .common import QTYPES, confidence_from_probs, render_criterion, render_options, serialize_state, temp_bucket, unpermute_probs
 from .confidence import apply_confidence_gate, check_min_confidence
 from .hooks import PredictContext, aggregate_usage, compose_hooks, dispatch, normalise_hooks, validate_timeout
 from .multimodal_readout import CandidateScorer, candidate_positions
 from .multimodal_calibration import ordinal_probabilities, validate_ordinal_calibration
+from .revisions import default_checkpoint, resolve_revision, snapshot_revision, verify_digests
 from .systemone import ImageReferences
 
 DEFAULT_MULTIMODAL_MODEL = "google/gemma-4-E2B-it"
@@ -44,6 +45,35 @@ MULTIMODAL_MODELS = {
 }
 _AUDIO_MODELS = {"gemma4", "gemma3n", "qwen2_5_omni", "qwen2_5_omni_thinker"}
 _SYMBOLS = string.ascii_uppercase + string.ascii_lowercase + string.digits
+
+
+def _checkpoint_directory(source, revision, token, expected_sha256):
+    path = Path(source).expanduser()
+    if path.is_dir():
+        verify_digests(str(path), expected_sha256)
+        return path
+    if path.is_absolute() or source.startswith(("./", "../")) or len(path.parts) > 2:
+        raise FileNotFoundError("checkpoint directory does not exist: " + source)
+
+    from huggingface_hub import hf_hub_download, snapshot_download
+    from huggingface_hub.errors import EntryNotFoundError
+
+    options = {"revision": revision, "token": token}
+    try:
+        manifest = hf_hub_download(source, "multimodal_config.json", **options)
+    except EntryNotFoundError:
+        if expected_sha256 or os.environ.get("LAYA_SHA256_DIGESTS", "").strip():
+            snapshot = Path(snapshot_download(source, **options))
+            verify_digests(str(snapshot), expected_sha256)
+            return snapshot
+        return path
+
+    options["revision"] = snapshot_revision(str(Path(manifest).parent)) or revision
+    snapshot = Path(snapshot_download(source, **options, allow_patterns=[
+        "multimodal_config.json", "backbone_config/*", "processor/*", "adapter/*", "*.safetensors",
+    ]))
+    verify_digests(str(snapshot), expected_sha256)
+    return snapshot
 
 
 def _positive(name, value):
@@ -153,24 +183,25 @@ def _is_adapter_model(model):
     return hasattr(model, "peft_config") and callable(getattr(model, "get_base_model", None))
 
 
-class MultimodalAgent(Agent):
+class MultimodalAgent(DecisionAgent):
     """A general multimodal reader converted into a local typed decision model.
 
     Image, sound and sampled video frames are passed as model inputs, including non-speech
     audio. Probabilities are conditional on the supplied options and require held-out calibration.
     """
 
-    def __new__(cls, *args, **kwargs):
-        return object.__new__(cls)
-
-    def __init__(self, model_id_or_path=DEFAULT_MULTIMODAL_MODEL, device=None, *, revision=None,
+    def __init__(self, model_id_or_path=None, device=None, *, revision=None,
                  token=None, max_len=4096, frames=8, max_audio_seconds=30.0,
                  use_audio_in_video=True, dtype=None, hooks=None, on_predict_start=None,
                  on_predict_end=None, hooks_raise=True, hooks_concurrent=True, hooks_timeout=None,
-                 readout=None, prompt_version=None, grounding_slots=None):
+                 readout=None, prompt_version=None, grounding_slots=None, expected_sha256=None):
         import transformers
-        model_id_or_path = os.fspath(model_id_or_path)
-        checkpoint = Path(model_id_or_path)
+        source = default_checkpoint() if model_id_or_path is None else os.fspath(model_id_or_path)
+        source = MULTIMODAL_MODELS.get(source, source)
+        revision = resolve_revision(source, revision) if not Path(source).expanduser().is_dir() else revision
+        checkpoint = _checkpoint_directory(source, revision, token, expected_sha256)
+        model_id_or_path = str(checkpoint) if checkpoint.is_dir() else source
+        self.checkpoint_revision = snapshot_revision(str(checkpoint))
         saved = None
         if (checkpoint / "multimodal_config.json").is_file():
             saved = json.loads((checkpoint / "multimodal_config.json").read_text())
@@ -212,7 +243,7 @@ class MultimodalAgent(Agent):
             self.model = factory.from_config(model_config, attn_implementation=attention, torch_dtype=self.dtype)
         else:
             self.model = factory.from_pretrained(self.model_id, config=model_config, torch_dtype=self.dtype,
-                                                 attn_implementation=attention, **options)
+                                                 attn_implementation=attention, use_safetensors=True, **options)
         forward_options = {"logits_to_keep": 1} if "logits_to_keep" in inspect.signature(self.model.forward).parameters else {}
         self.symbols = install_decision_head(self.model, self.tok, saved.get("symbols") if saved else None)
         if self.readout == "candidate":
@@ -458,9 +489,9 @@ class MultimodalAgent(Agent):
                 raise ValueError("Box takes only type and instructions; it has no criteria or option_order")
             if not isinstance(qdef.get("instructions"), str) or not qdef['instructions'].strip():
                 raise ValueError("Box instructions must be a nonempty string")
-            Agent._check_question(qid, dict(qdef, type="noul"))
+            DecisionAgent._check_question(qid, dict(qdef, type="noul"))
             return
-        Agent._check_question(qid, qdef)
+        DecisionAgent._check_question(qid, qdef)
 
     def _prepare(self, request, qdef, *, max_len=None, load_media=None):
         q = self._to_internal(qdef)
@@ -721,14 +752,22 @@ class MultimodalAgent(Agent):
         return answer
 
     @torch.no_grad()
-    def predict(self, state=None, questions=None, *, image=None, audio=None, video=None, sampling_rate=None, **kwargs):
+    def predict(self, state=None, questions=None, *, image=None, audio=None, video=None, sampling_rate=None,
+                batch_size=None, lang=None, hooks=None, on_predict_start=None, on_predict_end=None,
+                hooks_raise=None, hooks_timeout=None, max_len=None, head_max_len=None,
+                sort_by_length=False, min_confidence=None):
         return self.predict_batch([self._input(state, image=image, audio=audio, video=video,
-                                               sampling_rate=sampling_rate)], questions, **kwargs)[0]
+                                               sampling_rate=sampling_rate)], questions,
+                                  batch_size=batch_size, lang=lang, hooks=hooks,
+                                  on_predict_start=on_predict_start, on_predict_end=on_predict_end,
+                                  hooks_raise=hooks_raise, hooks_timeout=hooks_timeout, max_len=max_len,
+                                  head_max_len=head_max_len, sort_by_length=sort_by_length,
+                                  min_confidence=min_confidence)[0]
 
     system_one = predict
 
     def _answer_text_questions(self, request, questions, max_len, batch_size):
-        from .multimodal_train import collate_multimodal_inputs
+        from .multimodal_data import collate_multimodal_inputs
 
         answers, pending = {}, []
         tokens, forwards, longest = 0, 0, 0

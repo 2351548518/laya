@@ -1,4 +1,4 @@
-# Swedish routing: MASSIVE full-test comparison
+# Historical Swedish routing experiment on MASSIVE
 
 This report compares the `laya.lang` detector on all 51 locale files in the pinned
 `mteb/amazon_massive_intent` test split (dataset revision
@@ -18,17 +18,9 @@ named-language accuracy is reported separately: a detector can safely choose
 including guess counts, are in
 [`../results/massive_route_comparison_swedish.json`](../results/massive_route_comparison_swedish.json).
 
-Reproduce from the repository root, passing baseline and candidate commits:
-
-```sh
-python research/evals/massive_route_comparison.py \
-  --before-ref 6d942c92081fbc139e736bbd9ac0023223c29b7f \
-  --after-ref ee499bb095587c8af17f2747dacd89a4c76c1ff1 \
-  --out research/results/massive_route_comparison_swedish.json
-```
-
-The report records the source Git revisions and pinned dataset revision. The script
-downloads the split from Hugging Face on first run and needs `huggingface_hub` installed.
+The report records the exact source and dataset revisions. Its checkpoint routing targets belong to
+the earlier two-checkpoint deployment. See the [archived benchmark script](https://github.com/2351548518/laya/blob/21167295a16ec64de8b68999e17c37fb9a5e8706/research/evals/massive_route_comparison.py)
+to reproduce those measurements.
 
 ## Results
 

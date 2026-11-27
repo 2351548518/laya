@@ -18,8 +18,8 @@ In a terminal at the repository root, start the server:
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e '.[serve]'
-LAYA_HOST=127.0.0.1 LAYA_MODELS=english laya-serve
+python -m pip install -e '.[multimodal,serve]'
+LAYA_HOST=127.0.0.1 LAYA_DEVICE=cpu laya-serve
 ```
 
 In a second terminal, build the SDK and run the plain JavaScript example:
@@ -31,14 +31,7 @@ npm run build
 node examples/triage.mjs
 ```
 
-The server preloads checkpoints at startup by default. The command above loads
-the English checkpoint; the router can load others when needed. To preload both
-English and multilingual on CPU:
-
-```sh
-LAYA_HOST=127.0.0.1 LAYA_MODELS=english,multilingual LAYA_DEVICE=cpu laya-serve
-# Set LAYA_DEVICE=cuda or mps for a suitable GPU installation.
-```
+Set `LAYA_MULTIMODAL_MODEL` to a trained checkpoint for the server to preload.
 
 Set `LAYA_PRELOAD=0` to defer loading until the first prediction. Initial loads
 download weights and need sufficient memory and disk space. The client timeout
@@ -251,55 +244,28 @@ question's options no longer have a token span each. See the `usage` table in
 
 ## Local model selection
 
-By default, `laya-client` sends no `model` property. `laya-serve` then chooses
-the appropriate local checkpoint automatically. Set a client-wide `model` or
-override it per prediction only when a specific local checkpoint is required:
+Omit `model` to use the server's configured default. Set a client-wide name or select a
+checkpoint registered on the server for a single request.
 
 ```js
-const laya = new Laya({ model: 'english' });
-await laya.predict(state, questions, { model: 'typed-decisions' });
-await laya.predict(state, questions, { model: 'multilingual' });
+const laya = new Laya({ model: 'multimodal' });
+await laya.predict(state, questions, { model: 'default', maxLen: 4096 });
 ```
 
-Laya accepts its local checkpoint aliases. The HTTP endpoint forwards the
-per-request controls documented in the [HTTP API](https://github.com/NandhaKishorM/laya/blob/main/docs/http-api.md)
-reference, and this client exposes them as options on `predict()`:
+| Option | Wire field | Purpose |
+| --- | --- | --- |
+| `model` | `model` | Registered checkpoint name or alias |
+| `task` | `task` | Registered name to use when no model is supplied |
+| `lang` | `lang` | Optional language metadata |
+| `langGuess` | `lang_guess` | Optional diagnostic hint |
+| `maxLen` | `max_len` | Native input token budget |
+| `headMaxLen` | `head_max_len` | Control for backends that provide a separate option budget |
+| `minConfidence` | `min_confidence` | Minimum decision probability, either one threshold or a map of option-count buckets |
 
-| option | wire field | meaning |
-|---|---|---|
-| `model` | `model` | checkpoint name or alias for this request; a path or unpublished Hub id is a 422 from the server |
-| `task` | `task` | force a workflow; an unknown name is a 422 naming it |
-| `lang` | `lang` | a language code that skips detection when it names a language |
-| `langGuess` | `lang_guess` | a code from your own LID, consulted before detection |
-| `maxLen` | `max_len` | total token window for this request (server-capped) |
-| `headMaxLen` | `head_max_len` | token window the option prompt shares, same cap |
-| `minConfidence` | `min_confidence` | abstention gate: one threshold in `[0, 1]`, or a per-bucket map of option-count bucket to threshold; low-confidence answers are marked, not dropped |
-
-```js
-await laya.predict(state, questions, { task: 'typed', minConfidence: 0.8 });
-await laya.predict(state, questions, { lang: 'de', maxLen: 4096, headMaxLen: 512 });
-```
-
-Absent options stay absent, so the deployment's own `Router(...)` settings remain
-in charge. The endpoint does not expose a standalone `route()` call. Laya still
-detects language automatically; set `LAYA_AUTO_TASK=1` on the server to enable
-automatic workflow routing.
-
-Laya returns `model`, `answers`, and `usage`, with optional `routing`, answer
-`action`, and Noul `confidence` metadata. Those fields are validated when
-present. Choice and Score confidence remains required. Every answer also carries
-`answer_confidence` (`max(p)`), the one confidence that means the same thing on all
-three question types; when you pass `minConfidence`, each answer of that call additionally
-reports `abstention` and `abstention_threshold`, and the ones below the threshold carry
-`low_confidence: true`. With `minConfidence` unset none of those three keys appear — absence is
-how a caller tells an ungated run from a cleared gate. `health()` is never
-called by `predict()`.
-
-## Which JavaScript client?
-
-Use `laya-client` when a JavaScript or TypeScript application talks over HTTP to
-self-hosted Python `laya-serve`. Use `laya-ts` when inference must run directly
-inside JavaScript through its local ONNX runtime, without a Python server.
+Call `route()` to inspect the deployed checkpoint selection. Use `LAYA_JEV_STRICT=0` on the
+server to include extended confidence, routing and abstention fields in single responses.
+Native decisions use `maxLen` as the prompt budget.
+[HTTP API](https://github.com/2351548518/laya/blob/main/docs/http-api.md)
 
 ## Presets
 
@@ -373,8 +339,8 @@ import uvicorn
 from laya import Router
 from laya.serve import create_app
 
-router = Router(models={"english": "/path/to/checkpoint"}, device="cpu")
-router.preload(["english"])
+router = Router(multimodal="/path/to/checkpoint", device="cpu")
+router.preload(["multimodal"])
 app = create_app(router)  # Reads LAYA_API_KEY from the environment.
 uvicorn.run(app, host="127.0.0.1", port=8000)
 ```
@@ -402,9 +368,7 @@ with `python3 scripts/sync_presets.py` after editing that source.
 
 Batch tests compare the same inference batch shape against `Router.predict_batch`, in both
 extended and strict response modes. They also exercise tournament results and the server's
-authentication and request limits. CI sets `LAYA_SDK_LEGACY_FIXTURE` to a pinned v0.4.7
-checkout's `tests/sdk_server_fixture.py` to check an older server. Set that variable to an
-absolute fixture path to include the compatibility test locally; otherwise that test skips.
+authentication and request limits on the native service.
 `test:package` installs the actual npm tarball into a temporary consumer and checks ESM,
 CommonJS, batch validation and strict TypeScript declarations without runtime dependencies.
 

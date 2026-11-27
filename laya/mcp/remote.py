@@ -10,7 +10,7 @@ and the MCP process itself stays at a few tens of megabytes, with no torch impor
 Routing stays local and free. ``RemoteRouter`` is a ``Router``, so ``route`` / ``route_batch``
 run the same language and script detection the server runs, without a model. The server makes
 its own routing decision for the actual answer and reports it in ``routing``; the two agree when
-the MCP process and the server see the same ``LAYA_DEFAULT_MODEL`` / ``LAYA_AUTO_TASK``.
+the MCP process and the server see the same ``LAYA_DEFAULT_MODEL``.
 
 Not available remotely: ``load`` (and therefore ``laya_shortlist``, which needs the answering
 checkpoint's embeddings in-process), ``preload`` and ``unload`` (no-ops: the server owns its
@@ -196,11 +196,9 @@ class RemoteRouter(Router):
         video: Any = None,
     ) -> Dict[str, Any]:
         if any(value is not None for value in (image, audio, video)):
-            # `Router.predict` takes these since 0.4.25 for the vega lane; laya-serve has no media
-            # encoding, so the remote says so here rather than sending a file name as a state
             raise RemoteError("unsupported_remote",
-                              "images, recordings and clips cannot be sent to laya-serve; use "
-                              "laya.Agent(vegaml=True) or a local Router with the vega lane")
+                              "For media, send image assets to /v1/systemone, or inline "
+                              "audio and video to /v1/multimodal.")
         if hooks_timeout is not None:
             raise RemoteError("unsupported_remote", "hooks_timeout belongs to the server's hooks")
         if any(value is not None for value in (hooks, on_predict_start, on_predict_end, hooks_raise)):

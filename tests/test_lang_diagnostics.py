@@ -166,43 +166,24 @@ def test_explain_does_not_run_a_second_detection_pass():
         assert [c.args[0] for c in detector.call_args_list] == [c.args[0] for c in plain_calls]
 
 
-@pytest.mark.parametrize("default", ["english", "multilingual"])
+@pytest.mark.parametrize("default", ["multimodal", "speech"])
 def test_router_keeps_fallback_and_never_loads_models(default):
-    router = Router(default=default)
+    router = Router(default=default, models={"speech": "/local/speech"})
     with patch.object(router, "load", side_effect=AssertionError("must not load")):
         plain = router.route("Turn lights off")
         result = router.route("Turn lights off", explain=True)
     assert result["model"] == default
-    assert result["detection"].pop("diagnostic")["reason"] == "insufficient_words"
-    assert result == plain
+    assert result["detection"]["diagnostic"]["reason"] == "insufficient_words"
+    assert plain["model"] == default and plain["detection"] is None
 
 
 @pytest.mark.parametrize("override", [
-    {"model": "english"}, {"task": "typed-decisions"}, {"lang": "de"}, {"lang_guess": "en"},
+    {"model": "multimodal"}, {"task": "multimodal"}, {"lang": "de"}, {"lang_guess": "en"},
 ])
 def test_explicit_routes_do_not_invent_detector_evidence(override):
     router = Router()
     with patch("laya.router.analyse", side_effect=AssertionError("detector must be skipped")):
         result = router.route(DE, explain=True, **override)
-    assert result["detection"] is None
-
-
-def test_abstaining_hint_runs_detection_once():
-    calls = []
-    def hint(state):
-        calls.append(state)
-        return None
-    result = Router(lang_guess=hint).route("Turn lights off", explain=True)
-    assert calls == ["Turn lights off"]
-    assert result["detection"]["diagnostic"]["reason"] == "insufficient_words"
-
-
-def test_automatic_workflow_selection_skips_detection():
-    questions = {key: {"type": "bool"} for key in
-                 ("action", "category", "churn_risk", "needs_human", "urgency")}
-    with patch("laya.router.analyse", side_effect=AssertionError("detector must be skipped")):
-        result = Router(auto_task_detection=True).route(DE, questions, explain=True)
-    assert result["workflow"] == "customer_service"
     assert result["detection"] is None
 
 
@@ -222,7 +203,7 @@ def test_batch_uses_same_explanation_and_order():
     router = Router()
     batch = router.route_batch([{"state": s, "questions": {}} for s in states], explain=True)
     assert batch == [router.route(s, explain=True) for s in states]
-    assert all("diagnostic" not in r["detection"] for r in router.route_batch(
+    assert all(r["detection"] is None for r in router.route_batch(
         [{"state": s, "questions": {}} for s in states]))
 
 

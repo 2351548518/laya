@@ -963,11 +963,9 @@ check_true("edges/the pre-cut is four times the budget",
            "the `4 * |max_chars|` half of the stated arithmetic is not in the code")
 for edge_fn, edge_phrase in [
     (clean_email_body, "slice budget"),
-    (clean_email_body, "laya-java/fixtures/email.json"),
     (clean_email_body, "5 * |max_chars|"),
     (clean_email_body, "never recognized"),
     (email_state, "slice budget"),
-    (email_state, "laya-java/fixtures/email.json"),
 ]:
     edge_doc = " ".join((inspect.getdoc(edge_fn) or "").split())
     check_true("edges/doc/%s says %r" % (edge_fn.__name__, edge_phrase),

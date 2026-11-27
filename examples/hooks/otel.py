@@ -22,7 +22,7 @@ def on_predict_end(ctx):
     #   meter.create_histogram("laya.decision.latency_ms").record(ctx.elapsed_ms or 0.0)
 
 
-agent = laya.load("convaiinnovations/laya", on_predict_end=on_predict_end)
+agent = laya.load( on_predict_end=on_predict_end)
 agent.system_one("I was charged twice.", {"urgent": {"type": "noul", "instructions": "Urgent?"}})
 print("counts:", COUNTS)
 print("latency samples:", len(LATENCIES))

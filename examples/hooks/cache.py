@@ -42,7 +42,7 @@ def cache_write(ctx):
         CACHE[cache_key(ctx, i)] = result
 
 
-agent = laya.load("convaiinnovations/laya",
+agent = laya.load(
                   on_predict_start=cache_read, on_predict_end=cache_write)
 
 STATE = "I was charged twice for the same invoice."

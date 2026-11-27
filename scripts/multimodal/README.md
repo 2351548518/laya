@@ -5,7 +5,8 @@ experiments belong in the ignored `_local/` workbench.
 
 | Command | Purpose |
 | --- | --- |
-| `train.py` | Fresh head warmup and joint supervised LoRA/full adaptation |
+| `train.py` | Checkout entry point for `laya-train`, from head warmup through joint adaptation |
+| `monitor_swanlab.py` | Backfill SwanLab metrics from legacy training logs |
 | `calibrate.py` | Fit held-out calibration and check it on independent development records |
 | `prepare_dataset.py` | Convert native JSONL and Kev records to a shared request and supervision layout |
 | `evaluate.py` | Evaluate native decisions and single-box geometry |
@@ -18,6 +19,11 @@ Install the native dependencies with `python -m pip install -e '.[multimodal]'`.
 and training implementation live in `laya/`. Store local checkpoints in `models/` or
 `multimodal-runs/`. Use a compatible `llama.cpp-jev` checkout built in `build-laya/` for GGUF
 conversion and quantization. [Runtime setup](../../docs/multimodal-release.md#run-the-decision-server)
+
+For new runs, `train.py --swanlab local` records metrics directly from the training loop. Use
+`--swanlab online --swanlab-project PROJECT` from an authenticated SwanLab environment for an
+account dashboard. `monitor_swanlab.py` remains available to backfill logs from existing runs.
+[SwanLab tutorial](../../docs/project-readme/multimodal.md#swanlab)
 
 Export a frozen benchmark directory containing `manifest.json` and its verified JSONL files.
 

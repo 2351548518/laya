@@ -421,9 +421,8 @@ def decide_batch(runner, states: Sequence[Any], schema: Any = None, *,
     ``route_batch``) receives one ``{"state": ..., "questions": ...}`` request per
     state, so states may route to different checkpoints.
 
-    ``Agent``, ``ONNXAgent`` and ``Router`` all batch. A runner with no ``predict_batch``
-    raises ``TypeError`` here rather than silently degrading to N sequential ``decide``
-    calls -- loop ``decide`` yourself when the runner cannot batch.
+    Native agents and ``Router`` support batching. For a runner without ``predict_batch``,
+    call ``decide`` on each state.
     """
     if (schema is None) == (questions is None):
         raise ValueError("pass exactly one of schema= or questions=")

@@ -1,32 +1,4 @@
-"""Route a request to the Laya checkpoint best suited to it.
-
-Three checkpoints, measured on a shared benchmark (17,416 questions, one T4, identical questions
-per model -- see the repository's benchmark notebook):
-
-  english          convaiinnovations/laya                421M  ModernBERT-large, 512 tokens
-  multilingual     convaiinnovations/laya-multilingual   322M  mmBERT-base, 1024 tokens, 100+ langs
-  typed-decisions  convaiinnovations/laya-typed-decisions 421M  ModernBERT-large, 1024 tokens,
-                                                                fine-tuned on the typed-decisions
-                                                                workflows
-
-Why routing is worth it -- accuracy by language family:
-
-                      english   multilingual
-  MASSIVE intent  en    0.783       0.657        <- English checkpoint wins
-  MASSIVE intent  non-en 0.306      0.451
-  XNLI            en    0.860       0.843
-  XNLI            non-en 0.521      0.731        <- +21 points for multilingual
-  English suites        0.684       0.619
-
-The English checkpoint does not gently degrade off English, it collapses: on 20-option MASSIVE
-intent it scores 0.100 on Hindi and 0.103 on Korean, against 0.050 for random guessing -- and it
-reports high confidence while doing so (ECE 0.855 on Hindi). Script detection is therefore the
-primary routing signal.
-
-`typed-decisions` is never selected automatically unless you opt in with
-`auto_task_detection=True` or pass `task="typed_decisions"`: it is fine-tuned on four specific
-synthetic workflows and should not be a silent default.
-"""
+"""Select and load local decision checkpoints for text and media requests."""
 import contextvars
 import gc
 import inspect
@@ -37,7 +9,7 @@ import threading
 import time
 import warnings
 from collections.abc import Sequence as SequenceABC
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 from .confidence import apply_confidence_gate, check_min_confidence
 from .hooks import (
@@ -46,34 +18,17 @@ from .hooks import (
 )
 from .hooks import _SKIP_DEFAULTS
 from .lang import analyse
+from .revisions import DEFAULT_CHECKPOINT, default_checkpoint
 
-# The hub repo bundles all three checkpoints; only the requested subfolder is downloaded.
-BUNDLE_REPO = "convaiinnovations/laya"
-DEFAULT_MODELS = {
-    "english": (BUNDLE_REPO, None),
-    "multilingual": (BUNDLE_REPO, "multilingual"),
-    "typed-decisions": (BUNDLE_REPO, "typed-decisions"),
-}
-
-#: The lane for what the encoders cannot read, served by vegaml's universal reader through
-#: `laya.Agent(vegaml=True)` when the Router is built with `vega` on (the default when vegaml is
-#: installed): images, speech and video, states past the encoders' 8,192 tokens, and questions
-#: with fitted heads. Text the encoders can read keeps going to the encoders exactly as before.
+MULTIMODAL_MODEL = "multimodal"
+DEFAULT_MODELS = {MULTIMODAL_MODEL: DEFAULT_CHECKPOINT}
 VEGA_MODEL = "vega"
 VEGA_REPO = "nandakishorm/vega-U"
-MULTIMODAL_MODEL = "multimodal"
-
-# The same checkpoints also live in their own repos, for anyone who prefers them.
-STANDALONE_MODELS = {
-    "english": "convaiinnovations/laya",
-    "multilingual": "convaiinnovations/laya-multilingual",
-    "typed-decisions": "convaiinnovations/laya-typed-decisions",
-}
 
 
 def _estimate_tokens(state: Any) -> int:
     """A cheap token estimate for routing: characters over four, over the flattened state.
-    Only the decision "can an encoder read this at all" rests on it, so a rough count is enough."""
+    Used for the configured Vega routing threshold."""
     if state is None:
         return 0
     try:
@@ -84,35 +39,8 @@ def _estimate_tokens(state: Any) -> int:
     return len(text) // 4
 
 
-def _repo_str(spec):
-    """Human-readable id for a model spec: 'repo' or 'repo/subfolder'."""
-    repo, sub = _split(spec)
-    return "%s/%s" % (repo, sub) if sub else repo
+_ALIASES = {"laya": MULTIMODAL_MODEL, "default": MULTIMODAL_MODEL}
 
-
-def _split(spec):
-    """Normalise a model spec to (repo_or_path, subfolder)."""
-    if isinstance(spec, (tuple, list)):
-        repo, sub = (list(spec) + [None])[:2]
-        return repo, sub
-    return spec, None
-
-# Aliases people are likely to type.
-_ALIASES = {
-    "en": "english", "laya": "english", "default": "english",
-    "multi": "multilingual", "ml": "multilingual", "laya-multilingual": "multilingual",
-    "typed": "typed-decisions", "typed_decisions": "typed-decisions",
-    "laya-typed-decisions": "typed-decisions", "decisions": "typed-decisions",
-}
-
-# Question-id signatures of the four typed-decisions workflows, used only when
-# auto_task_detection is enabled.
-_TYPED_DECISION_WORKFLOWS = {
-    "agent_trace_observability": {"action", "needs_review", "outcome", "risk", "urgency"},
-    "customer_service": {"action", "category", "churn_risk", "needs_human", "urgency"},
-    "invoice_processing": {"discrepancy_severity", "disposition", "duplicate", "matches_order", "urgency"},
-    "security_incidents": {"credential_compromise", "disposition", "severity", "true_positive", "urgency"},
-}
 
 # What a caller may name a checkpoint of their own, once `canonical_name` has trimmed and
 # lowercased it (so `Papers` is registered as `papers`): letters, digits, `.`, `_` and `-`, starting
@@ -210,34 +138,6 @@ def normalise_name(name: str) -> str:
     return key
 
 
-def resolve_model_spec(name: str) -> Optional[Tuple[str, Optional[str]]]:
-    """Registry spec for a checkpoint name or alias, or None when it is not one.
-
-    The non-raising sibling of :func:`normalise_name`, for callers that also accept
-    things the registry knows nothing about -- a Hub repo id, a local directory, an
-    ONNX export. Those pass through untouched; a name or alias the registry does know
-    resolves to its ``(repo, subfolder)`` pair, so ``load("typed-decisions")`` and
-    ``Router(model="typed-decisions")`` name the same checkpoint from one table.
-    """
-    try:
-        key = normalise_name(name)
-    except ValueError:
-        return None
-    return tuple(_split(DEFAULT_MODELS[key]))
-
-
-def match_typed_decisions_workflow(questions: Dict[str, Any]) -> Optional[str]:
-    """Name of the typed-decisions workflow whose question ids these are, else None.
-
-    Requires an exact id-set match, so an unrelated schema that happens to contain 'urgency'
-    is never captured.
-    """
-    ids = set(questions or {})
-    for wf, sig in _TYPED_DECISION_WORKFLOWS.items():
-        if ids == sig:
-            return wf
-    return None
-
 
 def _question_schema(questions: Dict[str, Any]) -> str:
     """Order-sensitive signature of a question schema, for sharing forward passes.
@@ -261,27 +161,6 @@ _ENGLISH_SUBTAGS = ("en", "eng", "english")
 # `zxx` no linguistic content, `mul` multiple languages. They abstain, which is what the blank
 # case below already does, rather than forcing the multilingual checkpoint on English text.
 _LANGUAGE_AGNOSTIC_CODES = ("c", "posix", "und", "zxx", "mul")
-
-
-def _english_from_code(value: Any) -> Optional[bool]:
-    """True/False for a language code, or None when the code identifies nothing.
-
-    Accepts the forms a caller is likely to have to hand: `"en"`, `"EN"`, `"en-US"`, the
-    POSIX `"en_US"` (which `$LANG` holds), and `"en_US.UTF-8"`. `None` here means "no usable
-    hint", which is what lets a language-identification model abstain -- and it is also what a
-    code that names no language returns, so `LANG=C` falls through to detection instead of
-    pinning every request to one checkpoint.
-    """
-    if value is None:
-        return None
-    code = str(value).strip().lower()
-    if not code:
-        return None
-    code = code.split(".", 1)[0]                       # en_US.UTF-8 -> en_US
-    primary = code.replace("_", "-").split("-", 1)[0]  # en_US -> en
-    if not primary or primary in _LANGUAGE_AGNOSTIC_CODES:
-        return None
-    return primary in _ENGLISH_SUBTAGS
 
 
 def _takes_lang(fn) -> bool:
@@ -344,9 +223,8 @@ class _ScanLong:
         scan = getattr(agent, "predict_long", None)
         if scan is None:
             raise TypeError(
-                "%s has no predict_long, so a state longer than its window cannot be scanned; "
-                "the PyTorch Agent and ONNXAgent implement it, and an agent attached by hand needs "
-                "it too" % type(agent).__name__
+                "%s has no predict_long; select a checkpoint with long-input support"
+                % type(agent).__name__
             )
         lang = self.lang
         if lang is None:
@@ -581,130 +459,7 @@ class _InFlightBuild:
 
 
 class Router(HookRegistry):
-    """Lazily loads Laya checkpoints and sends each request to the right one.
-
-        from laya import Router
-
-        r = Router()
-        r.predict({"message": "Mein Konto wurde zweimal belastet"}, questions)   # -> multilingual
-        r.predict({"message": "I was charged twice"}, questions)                 # -> english
-        r.predict(state, questions, model="typed-decisions")                     # explicit
-
-    Models are downloaded and built on first use. `max_loaded` caps how many stay resident
-    (least-recently-used is evicted), because all three together are ~1.16B parameters.
-
-    The default is 2, because automatic routing only ever chooses between `english` and
-    `multilingual`: a cap of one rebuilds the checkpoint it just evicted on every script switch,
-    which is seconds per request on exactly the traffic the Router exists for. Traffic that only
-    ever sees one language never builds the second checkpoint, so the default costs it nothing.
-    Lower it to 1 for a memory-constrained host, and raise it to 3 (or preload) when
-    `auto_task_detection`, an explicit `model=` or an explicit `task=` can reach
-    `typed-decisions` as well.
-
-    For a server or a demo, preload instead: a cold load costs seconds, while detection costs
-    microseconds, so even the default still pays a load the first time a language appears.
-
-        r = Router(preload=True)                    # all three resident, routing is free
-        r = Router(preload=True, device="cuda")
-        r.preload(["english", "multilingual"])      # or just the two you serve
-
-    Hub revisions are opt-in. `revision` applies one commit to every model;
-    `revisions={"english": "...", "multilingual": "..."}` overrides that per model,
-    which is useful when standalone repositories were reviewed at different commits.
-    Without either, huggingface_hub's normal default and existing offline cache are used.
-
-    A `revisions` entry that is `None` or blank is "no override for this model", so the model
-    inherits `revision` -- the shape `{"english": os.environ.get("EN_SHA")}` writes when the
-    variable is unset, which must not cost the caller the pin it did ask for. Nothing in
-    `revisions` can unpin one model while `revision` pins the rest; leave `revision` unset and
-    name the models you want pinned instead.
-
-    A blank `revision` is read the same way, which is a deliberate change in what the Router
-    passes on: `Router(revision="   ")` used to reach `resolve_revision`, where a truthy but blank
-    string suppressed the `LAYA_REVISION` fallback and left huggingface_hub's default, and is now
-    dropped before it gets there, so a Router configured with whitespace behaves like one
-    configured with nothing and `$LAYA_REVISION` applies. That is what "this configuration line was
-    never filled in" has to mean if `revision` and a `revisions` entry are to be read the same way.
-
-    It is one of two places a weaker source ends up ahead of an explicit argument. The other is a
-    per-checkpoint digest entry from `LAYA_SHA256_DIGESTS`, which wins over an `expected_sha256`
-    passed through `agent_kwargs`; see the class docstring.
-
-    Anything else `laya.Agent` accepts is reachable through `agent_kwargs`, which is merged into
-    every checkpoint the Router builds:
-
-        Router(agent_kwargs={"lang_temperatures": {"de": {"temperature": [1.0, 1.4, 2.0]}}})
-        Router(agent_kwargs={"expected_sha256": {"model.safetensors": "a3f1..."}})
-        Router(agent_kwargs={"fast": True})
-
-    `expected_sha256` there pins the same files on every checkpoint, which is what a single
-    resident checkpoint or a shared `tokenizer.json` wants. It is never discarded wholesale by a
-    checkpoint's own digests: where one also has an entry, from `sha256_digests` or from a
-    **per-checkpoint** `LAYA_SHA256_DIGESTS`, the two maps are merged **file by file**, so a file
-    only one of them names is still verified.
-
-    Two exceptions, both deliberate and both tested, because "merged file by file" is not the whole
-    story and the difference is a supply-chain control:
-
-    * A **flat** `LAYA_SHA256_DIGESTS` -- `{artifact: digest}` rather than `{model: {...}}` -- is
-      not a layer here at all. `verify_digests` applies it itself, but only when nothing else pins
-      (`if expected is None`), so ANY `expected_sha256` reaching `Agent`, from here or from a
-      checkpoint entry, means the flat variable is not consulted for that load. Verified on real
-      files: a flat variable pinning `model.safetensors` plus an `agent_kwargs` map pinning
-      `tokenizer.json` loads a tampered `model.safetensors`. Use the per-checkpoint shape, or name
-      every file you care about in one map, if you need both. This is unchanged from `main`.
-    * An explicit `{}` or `None` entry MASKS what would otherwise apply -- that is what "load this
-      one unverified" has to mean, and `test_an_explicit_none_entry_masks_a_flat_environment_map`
-      pins it.
-
-    And the precedence is per-checkpoint over shared regardless of where each came from, so a
-    per-checkpoint entry synthesised from `LAYA_SHA256_DIGESTS` wins over an `expected_sha256`
-    passed here in code. An environment variable beating an explicit argument is worth stating
-    plainly on a control like this; `test_an_environment_pin_overrides_the_shared_one_per_checkpoint`
-    is where that is pinned.
-
-    For a file both name, the per-checkpoint entry wins. The two are not equally specific: the
-    `agent_kwargs` map reaches every checkpoint the Router builds, and `model.safetensors` is the one
-    name every checkpoint uses for a *different* file, so a shared entry for it cannot be a correct
-    claim about all of them at once. **Nothing raises over that overlap** -- refusing it would reject
-    a shared pin plus a per-checkpoint override, which is the ordinary shape and which loaded
-    correctly before any of this existed. If you need to know which digest a checkpoint was verified
-    against, read it back: the map handed to each `Agent` is the merge described above.
-
-    Both `agent_kwargs` and `sha256_digests` are public and mutable, and a checkpoint's entry is read
-    on the load rather than at construction, so a pin assigned afterwards -- or added to an
-    existing entry in place -- counts.
-
-    The names the Router sets for itself -- `model_id_or_path`, `device`, `token`, `subfolder`,
-    `revision` and the hook arguments -- are refused here rather than silently shadowed, and the
-    remaining names are checked against `Agent.__init__` at construction, so a misspelled option
-    fails on the `Router(...)` line instead of on the first request.
-
-    Artifact digests are opt-in and always per model: `sha256_digests={"english": {...}}`
-    passes that `{path relative to the checkpoint dir: hexdigest}` map to the `Agent` that
-    loads it, so a tampered or substituted weight file is refused before it is parsed. There
-    is no Router-wide equivalent of `revision` because digests, unlike a commit SHA, are not
-    shareable: the bundled repository ships a separate `model.safetensors` for each of
-    `english`, `multilingual` and `typed-decisions`, so one flat map can only ever match one
-    of them. A model listed with `None` or `{}` adds no files of its own, which loads it
-    unverified unless `agent_kwargs["expected_sha256"]` pins it; it still masks a flat
-    `LAYA_SHA256_DIGESTS`, which is what listing it that way is for.
-
-    The same split is available to a process configured only by environment: when
-    `LAYA_SHA256_DIGESTS` holds a model-keyed map (`{"english": {...}, "multilingual": {...}}`)
-    this seeds it per checkpoint, so a server that keeps several resident can pin each with its
-    own digests instead of refusing to start on the second one. A flat `LAYA_SHA256_DIGESTS`
-    keeps its existing meaning, applied by `laya.revisions` to every checkpoint the process
-    loads, which is right for a single-checkpoint one. An argument entry wins over the
-    environment for the model it names. A nested variable that names some checkpoints and not
-    others says nothing about the others: they keep whatever `agent_kwargs["expected_sha256"]`
-    pins them with, because pinning one checkpoint from the environment is not a request to stop
-    verifying the rest.
-
-    Hooks are opt-in and run at the Router level: `on_route` sees the routing decision,
-    `on_load` / `on_evict` see model lifecycle, and `on_predict_start` / `on_predict_end`
-    wrap the whole route+infer call. See `laya.hooks`.
-    """
+    """Route requests to registered checkpoints and keep a bounded cache of resident models."""
 
     # Opt-in defaults so a hand-built instance (`Router.__new__` in tests) works unset.
     # `hooks`/`_hooks_mutex` come from HookRegistry.
@@ -722,19 +477,7 @@ class Router(HookRegistry):
         revision: Optional[str] = None,
         revisions: Optional[Dict[str, Optional[str]]] = None,
         max_loaded: int = 2,
-        # The fallback for text whose language detection abstains, not for all traffic:
-        # detected non-Latin script already routes to `multilingual` whatever this says.
-        # `multilingual` since 0.4.0, on the refreshed 51-language sweep: it leads on 50 of
-        # the 51, the one exception being English itself (0.820 against 0.710), and by 0.180
-        # macro accuracy excluding English. The break-even is about 62% English traffic, so a
-        # mostly-English deployment should set `default="english"` back. The asymmetry that
-        # settles it for undecided text is the failure mode rather than the mean: off English
-        # the English checkpoint collapses while staying confident (Khmer 0.000 accuracy at
-        # 0.952 mean confidence), so no `min_confidence` gate downstream can catch it, while
-        # the multilingual checkpoint gives up 0.110 on English and stays gateable.
-        default: str = "multilingual",
-        auto_task_detection: bool = False,
-        standalone_repos: bool = False,
+        default: str = MULTIMODAL_MODEL,
         preload: bool = False,
         lang_guess: Optional[Any] = None,
         hooks=None,
@@ -745,14 +488,7 @@ class Router(HookRegistry):
         hooks_timeout: Optional[float] = None,
         agent_kwargs: Optional[Dict[str, Any]] = None,
         sha256_digests: Optional[Dict[str, Optional[Dict[str, str]]]] = None,
-        # The vega lane. "auto": on when the vegaml package is installed, built on first use;
-        # True: on, and an ImportError now if vegaml is missing; False or None: off, and the Router
-        # behaves exactly as it did before 0.4.25; a string: the vegaml reader to use ("4b", a Hub
-        # id, an attached local dir); an already built `laya.Agent(vegaml=...)`: used as is, and its
-        # fitted heads route the questions they were fitted for.
-        vega: Any = "auto",
-        # A state estimated past this many tokens goes to vega, because no encoder checkpoint can
-        # read it whole; 8,192 is `laya-multilingual` at `max_len=8192`, the most any encoder takes.
+        vega: Any = False,
         vega_over_tokens: int = 8192,
         multimodal: Any = None,
     ):
@@ -762,13 +498,8 @@ class Router(HookRegistry):
         self.hooks_timeout = None if hooks_timeout is None else validate_timeout(hooks_timeout)
         self._hooks_lock = threading.RLock() if not hooks_concurrent else None
         self._hooks_mutex = threading.Lock()
-        # The registry: built-in names first, then whatever the caller adds. A key that is a
-        # built-in name re-points that checkpoint (a fine-tune standing in for `english`); any
-        # other key registers a checkpoint of the caller's own, served beside the built-ins and
-        # named in `model=` like one of them.
-        self.models: Dict[str, Any] = dict(STANDALONE_MODELS if standalone_repos else DEFAULT_MODELS)
-        # Free text per registered checkpoint, reported by `registered`; a public mutable attribute
-        # like `sha256_digests`, filled by `register`.
+        source = default_checkpoint() if multimodal is None or isinstance(multimodal, bool) else multimodal
+        self.models: Dict[str, Any] = {MULTIMODAL_MODEL: os.fspath(source) if isinstance(source, (str, os.PathLike)) else None}
         self.descriptions: Dict[str, str] = {}
         for k, v in (models or {}).items():
             self._add(k, v)
@@ -795,7 +526,6 @@ class Router(HookRegistry):
         self.sha256_digests.update(argument)
         self.max_loaded = max(1, int(max_loaded))
         self.default = self.resolve(default)
-        self.auto_task_detection = bool(auto_task_detection)
         # An opt-in language hint installed for every request: a code, or a callable taking the
         # state and returning one (or None to abstain). Checked before the built-in detection,
         # never before an explicit `model`, `task` or `lang`. The default path is unchanged, so
@@ -821,7 +551,7 @@ class Router(HookRegistry):
         self.vega_over_tokens = int(vega_over_tokens)
         self._vega_spec: Any = None
         self._install_vega(vega)
-        self._multimodal_spec = multimodal if multimodal is not False else None
+        self._multimodal_spec = source if hasattr(source, "predict") else self.models[MULTIMODAL_MODEL]
         if self._multimodal_spec is not None and hasattr(multimodal, "predict"):
             self._agents[MULTIMODAL_MODEL] = multimodal
             self._order.append(MULTIMODAL_MODEL)
@@ -872,14 +602,12 @@ class Router(HookRegistry):
 
         The instance counterpart of :func:`normalise_name`. Everything on the Router that takes a
         checkpoint name goes through here, so a checkpoint registered under `papers` is accepted
-        wherever `english` is: `model=`, `task=`, `load`, `unload`, `preload`, `revisions`.
+        on every named route: `model=`, `task=`, `load`, `unload`, `preload`, `revisions`.
         """
         key = canonical_name(name)
         if key in self.models:
             return key
         if key == VEGA_MODEL and getattr(self, "_vega_spec", None) is not None:
-            return key
-        if key == MULTIMODAL_MODEL and getattr(self, "_multimodal_spec", None) is not None:
             return key
         raise ValueError("unknown model %r; choose one of %s (or an alias: %s)"
                          % (name, sorted(self.models) + ([VEGA_MODEL] if getattr(self, "_vega_spec", None) is not None else []),
@@ -888,11 +616,8 @@ class Router(HookRegistry):
     def register(self, name: str, source: Any, description: Optional[str] = None) -> str:
         """Add a checkpoint under `name`, to be served beside the built-in ones.
 
-        `source` is what `laya.load` accepts: a Hub repo id, a `(repo, subfolder)` pair, or a local
-        directory holding `model.safetensors` and `rl_agent_config.json` -- a fine-tune exported by
-        the training recipe, for instance. Nothing is downloaded or built here; the checkpoint loads
-        on first use like the built-ins, is evicted and unloaded like them, and counts toward
-        `max_loaded` like them.
+        `source` is a Hub repo ID or a local directory containing a native decision checkpoint.
+        The checkpoint loads on first use and counts toward `max_loaded`.
 
         `description` is free text about the checkpoint for whoever reads `registered`.
 
@@ -929,6 +654,8 @@ class Router(HookRegistry):
                         table[key] = old
                 raise
             replaced = before[0] is not missing and before[0] != self.models[key]
+            if key == MULTIMODAL_MODEL:
+                self._multimodal_spec = self.models[key]
         if replaced:
             freed = self._unload_key(key)       # outside the lock, waiting for a build of the old source
             if freed:
@@ -969,7 +696,7 @@ class Router(HookRegistry):
         with self._lock:
             return {
                 name: {
-                    "source": _repo_str(spec),
+                    "source": spec,
                     "description": self.descriptions.get(name),
                 }
                 # the vega lane is a model name (`model="vega"`, `load("vega")`) but not a checkpoint
@@ -990,25 +717,13 @@ class Router(HookRegistry):
             if key == VEGA_MODEL:
                 raise ValueError("invalid checkpoint name %r: it names the vega lane; pass Router(vega=...) "
                                  "to configure it" % (name,))
-            if key == MULTIMODAL_MODEL:
-                raise ValueError("invalid checkpoint name %r: use Router(multimodal=...) to configure this lane" % name)
-        if source is not None and not isinstance(source, (str, tuple, list)):
-            raise TypeError("checkpoint source for %r must be a repo id, a local path or a (repo, subfolder) "
-                            "pair, got %s" % (name, type(source).__name__))
-        # The sequence half of that sentence was never opened. `_split` pads with one `None`, so an
-        # empty pair unpacks to one value and `registered`, `route(model=...)` and `load()` all fail
-        # later with `ValueError: not enough values to unpack (expected 2, got 1)` -- after the
-        # registration reported success -- while a third element is silently truncated and a number
-        # part is stringified into a repo id like `acme/5`. Refuse the shape here, where the name is
-        # known, so nothing is stored and no later call has to guess what the pair meant.
-        if isinstance(source, (tuple, list)) and (
-                not 1 <= len(source) <= 2
-                or not all(part is None or isinstance(part, str) for part in source)
-                or not any(isinstance(part, str) for part in source)):
-            raise TypeError("checkpoint source for %r must be a repo id, a local path or a (repo, subfolder) "
-                            "pair of strings, got %r" % (name, source))
-        if isinstance(source, str) and source.startswith("~"):
-            source = os.path.expanduser(source)     # a local path, never a Hub repo id
+        if source is not None:
+            if not isinstance(source, (str, os.PathLike)):
+                raise TypeError("checkpoint source for %r must be a Hub repo id or local directory, got %s"
+                                % (name, type(source).__name__))
+            source = os.path.expanduser(os.fspath(source))
+            if not source.strip():
+                raise ValueError("checkpoint source for %r must not be empty" % name)
         # After every check that can refuse the registration, and before the write. A filter
         # that turns warnings into errors then raises with nothing stored, and `register`'s
         # rollback still runs because the warning is inside its try. Built-in names and their
@@ -1090,13 +805,10 @@ class Router(HookRegistry):
 
     def _build(self, key: str):
         """Construct the Agent for `key`: config is read under `_lock`, the build runs outside it."""
-        from .agent import Agent
-        if key == MULTIMODAL_MODEL and self._multimodal_spec is not None:
-            if hasattr(self._multimodal_spec, "predict"):
-                return self._multimodal_spec
-            from .multimodal import DEFAULT_MULTIMODAL_MODEL, MultimodalAgent
-            source = DEFAULT_MULTIMODAL_MODEL if self._multimodal_spec is True else self._multimodal_spec
-            return MultimodalAgent(source, device=self.device, token=self.token, revision=self.revision)
+        from .agent import load
+
+        if key == MULTIMODAL_MODEL and hasattr(self._multimodal_spec, "predict"):
+            return self._multimodal_spec
         if key == VEGA_MODEL and self._vega_spec is not None:
             if not isinstance(self._vega_spec, (bool, str)):
                 return self._vega_spec          # an attached agent, back after an eviction
@@ -1106,8 +818,8 @@ class Router(HookRegistry):
             if self.models.get(key) is None:
                 raise ValueError("checkpoint %r has no source to load from: it was attached as a built Agent "
                                  "and is no longer resident; attach it again, or register a path or repo" % key)
-            repo, sub = _split(self.models[key])
-            kwargs = {"device": self.device, "token": self.token, "subfolder": sub}
+            source = self.models[key]
+            kwargs = {"device": self.device, "token": self.token}
             # A None or blank entry in `revisions` is "no pin of its own", so the checkpoint
             # inherits `revision`. Reading it as a pin of nothing dropped the caller's `revision`
             # and handed that one checkpoint to `$LAYA_REVISION` instead, which is the opposite of
@@ -1123,7 +835,7 @@ class Router(HookRegistry):
                                                _digest_entry(self.sha256_digests, key))
             if expected is not None:
                 kwargs["expected_sha256"] = expected
-        return Agent(repo, **kwargs)
+        return load(source, **kwargs)
 
     def _touch(self, key: str):
         with self._lock:
@@ -1173,8 +885,7 @@ class Router(HookRegistry):
         """Register an already-built Agent under `name` instead of loading a second copy.
 
         Useful when the process has a checkpoint loaded for other reasons: a demo that already
-        built `convaiinnovations/laya` can hand it to the router rather than pay for -- and hold
-        in memory -- a duplicate 421M parameters.
+        loaded a decision checkpoint can attach the agent and share it with the router.
 
         A name the Router does not know yet is registered on the spot, with no source: the agent
         serves under that name while resident, and loading it again after an unload needs
@@ -1202,7 +913,7 @@ class Router(HookRegistry):
             # Every checkpoint that has a source to build from; an `attach`ed agent registered
             # without one is resident already and would raise here once evicted.
             with self._lock:
-                names = [n for n, source in self.models.items() if source is not None]
+                names = [self.default]
         names = [self.resolve(n) for n in names]
         with self._lock:
             self.max_loaded = max(self.max_loaded, len(set(names) | set(self._agents)))
@@ -1283,20 +994,7 @@ class Router(HookRegistry):
     def loaded_revisions(self) -> Dict[str, Optional[str]]:
         """Commit SHA each resident agent was loaded from (None for local paths)."""
         with self._lock:
-            return {name: getattr(agent, "revision", None) for name, agent in self._agents.items()}
-
-    def _resolve_hint(self, hint: Any, state: Union[str, dict, list, None]) -> Optional[bool]:
-        """True/False for a hint about whether the English checkpoint can read `state`.
-
-        `hint` is either a language code or a callable taking the state. Anything the hint
-        cannot answer returns None, which makes `route` fall through to detection rather than
-        picking a checkpoint on no evidence.
-        """
-        if hint is None:
-            return None
-        if callable(hint):
-            hint = hint(state)
-        return _english_from_code(hint)
+            return {name: getattr(agent, "checkpoint_revision", None) or getattr(agent, "revision", None) for name, agent in self._agents.items()}
 
     def _vega_repo(self) -> str:
         spec = self._vega_spec
@@ -1325,7 +1023,7 @@ class Router(HookRegistry):
         """Decide which checkpoint to use, then let `on_route` hooks observe or replace it.
 
         `media` is "image", "audio" or "video" when the caller is passing one of those instead of
-        a text state; see `predict`. `allow_vega=False` keeps the decision on the encoders.
+        a text state; see `predict`. `allow_vega=False` keeps the decision on the native checkpoint.
 
         `ctx.decision` is the `RouteDecision`; a hook may replace it (for example to pin a
         checkpoint) and the replacement is what gets returned and used. `hooks` are per-call
@@ -1360,129 +1058,26 @@ class Router(HookRegistry):
         media: Optional[str] = None,
         allow_vega: bool = True,
     ) -> RouteDecision:
-        """Decide which checkpoint to use, without loading or running anything.
+        """Choose an explicit checkpoint or the configured default."""
+        selected = model if model is not None else task
+        key, reason = self.default, "default native checkpoint"
+        if selected is not None:
+            key = self.resolve(selected)
+            reason = "%s=%r" % ("model" if model is not None else "task", selected)
+        elif allow_vega and self.vega_enabled and not media and not (
+            isinstance(state, dict) and any(state.get(kind) is not None for kind in ("image", "audio", "video"))
+        ):
+            if set(questions or {}) & self._vega_heads() or _estimate_tokens(state) > self.vega_over_tokens:
+                key, reason = VEGA_MODEL, "configured Vega reader"
+        repo = self._vega_repo() if key == VEGA_MODEL else self.models.get(key)
+        if repo is None and key in self._agents:
+            repo = getattr(self._agents[key], "model_id", None)
+        explain_language = explain and selected is None and media is None and not (
+            lang or lang_guess or getattr(self, "lang_guess", None)
+        )
+        detection = analyse(state, explain=True) if explain_language else None
+        return RouteDecision(model=key, repo=repo, reason=reason, detection=detection, workflow=None)
 
-        Precedence: explicit `model` > explicit `task` > the vega lane (an image, a recording or a
-        clip; a question with a fitted head; a state past `vega_over_tokens`) > detected workflow
-        (opt-in) > explicit `lang` > `lang_guess` > detected script/language > default.
-
-        `media` names the kind of non-text input the caller passed ("image", "audio" or "video");
-        `allow_vega=False` keeps a decision on the encoders, which is what `predict_batch` does,
-        because a batch shares one forward pass on one checkpoint.
-
-        `lang_guess` is an opt-in hint -- a language code or a callable taking the state --
-        checked after an explicit `lang` and before the built-in detection. It only answers
-        "can the English checkpoint read this?", so any non-English code routes to the
-        multilingual checkpoint. A hint that resolves to nothing falls through to detection,
-        which lets a language-identification model abstain. Pass one here, or set
-        `Router(lang_guess=...)` to apply it to every request.
-        """
-        # `.get`, not `[]`: a concurrent `unregister` can remove the name between `resolve` and this
-        # lookup, and the decision then reports no repo rather than raising.
-        if model is not None:
-            key = self.resolve(model)
-            return RouteDecision(model=key, repo=_repo_str(self.models.get(key)), reason="explicit model=%r" % model,
-                                 detection=None, workflow=None)
-
-        if task is not None:
-            key = self.resolve("typed-decisions" if str(task).lower().replace("-", "_") == "typed_decisions" else task)
-            return RouteDecision(model=key, repo=_repo_str(self.models.get(key)), reason="explicit task=%r" % task,
-                                 detection=None, workflow=None)
-
-        vega_on = allow_vega and self.vega_enabled
-        multimodal = getattr(self, "_multimodal_spec", None)
-        media_state = isinstance(state, dict) and any(state.get(k) is not None for k in ("image", "audio", "video"))
-        if multimodal is not None and (media is not None or media_state):
-            source = getattr(multimodal, "model_id", multimodal if isinstance(multimodal, str) else None)
-            return RouteDecision(model=MULTIMODAL_MODEL, repo=source,
-                                 reason="native multimodal decision backbone", detection=None, workflow=None)
-        if media is not None:
-            if not vega_on:
-                raise ValueError("an %s needs the vega lane, which this Router does not have: install "
-                                 "vegaml (pip install -U laya) and build the Router with vega='auto' or "
-                                 "vega=True, or pass media to laya.Agent(vegaml=True) directly" % media)
-            return RouteDecision(model=VEGA_MODEL, repo=self._vega_repo(),
-                                 reason="%s input: the encoders have no vision or speech path" % media,
-                                 detection=None, workflow=None)
-        if vega_on:
-            fitted = sorted(q for q in (questions or {}) if q in self._vega_heads())
-            if fitted:
-                return RouteDecision(model=VEGA_MODEL, repo=self._vega_repo(),
-                                     reason="vega has fitted heads for %s" % ", ".join(fitted),
-                                     detection=None, workflow=None)
-            n_tokens = _estimate_tokens(state)
-            if n_tokens > self.vega_over_tokens:
-                return RouteDecision(model=VEGA_MODEL, repo=self._vega_repo(),
-                                     reason="state is about %d tokens, past the %d the encoders can read; "
-                                            "vega reads it whole" % (n_tokens, self.vega_over_tokens),
-                                     detection=None, workflow=None)
-
-        workflow = match_typed_decisions_workflow(questions or {})
-        if workflow and self.auto_task_detection:
-            return RouteDecision(model="typed-decisions", repo=_repo_str(self.models["typed-decisions"]),
-                                 reason="question ids match the %r typed-decisions workflow" % workflow,
-                                 detection=None, workflow=workflow)
-
-        if lang is not None:
-            # An explicit `lang` is decisive only when the code names a language. Blank or
-            # whitespace resolves to no usable hint, so it falls through to lang_guess/detection
-            # exactly as an abstaining hint does; real English/non-English codes still route now.
-            resolved = _english_from_code(lang)
-            if resolved is not None:
-                key = "english" if resolved else "multilingual"
-                return RouteDecision(model=key, repo=_repo_str(self.models[key]), reason="explicit lang=%r" % lang,
-                                     detection=None, workflow=workflow)
-
-        # Caller-supplied hint, per-call first then the one installed on the Router. Only a hint
-        # that actually answers the question routes here; anything else falls through.
-        for source, hint in (("lang_guess", lang_guess), ("Router(lang_guess=...)", self.lang_guess)):
-            resolved = self._resolve_hint(hint, state)
-            if resolved is not None:
-                key = "english" if resolved else "multilingual"
-                return RouteDecision(
-                    model=key, repo=_repo_str(self.models[key]),
-                    reason="%s: the caller identified this as %s text" % (
-                        source, "English" if resolved else "non-English"),
-                    detection=None, workflow=workflow)
-
-        det = analyse(state, explain=True) if explain else analyse(state)
-        if det["script"] == "unknown":
-            key = self.default
-            reason = "no letters detected in state; using default (%s)" % key
-        elif det["script"] != "latin":
-            key = "multilingual"
-            reason = "non-Latin script (%s, %.0f%% of letters); the English checkpoint cannot read it" % (
-                det["script"], 100 * float(det["non_latin_fraction"]))
-        elif not det["is_english"]:
-            key = "multilingual"
-            if det.get("mixed_segment"):
-                reason = ("Latin script, mostly English, but a line or field reads as %r (%r); "
-                          "the English checkpoint cannot read it" % (det["language"], det["mixed_segment"][:60]))
-            elif det["language"]:
-                reason = "Latin script but language looks like %r, not English" % det["language"]
-            else:
-                # Unidentified Latin-script language: routed on the non-English letters alone,
-                # because no stopword list here covers it.
-                reason = ("Latin script, language not identified but %.0f%% non-English letters; "
-                          "not safe for the English checkpoint" % (100 * float(det["diacritic_rate"])))
-        elif det["language_undecided"]:
-            # Nothing identifies the language: too short, or only content words ("Quero cancelar",
-            # "Esqueci minha senha"). That is no evidence of English either, so it takes the same
-            # `default` as a state with no letters, which is `multilingual` since 0.4.0.
-            # #54 measured the cost of the old English default here: 128 of 200 German
-            # utterances reached this branch and lost 20 accuracy points against
-            # `model="multilingual"` on the same rows. A mostly-English deployment sets
-            # `Router(default="english")`.
-            key = self.default
-            reason = ("Latin script, language not identified and no non-English letters; "
-                      "using default (%s)" % key)
-        else:
-            key = "english"
-            reason = "English Latin text"
-        return RouteDecision(model=key, repo=_repo_str(self.models[key]), reason=reason,
-                             detection=det, workflow=workflow)
-
-    # ------------------------------------------------------------------ running
     def predict(
         self,
         state: Union[str, dict, list],
@@ -1580,20 +1175,16 @@ class Router(HookRegistry):
                             overrides["max_len"] = ctx.max_len
                         if ctx.head_max_len is not None:
                             overrides["head_max_len"] = ctx.head_max_len
-                        if decision["model"] in (VEGA_MODEL, MULTIMODAL_MODEL):
-                            # vega's predict takes laya's shape plus the media; `max_len` and
-                            # `head_max_len` are recorded there and not applied
-                            result = agent.predict(ctx.states[0], ctx.questions, lang=effective_lang,
-                                                   image=image, audio=audio, video=video, **overrides)
-                        else:
-                            try:
-                                result = agent.system_one(ctx.states[0], ctx.questions,
-                                                          lang=effective_lang, **overrides)
-                            except TypeError as e:
-                                if "unexpected keyword argument 'lang'" in str(e):
-                                    result = agent.system_one(ctx.states[0], ctx.questions, **overrides)
-                                else:
-                                    raise
+                        predict = getattr(agent, "predict", None) or agent.system_one
+                        if image is not None:
+                            overrides["image"] = image
+                        if audio is not None:
+                            overrides["audio"] = audio
+                        if video is not None:
+                            overrides["video"] = video
+                        if _takes_lang(predict):
+                            overrides["lang"] = effective_lang
+                        result = predict(ctx.states[0], ctx.questions, **overrides)
                 finally:
                     _SKIP_DEFAULTS.reset(skip)
                 if scan is not None:
@@ -1639,47 +1230,19 @@ class Router(HookRegistry):
                      hooks=None, on_predict_start=None, on_predict_end=None,
                      hooks_raise: Optional[bool] = None, hooks_timeout: Optional[float] = None,
                      ) -> Dict[str, Any]:
-        """Route, then scan every window of the state instead of only its first one.
+        """Route to a backend that supports long-input prediction.
 
-        `predict` scores a state from a single window: anything past `max_len` is cut off (the
-        first window, or for a conversation list the last) and never reaches the model. This
-        routes exactly as `predict` does -- the same `model`/`task`/`lang` hints, the same
-        router-level hooks, the same `routing` key and `usage` -- and scores the routed state with
-        that agent's `predict_long`, which splits it into overlapping windows and aggregates per
-        question. The aggregation rules are `laya.agent.Agent.predict_long`'s: `noul` takes the
-        strongest window, `choice`/`score` the most confident one.
+        Routing uses the same model, task and language hints as `predict`. The selected
+        backend determines how it processes a long input. Vega uses its own context limit.
+        For a native checkpoint, use `predict` with a supported prompt budget, or split the
+        input before prediction.
 
         Per-call hooks (`hooks`, `on_predict_start`, `on_predict_end`, `hooks_raise`,
         `hooks_timeout`) wrap the whole route+scan exactly as they wrap `predict`: the scan runs
         last, so a start hook that answers (`ctx.skip(...)`) or rewrites the state wins.
-        `max_len` / `head_max_len` are not accepted here -- a window is sized by `window` or the
-        checkpoint budget, and overriding the single-window truncation is what `predict_long` is for.
-
-        Args:
-            window: state tokens per window. Defaults to the routed checkpoint's budget
-                    (`max(64, max_len - head_max_len - 8)`; the 64 is a floor), capped at the room
-                    the questions leave for the state so no window is truncated again on the way
-                    in; a smaller window isolates a localized span.
-            stride: token step between windows; defaults to half the effective window (50%
-                    overlap). A stride past that window is a `ValueError`, since the tokens between
-                    windows would reach no model.
-            aggregate: "auto" (the per-type rules above) is the only mode.
-            batch_size: cap on windows per forward pass, to bound memory on very long states.
-
-        Returns:
-            The usual `predict` payload, with `usage["windows"]` counting the windows scored.
-
-        Raises:
-            TypeError: the routed agent has no `predict_long` -- one attached by hand, since both
-                    `Agent` and `ONNXAgent` implement it -- so there is nothing to scan with.
-                    Always raised, whatever `hooks_raise` is, and so is every other error the scan
-                    itself raises -- none are caught: the scan is this method's own work, not a
-                    caller's hook, so the hook error policy does not decide whether it may be
-                    skipped. It previously ran as a start hook, where `hooks_raise=False` swallowed
-                    this and returned one window scored by `system_one` -- a different question than
-                    the one asked. An agent whose `predict_long` has no `lang` parameter is scanned
-                    without one and warned about, not failed; that is a signature check, not a
-                    swallowed error.
+        The Router forwards `window`, `stride`, `aggregate` and `batch_size` to the backend.
+        A backend without `predict_long` raises `TypeError`. Backend errors propagate under
+        either hook error policy.
         """
         token = _SCAN.set(_ScanLong(window=window, stride=stride, aggregate=aggregate,
                                     batch_size=batch_size, lang=lang))
@@ -2053,11 +1616,8 @@ class Router(HookRegistry):
                         )
 
                     if sort_report is not None:
-                        # What this group actually did with the knob: the agent reorders only
-                        # when `batch_size` clears its own `1 < chunk < len(states)` gate
-                        # (agent.py:1519, onnx_agent.py:761) over this group's states. A group
-                        # whose agent predates the knob (#294) reports as unsorted, not as an
-                        # error -- the run answered, just at one state's width.
+                        # A backend can reorder states when it receives the sort flag and
+                        # splits this group into multiple batches of more than one state.
                         n = len(items)
                         reorders = bool("sort_by_length" in batch_kwargs and batch_size
                                         and batch_size > 1 and batch_size < n)

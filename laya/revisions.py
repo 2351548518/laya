@@ -1,21 +1,4 @@
-"""Supply-chain integrity for published checkpoints: opt-in pins and digest checks.
-
-Runtime loaders keep the Hub default revision unless the caller supplies one. This preserves
-compatibility with existing offline caches, including ``HF_HUB_OFFLINE=1`` deployments. The
-reviewed commit SHAs below are available for callers that opt in, and every loader accepts an
-optional SHA-256 map to verify artifact integrity before weights reach the runtime.
-
-Both halves are reachable the same way. `expected_sha256` falls back to
-``LAYA_SHA256_DIGESTS``, and `resolve_revision` falls back to ``LAYA_REVISION``: a commit, branch
-or tag applied to every checkpoint load, or the word ``reviewed`` to use `PINNED_REVISIONS` for
-whichever repository is being loaded. A `revision` argument still outranks the environment, and an
-unset or empty ``LAYA_REVISION`` leaves today's behaviour exactly as it was, so a container pins
-its checkpoints with one environment line and no code.
-
-The env fallback is for checkpoints, i.e. the loads in this module's callers (`Agent`,
-`ONNXAgent`). `common.build_model`'s training-time base-encoder load is deliberately excluded:
-that is a different repository, and it has no reviewed SHA here to resolve to.
-"""
+"""Revision selection and SHA-256 verification for native checkpoints."""
 import hashlib
 import json
 import ntpath
@@ -24,11 +7,23 @@ from typing import Dict, Optional
 
 # Opt-in reviewed commit SHAs of the published checkpoints. They are not applied
 # implicitly, so existing Hub/offline caches keep working; pass one explicitly to pin a load.
+DEFAULT_CHECKPOINT = "ZeeoRe/jev-multimodal-qwen3.5-4b"
 PINNED_REVISIONS: Dict[str, str] = {
-    "convaiinnovations/laya": "55cf4c4ebb4ebe31b2550e8bdf3bd21b99753851",
-    "convaiinnovations/laya-multilingual": "e4e9ddf21a7b1903b7acffd8814ad4307bf63a67",
-    "convaiinnovations/laya-typed-decisions": "1a793eb568e6718f15941d08f85432581df534e3",
+    DEFAULT_CHECKPOINT: "5ea706ae049932f34aa78cb26e119939eb145cc3",
 }
+
+
+def default_checkpoint() -> str:
+    """Resolve the configured source or the merged checkpoint from local setup."""
+    configured = os.environ.get("LAYA_MULTIMODAL_MODEL", "").strip()
+    if configured:
+        return configured
+    name = DEFAULT_CHECKPOINT.rsplit("/", 1)[-1]
+    for local in (os.path.join("models", name), os.path.join("models", "releases", name, "native")):
+        if os.path.isfile(os.path.join(local, "multimodal_config.json")):
+            return local
+    return DEFAULT_CHECKPOINT
+
 
 #: Opt-in `LAYA_REVISION` value meaning "the reviewed SHA of the repository being loaded".
 #: The alternative is a commit/branch/tag, which is applied to every checkpoint load instead.
@@ -38,8 +33,8 @@ REVIEWED = "reviewed"
 def _reviewed_pin(model_id_or_path: str) -> Optional[str]:
     """The reviewed SHA for `model_id_or_path`, matching repo ids case-insensitively.
 
-    Hugging Face repo ids are case-insensitive -- ``ConvaiInnovations/Laya`` resolves to the
-    same repository as ``convaiinnovations/laya`` -- so a load that spells a released
+    Hugging Face repo ids are case-insensitive -- ``ZeeoRe/jev-multimodal-qwen3.5-4b`` can be
+    looked up case-insensitively -- so a load that spells a released
     checkpoint differently must still find its pin. Refusing it instead would report a
     missing reviewed SHA for a repository that has one, which is the opposite of what the
     control exists for. The table's keys keep the canonical lowercase spelling.
@@ -65,7 +60,7 @@ def resolve_revision(model_id_or_path: str, revision: Optional[str] = None) -> O
     variable applies. The variable holds either a commit SHA/branch/tag, applied to
     every checkpoint load the way `Router(revision=)` applies one, or the word ``reviewed``, which
     looks `model_id_or_path` up in `PINNED_REVISIONS` -- case-insensitively, the way the Hub
-    itself reads repo ids, so `laya.load("ConvaiInnovations/Laya")` finds its pin.
+    itself reads repo ids, so `laya.load("ZeeoRe/jev-multimodal-qwen3.5-4b")` finds its pin.
 
     ``reviewed`` for a repository the table has no entry for raises rather than loading it
     unpinned: a pin that quietly resolves to nothing is the failure mode this control exists to
@@ -109,7 +104,6 @@ def snapshot_revision(path: str) -> Optional[str]:
 def verify_digests(
     model_dir: str,
     expected: Optional[Dict[str, str]] = None,
-    onnx_path: Optional[str] = None,
 ) -> None:
     """Verify SHA-256 digests of files under `model_dir` against {relpath: hexdigest}.
 
@@ -136,22 +130,19 @@ def verify_digests(
         raise ValueError("expected_sha256 must be a mapping of artifact paths to digests")
     for rel, want in expected.items():
         raw_rel = str(rel).replace("\\", "/")
-        if rel in ("onnx", "onnx_path") and onnx_path:
-            path = onnx_path
-        else:
-            if raw_rel.startswith("/") or os.path.isabs(raw_rel) or ntpath.isabs(raw_rel):
-                raise ValueError("laya: unsafe absolute path in expected digests: %r" % (rel,))
-            rel_norm = raw_rel.lstrip("/")
-            if not rel_norm or rel_norm == ".." or rel_norm.startswith("../") or "/../" in rel_norm:
-                raise ValueError("laya: unsafe path in expected digests: %r" % (rel,))
-            # Drive-anchored components are not absolute by ntpath's own test
-            # (ntpath.isabs("C:evil") is False), but on Windows ntpath.join resets to
-            # the drive the moment one appears -- os.path.join("C:\\dir", "a", "b:c")
-            # is "b:c" -- so a digest entry like "a/b:c" escapes model_dir and the
-            # verification reads a file outside the checkpoint it is meant to gate.
-            if any(ntpath.splitdrive(part)[0] for part in rel_norm.split("/")):
-                raise ValueError("laya: unsafe drive-anchored path in expected digests: %r" % (rel,))
-            path = os.path.join(model_dir, rel_norm)
+        if raw_rel.startswith("/") or os.path.isabs(raw_rel) or ntpath.isabs(raw_rel):
+            raise ValueError("laya: unsafe absolute path in expected digests: %r" % (rel,))
+        rel_norm = raw_rel.lstrip("/")
+        if not rel_norm or rel_norm == ".." or rel_norm.startswith("../") or "/../" in rel_norm:
+            raise ValueError("laya: unsafe path in expected digests: %r" % (rel,))
+        # Drive-anchored components are not absolute by ntpath's own test
+        # (ntpath.isabs("C:evil") is False), but on Windows ntpath.join resets to
+        # the drive the moment one appears -- os.path.join("C:\\dir", "a", "b:c")
+        # is "b:c" -- so a digest entry like "a/b:c" escapes model_dir and the
+        # verification reads a file outside the checkpoint it is meant to gate.
+        if any(ntpath.splitdrive(part)[0] for part in rel_norm.split("/")):
+            raise ValueError("laya: unsafe drive-anchored path in expected digests: %r" % (rel,))
+        path = os.path.join(model_dir, rel_norm)
         if not os.path.isfile(path):
             raise FileNotFoundError(
                 "laya: cannot verify %r: no such file under %s" % (rel, model_dir))

@@ -1,36 +1,34 @@
 # LangChain & LangGraph Integration
 
-Laya provides fast, non-autoregressive decision components for **LangChain** and **LangGraph** (single-question latency measured at **32.8 ms** with `laya-multilingual` and **39.5 ms** with `laya` on a Tesla T4 GPU; 193–464 ms on CPU):
+Use native typed decisions in LangChain and LangGraph to route, score and screen inputs.
 
 * **`LayaRouter`**: Conditional edge and branch router with confidence fallback gating or a native `auto`/`review` policy.
-* **`LayaGuardrail`**: Sub-40ms inline screening for prompt injections, jailbreaks, and sensitive data.
-* **`LayaTriage`**: Support ticket triage node evaluating intent, urgency, frustration, and churn risk in one forward pass.
+* **`LayaGuardrail`**: Inline screening for prompt injections, jailbreaks, and sensitive data.
+* **`LayaTriage`**: Support ticket triage node evaluating intent, urgency, frustration, and churn risk in one request.
 * **`LayaEvaluator`**: Rubric-based output grading and hallucination evaluation.
 * **`LayaDecision`**: Schema-driven decisions -- a JSON schema or pydantic model in, schema-shaped values out.
 
-Every node also takes core's per-call decision controls -- the two token budgets (`max_len`, `head_max_len`), the language and abstention controls (`lang`, `min_confidence`), and the five prediction-hook arguments (`hooks`, `on_predict_start`, `on_predict_end`, `hooks_raise`, `hooks_timeout`).
+Every node also takes core's per-call decision controls -- the native token budget (`max_len`), the language and abstention controls (`lang`, `min_confidence`), and the five prediction-hook arguments (`hooks`, `on_predict_start`, `on_predict_end`, `hooks_raise`, `hooks_timeout`).
 
-For high-cardinality choice questions, see the [many-option guidance](benchmarks.md#limits-to-check-on-your-own-data)
-and [runtime-parity check](benchmarks.md#check-runtime-parity-before-comparing-accuracy) before
+For high-cardinality choice questions, see the [many-option guidance](benchmarks.md)
+and [runtime-parity check](benchmarks.md) before
 comparing checkpoint results across backends.
 
-Supports both **local in-process inference** (`Agent` or `Router`) and **remote HTTP inference** against your own `laya-serve` without requiring PyTorch on edge clients.
+Supports both **local in-process inference** (`Agent` or `Router`) and **remote HTTP inference** against your own `laya-serve` with weights hosted by the service.
 
 ---
 
 ## Installation
 
 ```bash
-pip install "laya[langchain]"   # Installs both langchain-core and langgraph
-# or
-pip install "laya[langgraph]"
+python -m pip install -e '.[multimodal,langchain]'
 ```
 
 ---
 
 ## 1. LangGraph Conditional Edge Routing
 
-In LangGraph, conditional edges determine which node executes next. Autoregressive LLMs take 500–2,000 ms to make this decision. `LayaRouter` runs in **~33 ms** (measured at 32.8 ms on `laya-multilingual` / 39.5 ms on `laya` English on a Tesla T4 GPU):
+Use `LayaRouter` as the conditional edge that selects the next node from the registered branches.
 
 ```python
 from typing import TypedDict
@@ -82,11 +80,8 @@ print(result["response"])
 
 `confidence_threshold` reads `answer_confidence`, the `max(p)` confidence the calibration figures
 are computed on, when the answer carries it, and falls back to the entropy `confidence` otherwise.
-It is not calibrated as shipped: `laya-multilingual` ships `temperature: [1.0, 1.0, 1.0]` and no
-`temperature_by_options` at all, and the english checkpoint's `choice:11+` entry is refused by the
-loader's own clamp with a warning that says to treat it as uncalibrated. Fit and validate the
-threshold on held-out data at the option counts your workload uses -- see the README's
-[Calibration](https://github.com/NandhaKishorM/laya#calibration) section.
+Fit and validate thresholds on held-out data from the checkpoint and question types you deploy.
+[Native calibration](multimodal.md#calibration-and-evaluation)
 
 ### Following the backend's native review policy
 
@@ -307,179 +302,54 @@ result.values["department"]       # "technical"
 result.confidence["department"]   # 0.203 -- a low-confidence pick on an ambiguous request
 ```
 
-(The outputs above are from the `laya` checkpoint on Apple silicon; a checkpoint can answer
-differently for your own wording and descriptions.)
-
 **The schema is validated when you build the node.** A property Laya cannot answer from a fixed
 option set -- a free string, an array, a nested object -- raises `SchemaError` from the
 constructor, not on the first request after the chain has paid for every earlier step.
 
-**It costs the same as writing the questions yourself.** The node adds only the schema plan and
-the projection back, and measured against a hand-built question set on the same checkpoint
-(`convaiinnovations/laya`, 6 support tickets, median of 3 runs of 6 `invoke()` calls) the two are
-within noise of each other and agree on every field:
-
-| Device | Hand-written questions | `LayaDecision` | Overhead | Decision mismatches |
-|---|---|---|---|---|
-| Apple M-series GPU (MPS) | 71.2 ms/state | 69.7 ms/state | -2.0% | 0 of 18 fields |
-| CPU | 142.1 ms/state | 143.7 ms/state | +1.1% | 0 of 18 fields |
-
-The plan itself is 0.003 ms per call -- roughly 0.004% of one decision on MPS. Repeat MPS runs
-landed between -3.9% and +2.1%, so treat the overhead as unmeasurable rather than a speedup.
-
-`invoke()` answers one state, so `batch()` runs LangChain's default per-input loop. On Apple
-silicon that loop can overlap forwards on a thread pool, and concurrent MPS forwards abort the
-process; pass `max_concurrency=1` there, or call `invoke()` in a loop.
-
 ### The per-call controls
 
-The node plans the questions itself, but the call it makes is an ordinary one, so it takes the
-same nine per-call arguments as the other four nodes -- the two token budgets, the five prediction
-hooks, and the two routing hints of [section 9](#9-which-checkpoint-answers):
+Pass the native token budget and hooks to a local decision node.
 
 ```python
 decide = LayaDecision(
     Ticket,
-    max_len=8192,        # the document is longer than the checkpoint's state window
-    head_max_len=512,    # the enum has more members than the default option budget fits
-    hooks=[Memo()],      # the cache pair from section 8, on a schema decision
+    max_len=8192,
+    hooks=[Memo()],
     hooks_timeout=0.25,
 )
 ```
 
-`head_max_len` is the one worth knowing here, because a schema writes the option list for you:
-an enum with many members is a wide option prompt, and the trimming an over-wide prompt gets is
-silent -- several members can reach the model as the same text, which is a wrong answer rather
-than an error. See [Widening the Token Budget](#7-widening-the-token-budget-for-many-options) for
-the measured collapse and the recovery.
-
-Leave an argument out and it is not sent at all, so the decision keeps whatever the runner was
-built with. `head_max_len=0` and `hooks=[]` are decisions rather than absences and are forwarded
-as given.
-
-**Remote mode forwards the budgets and refuses the hooks.** A `LayaDecision` with a `base_url`
-puts `max_len` / `head_max_len` in the request body like its siblings, under the same
-`LAYA_MAX_TOKEN_BUDGET` ceiling. A hook is a Python callable and cannot cross HTTP, so passing one
-to a remote node raises at the call site instead of quietly deciding without the cache or the
-audit line.
-
----
+Use the server's configured token ceiling for a remote node. Python hooks run in the
+process that owns the model.
 
 ## 6. Batching Many Inputs
 
-Every Laya runnable implements `batch()` on Laya's shared forward passes, so a backlog costs one
-batched call instead of one pass per input. LangChain calls this for you from `chain.batch(...)`,
-`RunnableParallel`, and LangGraph map-reduce; you can also call it directly:
+Use `batch()` to return one decision for each input in order.
 
 ```python
 routes = router.batch(["refund my invoice", "the app crashes", "change my password"])
-# ["billing", "technical", "account"] -- one call, outputs in input order
-
-graded = asyncio.run(evaluator.abatch(predictions))   # the async entry point, same batch
 ```
 
-The outputs are the same as calling `invoke` on each input in turn, including the selected routing
-policy on `LayaRouter` and the `action` (`raise` / `filter` / `annotate`) on `LayaGuardrail`. Two
-differences are worth knowing:
-
-- With `action="raise"`, the first violating input raises, so the batch stops there. Pass
-  `return_exceptions=True` to get one outcome per input, exceptions included.
-- `batch()` shares one forward pass, so a failure fails the batch; that is also why
-  `return_exceptions=True` falls back to the per-input loop.
-
-Remote mode (`base_url`) keeps the per-request loop, because `laya-serve` answers one decision per
-`POST`. A runner you supply yourself only needs `predict_batch` to take the fast path; without it
-the runnable behaves like any other `Runnable`.
-
-This matters most on MPS: LangChain's default `batch` runs `invoke` concurrently on a thread pool,
-and concurrent PyTorch MPS forwards abort the process
-(`failed assertion _status < MTLCommandBufferStatusCommitted`). One batched call has no such race.
-Measured on an Apple M-series GPU with a 4-way routing question, medians of three runs. 16 English
-tickets through an `Agent`: 1320 ms invoking one by one vs **598 ms** batched (**2.2x**); 24 mixed
-English/German tickets through a `Router`: 1805 ms vs **814 ms** (**2.2x**); 16 tickets through the
-guard `LayaGuardrail`: 4173 ms vs **2329 ms** (**1.8x**). Route labels and guardrail flags were
-identical to the one-by-one loop in every run (0/16 and 0/24 changes). On CPU the same workloads are
-2.2x to 2.4x over the one-by-one loop, but only 1.1x to 1.5x over the thread pool, which already
-overlaps cores -- the MPS case is where `batch()` was not just slower but unusable.
-
----
+The native agent processes separate states with individual prompt budgets. A remote
+node with batch support sends the shared questions and states in one HTTP request.
+[Batch requests](http-api.md#batch-and-media-requests)
 
 ## 7. Widening the Token Budget for Many Options
 
-Every runnable takes `max_len` and `head_max_len`, the two per-request knobs the core API accepts.
-A choice question's options share the checkpoint's *option* budget -- `head_max_len`, 192 tokens on
-`laya` and 256 on `laya-multilingual` -- and each option carries its own description, so past
-roughly 20 options every label is trimmed to fit and similar labels start reaching the model as the
-same text. See the README's [Honest limits](https://github.com/NandhaKishorM/laya#honest-limits)
-for the same effect measured on Banking77.
-
-Two situations call for it. A routing node with many branches overflows the *option* budget, and
-a long document overflows the *state* budget -- the README's own long-document guidance is literally
-`router.predict(long_document, questions, model="multilingual", max_len=8192)`, which until now was
-unspeakable from a chain step. Both go through the same two arguments:
+`max_len` includes the state, instructions and all option text. Shorten those inputs
+when the prepared prompt exceeds the budget. Use the server's allowed token ceiling
+in remote mode.
 
 ```python
 router = LayaRouter(
-    criteria=queue_criteria,          # 48 queues, each with a description
+    criteria=queue_criteria,
     instructions="Which support queue owns this ticket?",
-    max_len=1024,                     # total window
-    head_max_len=512,                 # tokens shared by the option prompt
+    max_len=4096,
 )
 ```
 
-Measured on `laya` (Apple silicon, one forward pass per state, scored on the chosen label) with
-queue labels a state names explicitly, so ground truth is exact. Each cell is the count over the
-full set, and all three repeats of every row gave the identical count:
-
-| Options | Default budget | `max_len=1024, head_max_len=512` |
-|---|---|---|
-| 24 | 24/24 | 20/24 |
-| 48 | 1/48 | 43/48 |
-| 72 | 1/72 | 63/72 |
-
-Both directions of that table matter. Past about 40 options the default budget collapses the
-decision, and widening it recovers most of it. Below that, widening it costs a few: at 24 options
-the labels already fit the default budget and four answers move. The docs do not claim to know why
-the wider collation changes those four -- it is enough that it can. That is why the two arguments
-are opt-in per node: set the knob to fix a question that does not fit, not to sharpen one that does.
-
-The same override applies to `LayaGuardrail`, `LayaTriage`, `LayaEvaluator` and `LayaDecision`.
-It is per node, so a chain can give its wide routing step room while every other node keeps the
-checkpoint's defaults, which is the point of not raising `agent.cfg["head_max_len"]` process-wide.
-
-**Remote mode forwards it.** A node with a `base_url` sends `max_len` / `head_max_len` in the
-request body, and `laya-serve` applies them up to its `LAYA_MAX_TOKEN_BUDGET` ceiling (8192 by
-default); a larger value comes back as a 422.
-
-### Language and abstention
-
-Every runnable also takes `lang` and `min_confidence`, the two per-request controls `Agent.predict`
-and `Router.predict` both read and `laya-serve` both accepts in the body. `lang` pins the language
-the state is routed and answered in -- select the answering checkpoint's per-language calibration
-rather than relying on built-in detection -- and `min_confidence` is core's abstention gate, which
-marks rather than withholds: an answer under it comes back carrying `low_confidence: true`,
-`abstention: "abstained"` and `abstention_threshold` on the raw decision kept in `last_decision`,
-while the default `decision_policy="confidence"` still returns the argmax. In that mode the
-label is changed by `confidence_threshold` and its `fallback`, not by the gate; a
-`min_confidence` on its own reports the abstention and routes anyway. With
-`decision_policy="native"`, the backend's final `route` determines whether the adapter returns
-the business choice or its review fallback, as described above. Both controls are forwarded on the
-local and the remote path, and an unset one is omitted rather than sent as `None` so it cannot
-shadow a checkpoint's own default. `min_confidence=0.0` and `lang=""` are real values, not absences,
-and are forwarded as given.
-
-```python
-router = LayaRouter(
-    criteria={"billing": "invoices", "tech": "bugs"},
-    lang="es",                        # route and answer in Spanish
-    min_confidence=0.3,               # report an abstention below 0.3; the branch is still chosen
-)
-```
-
-Unlike `task` and `lang_guess` -- Router-only routing keywords a direct `Agent.predict` rejects --
-these two are safe on every runner and every deployment.
-
----
+Evaluate a shortlist or tournament on your labelled task when its option set is large.
+[Tournament evaluation](evals.md)
 
 ## 8. Prediction Hooks on a Single Node
 
@@ -541,89 +411,13 @@ Install hooks on the process that runs inference.
 
 ## 9. Which Checkpoint Answers
 
-`Router.route` decides between the three checkpoints on this precedence -- explicit `model` >
-explicit `task` > detected workflow > explicit `lang` > `lang_guess` > detected script/language --
-and until now a chain step could state only `model` of those six. The two that were missing are the
-two that do not name a repository:
-
-- **`task`** forces a checkpoint by workflow name, so `task="typed-decisions"` answers on the
-  typed-decisions checkpoint without waiting for auto task detection to recognise the question ids.
-  An unknown name raises `ValueError` from core and lists what it does know.
-- **`lang_guess`** is a language code from something that already knows the answer -- a user id, a
-  locale header, an `Accept-Language` value. It is consulted after an explicit `lang` and before
-  detection, and it only answers "can the English checkpoint read this?", so any non-English code
-  routes to the multilingual one. It may also be a callable taking the state, and a blank one falls
-  through to detection, which is how an abstaining language identifier is supposed to behave.
+Native routing selects the configured default checkpoint. Supply `model` or `task` to
+pin one registered name. A `Router` exposes the same registry to LangChain.
 
 ```python
-router = LayaRouter(
-    criteria=queue_criteria,
-    task="typed-decisions",           # this workflow, on that checkpoint, always
-    lang_guess=lambda state: state["locale"][:2],
-)
+router = LayaRouter(criteria=queue_criteria, model="multimodal", lang="de")
 ```
 
-Both are per node, like the budgets, and unset means unsent: leave one out and the deployment's own
-`Router(task=...)` / `Router(lang_guess=...)` stays in charge rather than being overwritten with
-`None`. `batch()` sends them with every request in the batch, `abatch()` on the same path.
-
-**What the hint moves, measured.** Sixteen German support queries through `Router.route` on
-`6880462` (0.4.2) -- routing only, so no checkpoint is loaded and no answer is taken -- counted by
-which checkpoint the decision lands on:
-
-| German queries | no hint | `lang_guess="de"` |
-|---|---|---|
-| 8 written without umlauts or `ß` | 1 read as English | 0 read as English |
-| 8 carrying umlauts or `ß` | 0 read as English | 0 read as English |
-
-The one miss is `Was kostet die MwSt?`, which detection reads as `"English Latin text"`: an
-abbreviation-heavy short query with no diacritics and no stopword signal. Diacritics settle it on
-their own, so the eight `umlauts or ß` queries all leave `english` without any help from the hint.
-Plain German prose that detection cannot place does not reach the English checkpoint either any
-more -- an undecided Latin script now abstains to the multilingual one (`"Latin script, language
-not identified and no non-English letters; using default (multilingual)"`, asserted in
-`tests/test_router.py`), so the residual gap the hint closes is the false-English read, not the
-undecided one. A caller that knows the language from a user id or an `Accept-Language` header still
-knows better than any guess, which is the argument for the hint. What is *not* claimed here is what
-the two checkpoints then score on those queries -- that needs weights and a labelled set, and this
-table is about which one answers, not how well.
-
-`tests/test_langchain.py` re-runs these sixteen queries against the live router and asserts the
-hint half of the table, so the numbers above cannot quietly go stale behind this paragraph.
-
-**A recorded `before`.** On `6d942c9`, in real (installed `langchain-core`) mode, a node built with
-both hints and a budget, answering through a runner that prints what `predict` received:
-
-```
-node.task           'typed_decisions'        # extra="allow" stores it
-model_extra         {'task': 'typed_decisions', 'lang_guess': 'de'}
-predict() received  {'max_len': 8192}        # and the call sees neither hint
-```
-
-The node *looked* configured -- `router.task` read back what it was given -- and the decision above
-was still taken on the deployment's defaults. The forwarding itself is what the gate asserts, in
-`tests/test_langchain.py`, `tests/test_crewai.py` and `tests/test_llamaindex.py`: no latency claim is
-made for it, because a routing hint changes which weights answer, not how long the pass takes.
-
-**Remote mode sends them; one shape it cannot.** A node with a `base_url` puts both in the request
-body, where `laya-serve` treats them exactly as documented in the [HTTP
-API](http-api.md). The callable form of `lang_guess` does not cross HTTP, so a remote node called
-with one raises `ValueError` before the request goes out rather than coming back as serve's `422`
-after it; install the callable on the `Router` where serve runs, or pass a code.
-
-**`agent=` decides the rule.** A node handed `agent=Agent(...)` is answered by an `Agent`, and an
-`Agent` has no routing step to read a routing hint in -- `Agent.predict` takes neither name. The node
-still stores the hint, since declaring `extra = "allow"` is what lets a subclass add fields; what
-changes is that the first call raises instead of answering on the checkpoint the `Agent` was built
-with, and it raises before `predict` is reached, so no hook runs on a decision that cannot honour the
-hint:
-
-```
-ValueError: task is a routing hint, and Agent.predict does not read it: this runner answers on
-the checkpoint it was built with. Pass a Router as `agent=`, or drop it.
-```
-
-The rule is read from the signature of the call about to be made, not from a list of classes, so a
-runner that declares `**kwargs` is forwarded to rather than refused -- the wrapper cannot tell what
-it reads, and refusing on a guess would block a call that works. `laya.integrations.crewai` and
-`laya.integrations.llamaindex` import the same rule from `laya.integrations._controls`.
+Use `lang` and `lang_guess` to supply language metadata and diagnostics to a compatible
+backend. Remote calls send a string language hint. A direct `Agent` uses the checkpoint
+loaded when it was built. [Checkpoint selection](routing.md)

@@ -4,8 +4,9 @@ This script uses a checkpoint already on disk, sets `HF_HUB_OFFLINE=1`, and runs
 inference. It needs the `serve` and `mcp` extras on an Apple Silicon Mac. Memory is in MiB;
 process RSS comes from `ps`, Metal values from torch. Run every mode in a fresh process.
 
-Set `CHECKPOINT` to a local English checkpoint containing `model.safetensors`, `encoder/`, and
-`tokenizer/`. The default idle window in these measurements is two seconds so the check is quick.
+Set `CHECKPOINT` to a [merged native checkpoint](../../../README.md#quickstart) directory with
+`multimodal_config.json`, model weights, decision heads, and `processor/`. The default idle window
+is two seconds.
 
 ```bash
 python research/benchmarks/idle_unload/benchmark.py --checkpoint "$CHECKPOINT" --mode idle-off

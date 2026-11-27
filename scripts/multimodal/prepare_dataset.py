@@ -12,11 +12,10 @@ import sys
 from tempfile import TemporaryDirectory
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from laya.grounding_train import _validate_grounding_row
 from laya.multimodal import MultimodalAgent
 from laya.multimodal_data import BOX_EDGES, MEDIA_CONTROLS, MEDIA_FIELDS, can_shuffle_choice, normalize_record
-from laya.multimodal_train import _decision_target
 from laya.systemone import MAX_CHOICE_OPTIONS, MAX_SCORE_LEVELS
+from laya.train import _validate_grounding_row, decision_target
 
 try:
     from orjson import dumps as encode_json, loads
@@ -88,7 +87,7 @@ def _supervision(record, row, questions):
                     or any(isinstance(v, bool) or not math.isfinite(v) or v < 0 for v in probabilities.values())
                     or not sum(probabilities.values())):
                 raise ValueError("invalid gold probability vector for " + qid)
-        target = _decision_target(row, qid, MultimodalAgent._to_internal(question))
+        target = decision_target(row, qid, MultimodalAgent._to_internal(question))
         if max(target) == 1.:
             label = _hard_label(question, target)
             if qid not in expected or raw is None or expected[qid] == label:

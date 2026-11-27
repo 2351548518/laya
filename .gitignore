@@ -36,12 +36,12 @@ node_modules/
 .DS_Store
 .idea/
 
-# local setup artifacts from setup_laya.sh: ~2.3 GB of checkpoint weights and the download caches
+# Local setup artifacts and download caches
 models/
 .hf-cache/
 .pip-cache/
 
-# outputs written by the research/scripts harnesses; curated runs live in research/results/
+# Local benchmark outputs
 research/*_benchmark_results.json
 
 # output of a local notebook run (Kaggle uses /kaggle/working)
@@ -54,7 +54,7 @@ session-*.md
 *-session.md
 .claude-session*
 
-# laya-ts: exported weights (regenerate via laya-ts/scripts/export_onnx.py)
+# Local model exports
 model-*/
 *.onnx
 *.onnx.data

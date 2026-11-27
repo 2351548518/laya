@@ -5,7 +5,7 @@ import re
 import pytest
 import torch
 
-from laya.grounding_train import GroundingTrainConfig
+from laya.train import GroundingTrainConfig
 from laya.multimodal_objectives import lora_target_pattern, optimizer_groups
 
 
@@ -103,7 +103,7 @@ def test_length_bucketing_preserves_global_loss_and_gradients():
     from laya.agent import Agent
     from laya.multimodal import MultimodalAgent
     from laya.multimodal_readout import CandidateScorer
-    from laya.grounding_train import _decision_microbatches, _decision_batch_loss
+    from laya.train import _decision_microbatches, _decision_batch_loss
     torch.manual_seed(107); torch.set_num_threads(1)
     agent=MultimodalAgent.__new__(MultimodalAgent)
     agent.model=Qwen3_5ForConditionalGeneration(tiny_qwen_config()).eval()
@@ -155,7 +155,7 @@ def test_joint_optimizer_applies_head_and_projector_rates_without_duplicates():
 
 
 def test_indexed_training_preserves_unicode_labels_random_access_and_validation(tmp_path):
-    from laya.grounding_train import _IndexedGroundingRows, load_grounding_rows
+    from laya.train import _IndexedGroundingRows, load_grounding_rows
     path = tmp_path / 'train.jsonl'
     rows = [{'id': str(i), 'group': str(i), 'state': '决策\u2028测试' + str(i),
         'questions': {'q': {'type': 'noul', 'instructions': '可以继续吗？'}}, 'expected': {'q': i % 2}}

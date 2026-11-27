@@ -15,7 +15,7 @@ from laya.multimodal import MultimodalAgent
 from laya.multimodal_data import normalize_record, record_modality
 from laya.multimodal_objectives import decision_loss
 from laya.multimodal_readout import CandidateScorer
-from laya.multimodal_train import _decision_target
+from laya.train import decision_target
 
 
 def check_examples(directory):
@@ -40,7 +40,7 @@ def check_examples(directory):
                     assert row["grounding"]["task"] == "single"
                     assert len(validate_boxes(row["grounding"]["boxes"])) == 1
                 else:
-                    target = _decision_target(row, qid, MultimodalAgent._to_internal(question))
+                    target = decision_target(row, qid, MultimodalAgent._to_internal(question))
                     assert math.isclose(sum(target), 1.0, abs_tol=1e-6)
             counts[section] = len(entries)
     return counts

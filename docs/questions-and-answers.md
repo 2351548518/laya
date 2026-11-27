@@ -6,7 +6,7 @@ back. There are three, and one state can carry all of them in a single forward p
 ```python
 import laya
 
-agent = laya.load("convaiinnovations/laya")
+agent = laya.load()
 
 questions = {
     "dept": {"type": "choice", "instructions": "Which team should handle this?",
@@ -80,13 +80,8 @@ exactly the keys `false` and `true`, and the polarity is unchanged: `noul` is st
  "labels": {"false": "automatic", "true": "escalate"}}
 ```
 
-Labels move the answer, in both directions. `noul` follows its own option labels, most strongly
-on the English checkpoint, so a label pair that reads as a decision ("approve" / "reject") can
-pull the answer toward the label rather than the state. That same pull is the one workaround for
-the wordings in [#1244](https://github.com/NandhaKishorM/laya/issues/1244) that answer without
-reading the state at all: naming the two options restores the question, where rewording it does
-not reliably. So labels are worth reaching for when an answer ignores the state, and worth
-suspecting when an answer tracks the label. Validate any relabelling on your own data either way.
+Option wording is part of the model input. Validate important label changes on held-out
+examples. The yes option always supplies the returned `noul` probability.
 
 ### `score` — an ordered level
 
@@ -140,8 +135,7 @@ below the model's own accuracy ([#394](https://github.com/NandhaKishorM/laya/iss
 
 ```python
 # THRESHOLD is a number you measured on your own held-out data, not one the model ships.
-# Fit and validate the temperatures first — the fine-tuning notebook has the loop:
-#   notebooks/laya_finetune_typed_decisions_2xT4_kaggle.ipynb
+# Fit and validate the temperatures on held-out data first.
 ans = result["answers"]["dept"]
 if ans["answer_confidence"] >= THRESHOLD:
     ...

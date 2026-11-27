@@ -1,30 +1,10 @@
 # Architectural Patterns and Production Use Cases
 
-Laya is an on-device, non-autoregressive decision engine built on a single-forward-pass transformer
-architecture (`ModernBERT-large` and `mmBERT-base`). Instead of generating tokens sequentially like an
-LLM (which incurs variable token generation costs, decode loop overhead, and unpredictable output schemas),
-Laya computes calibrated probability distributions across discrete questions in one pass.
-
-This document serves as an architectural blueprint for system architects and backend engineers
-integrating Laya into production environments.
-
----
-
-## Decision Engine vs. LLM vs. Embedding Retrieval
-
-Choosing the right primitive depends on latency constraints, hosting topology, and whether the task
-requires free-form generation or discrete classification:
-
-| Dimension | Embedding Retrieval | Laya Decision Engine | Autoregressive LLM |
-|---|---|---|---|
-| **Computation Model** | Vector cosine distance | Single forward pass (non-autoregressive masked head) | Sequential token-by-token generation |
-| **Execution Profile** | Nearest-neighbor index lookup | Single fixed forward pass (no decoding loop) | Iterative decoding loop scaling with output length |
-| **Hosting & Topology** | In-process or vector database | In-process (local CPU/GPU) or self-hosted HTTP daemon | Remote hosted API or large-model GPU serving |
-| **Context Attention** | Pooled vector representation | Deep bidirectional cross-attention across full input | Causal sequential attention |
-| **Structured Output** | Unstructured retrieved chunks | Native schema-aligned distributions (`choice`, `score`, `noul`) | Free-form text requiring JSON repair or schema sampling |
-| **Primary Workload** | Broad candidate retrieval | Discrete classification, policy gating & routing | Open-ended synthesis, translation & generation |
-
----
+Use a native Qwen3.5 or Gemma 4 checkpoint for typed decisions inside your
+application or through the local HTTP service. The model scores supplied options,
+yes/no questions, ordinal levels and image boxes without generating text. The sections
+below show how to use those results in routing and review workflows.
+[Model architecture](multimodal.md)
 
 ## 1. Smart Ingress Gateway
 
@@ -50,7 +30,7 @@ graph TD
 ```python
 import laya
 
-agent = laya.load("convaiinnovations/laya")
+agent = laya.load()
 
 GATEWAY_QUESTIONS = {
     "complexity": {
@@ -113,7 +93,7 @@ graph TD
 ```python
 from laya import Agent
 
-agent = Agent("convaiinnovations/laya")
+agent = Agent()
 
 VOICE_QUESTIONS = {
     "intent": {
@@ -215,7 +195,7 @@ class SecurityFirewallHook(BaseHook):
                 raise PermissionError("Request blocked by security firewall: adversarial prompt detected.")
 
 # Attach to Router or Agent; hooks_raise=True ensures policy exceptions propagate
-guard_agent = laya.load("convaiinnovations/laya")
+guard_agent = laya.load()
 router = Router(hooks=[SecurityFirewallHook(guard_agent)], hooks_raise=True)
 ```
 
@@ -248,7 +228,7 @@ graph TD
 ```python
 from laya import Router
 
-# Automatically routes between local English and Multilingual models
+# Uses the same native checkpoint across languages
 router = Router()
 
 INDEX_QUESTIONS = {
@@ -362,7 +342,7 @@ graph TD
 from laya.structured import decide_batch
 from laya import Agent
 
-agent = Agent("convaiinnovations/laya")
+agent = Agent()
 
 # Strict typed schema
 TICKET_SCHEMA = {
@@ -408,7 +388,6 @@ Before rolling out any of the above patterns to production, verify:
    appropriately (`torch.set_num_threads`).
 2. **Confidence thresholding:** Set `min_confidence` (e.g. `0.80–0.90`) on mission-critical gates so
    the system safely falls back when queries are ambiguous.
-3. **Multilingual routing:** Use `Router()` to select among classic encoders for mixed or
-   non-English inputs.
+3. **Multilingual decisions** use the same native checkpoint across languages.
 4. **Staged rollout:** Follow the [Staged Adoption Guide](staged-adoption.md) to shadow production traffic
    before making decisions authoritative.

@@ -1,32 +1,21 @@
-# Local runtime checks
+# Check a native checkpoint
 
-## Native checkpoints
+Run the smoke check before serving a checkpoint. It uses the local model processor and
+validates typed decisions and single-box responses for the supplied files.
 
-Install `.[multimodal]` and run from the repository root using the downloaded checkpoint.
-[Model setup](../docs/multimodal-release.md)
-
-```sh
-python verify/multimodal_smoke_test.py models/jev-multimodal-qwen3.5-4b --device cpu
+```bash
+python verify/multimodal_smoke_test.py --help
 ```
 
-The check exercises `choice`, `score` and `noul` on text and uses a generated image for
-an image decision and, when the checkpoint has a trained grounding head, a `box` answer.
-It validates the answer shape, normalized geometry and token accounting. Pass `--video clip.mp4`
-to check visual video or `--audio clip.wav` with a trained Gemma 4 checkpoint. Video decoding
-requires `ffmpeg` and `ffprobe`. Use labelled splits for accuracy measurements.
-[Native benchmarks](../docs/benchmarks.md#native-multimodal-checkpoints) · [HTTP checks](../docs/multimodal-clients.md)
+For a running authenticated service, verify one native HTTP decision and inspect the loaded
+checkpoint's device and revision.
 
-## Classic text checkpoints
-
-With the three classic checkpoints under `models/`, run these checks from the repository root.
-
-```sh
-python verify/checkpoints.py --models ./models
-python verify/laya_smoke_test.py --models ./models --device cpu
+```bash
+python scripts/http_inference_smoke.py --api-key-file /path/to/bearer-key \
+  --checkpoint-revision local --device cpu
 ```
 
-`checkpoints.py` checks the pinned weights against this directory's manifest.
-`laya_smoke_test.py` exercises text routing and typed answers. `edge_sweep.py`,
-`numerics_check.py` and `soak_check.py` cover boundary inputs, numerical parity and repeated
-calls. `bench_devices.py` measures classic CPU and available MPS paths.
-[Classic local setup](../LOCAL_SETUP.md)
+The default request exercises the three text decision types. Pass `--request` with a System One
+image asset request to validate a box, or combine it with `--route multimodal` for inline media.
+Use the exact Hub revision in place of `local` for a pinned downloaded checkpoint.
+[HTTP request formats](../docs/http-api.md)

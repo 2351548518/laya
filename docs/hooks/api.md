@@ -52,11 +52,11 @@ class PredictContext:
 | `run_id` | `str` | always | no | a unique id shared by the predict events of this call (`on_predict_start`, `on_predict_end`, `on_error`). `on_route`, `on_load` and `on_evict` are dispatched with contexts of their own, so their `run_id` differs even within one `Router.predict`. Use it to correlate events and spans. |
 | `results` | `list \| None` | end (and on a skip) | yes (end) | per-state result dicts, each shaped like `system_one`'s return. `None` until inference finishes. |
 | `decision` | `dict \| None` | Router only | yes (route) | the `RouteDecision` (a `dict`) that selected the checkpoint. |
-| `model` | `str \| None` | always | no | the checkpoint id: `Agent.model_id` for an Agent, the resolved alias (for example `"english"`) for a Router. |
-| `agent` | `Agent \| ONNXAgent \| None` | predict events | no | the runtime answering the call. |
+| `model` | `str \| None` | always | no | the checkpoint id: `Agent.model_id` for an Agent, the resolved alias (for example `"multimodal"`) for a Router. |
+| `agent` | `MultimodalAgent \| VegaAgent \| None` | predict events | no | the runtime answering the call. |
 | `router` | `Router \| None` | Router events | no | the Router, when one is in play. |
-| `max_len` | `int \| None` | always | yes (start) | per-call token budget for the encoder. `None` uses the agent config. |
-| `head_max_len` | `int \| None` | always | yes (start) | per-call token budget for the question head. `None` uses the agent config. |
+| `max_len` | `int \| None` | always | yes (start) | per-call token budget for the entire native input. `None` uses the agent config. |
+| `head_max_len` | `int \| None` | always | yes (start) | legacy hook field for custom backends. Leave it unset for native inference. |
 | `usage` | `dict \| None` | end | yes (end) | `{"input_tokens", "output_tokens"}`, summed over the states of the call. |
 | `started_at` | `float` | always | no | `time.perf_counter()` when the call began. |
 | `elapsed_ms` | `float \| None` | end | no | wall time in milliseconds, measured from `started_at`. On an Agent that is the whole call. On a Router `started_at` is reset after routing and loading, so it is the prediction only -- a cold model load is not in it. |
@@ -91,7 +91,7 @@ def cache_write(ctx):
     for i, result in enumerate(ctx.results or []):
         CACHE[key(ctx, i)] = result
 
-laya.load("convaiinnovations/laya", on_predict_start=cache_read, on_predict_end=cache_write)
+laya.load( on_predict_start=cache_read, on_predict_end=cache_write)
 ```
 
 `tests/test_hooks_api.py` execs this block, `examples/hooks/cache.py`, and the caching blocks of
@@ -155,7 +155,7 @@ from laya import OptionStabilityHook
 
 # Required accept and escalate thresholds; pass None to disable categorical triage:
 stability_hook = OptionStabilityHook(accept=0.85, escalate=0.60, variants="fast")
-agent = laya.load("convaiinnovations/laya", hooks=[stability_hook])
+agent = laya.load( hooks=[stability_hook])
 ```
 
 Thresholds `accept` and `escalate` are required keyword arguments: categorical gating decisions (`ACCEPT`, `VERIFY`, `ESCALATE`) depend directly on application error tolerance, option count, and temperature calibration (Issue #1245). Pass `accept=None, escalate=None` to evaluate continuous stability signals without applying categorical gating.
@@ -282,7 +282,7 @@ class Remote:
     async def on_predict_end(self, ctx):
         await ship(ctx.results)
 
-agent = laya.load("convaiinnovations/laya", hooks=[AsyncHook(Remote())])
+agent = laya.load( hooks=[AsyncHook(Remote())])
 ```
 
 A plain async callable passed to `on_predict_start=` / `on_predict_end=` also works, because
@@ -315,63 +315,34 @@ of objects; `on_predict_start` / `on_predict_end` take a callable or a sequence.
 
 ### Agent
 
-```python
-Agent(
-    model_id_or_path="convaiinnovations/laya",
-    device=None, token=None, subfolder=None, fast=False, compile=False,
-    hooks=None, on_predict_start=None, on_predict_end=None,
-    hooks_raise=True, hooks_concurrent=True, hooks_timeout=None,
-)
+`Agent` is an alias of `MultimodalAgent`. Use `load()` for the configured checkpoint,
+or supply a trained local checkpoint directory.
 
-load(..., hooks=None, on_predict_start=None, on_predict_end=None,
-     hooks_raise=True, hooks_concurrent=True, hooks_timeout=None)
+```python
+agent = load(model_id_or_path=None, device=None, hooks=None,
+             on_predict_start=None, on_predict_end=None,
+             hooks_raise=True, hooks_concurrent=True, hooks_timeout=None)
+
+agent.predict(state, questions, image=None, audio=None, video=None,
+              hooks=None, on_predict_start=None, on_predict_end=None,
+              hooks_raise=None, hooks_timeout=None, max_len=None)
 
 agent.predict_batch(states, questions, batch_size=None,
-                    hooks=None, on_predict_start=None, on_predict_end=None, hooks_raise=None,
-                    hooks_timeout=None, max_len=None, head_max_len=None, sort_by_length=False)
+                    hooks=None, on_predict_start=None, on_predict_end=None,
+                    hooks_raise=None, hooks_timeout=None, max_len=None)
 
-agent.system_one(state, questions,
-                 hooks=None, on_predict_start=None, on_predict_end=None, hooks_raise=None,
-                 hooks_timeout=None, max_len=None, head_max_len=None)
-
-agent.predict_long(state, questions, window=None, stride=None, aggregate="auto",
-                   batch_size=None, lang=None,
-                   hooks=None, on_predict_start=None, on_predict_end=None, hooks_raise=None,
-                   hooks_timeout=None)
-
-agent.predict(...)          # alias of system_one
+agent.system_one(...)       # alias of predict
 ```
 
-- `hooks_raise` and `hooks_timeout` on a per-call method default to `None`, meaning "use the instance value".
-- `hooks_concurrent` is instance-level only.
-- On `predict_long` the hooks wrap the inference that answers the state, which for a document
-  needing several windows is the single shared `predict_batch` over them: `on_predict_start` fires
-  once, and `ctx.states` holds the decoded window texts in scan order rather than the caller's
-  state, which was tokenized to produce them. `states` is mutable from a start hook, so the scan
-  that reaches inference need not be the split `predict_long` computed. What changes is what the
-  answer can claim:
-
-  | what the start hook did | `usage["windows"]` | `answer["window"]` |
-  |---|---|---|
-  | answered with `ctx.skip([result])` | `0` | absent -- no window scored it |
-  | left the scan as it was built | `N` | present -- `index`, `token_start`/`token_end` name the deciding span |
-  | replaced the scan, in any way | the states that were scored | absent -- the offsets describe `predict_long`'s windows, not the text that was scored |
-
-  `usage["windows"]` is total over every path, including the one where a state already fit a single
-  window, so a cached answer never reads as a window the model read.
-
-  End hooks may reorder result rows: an unchanged answer keeps the index and token span of its
-  original window. Attribution requires the original answer object and unchanged prediction fields
-  (type, choice/noul/score, probabilities, legend and confidence). Cloned, replaced or edited answers
-  omit `answer["window"]`; reliability and action annotations are retained. Adding the window to
-  the returned answer does not mutate the per-window answer a hook may have cached.
+A per-call value of `None` for `hooks_raise` or `hooks_timeout` uses the instance
+setting. Configure `hooks_concurrent` when loading the model.
 
 ### Router
 
 ```python
 Router(
-    models=None, device=None, token=None, max_loaded=2, default="multilingual",
-    auto_task_detection=False, standalone_repos=False, preload=False, lang_guess=None,
+    models=None, device=None, token=None, max_loaded=2, default="multimodal",
+    preload=False, lang_guess=None, multimodal=None,
     hooks=None, on_predict_start=None, on_predict_end=None,
     hooks_raise=True, hooks_concurrent=True, hooks_timeout=None,
 )
@@ -381,7 +352,7 @@ router.route(state, questions=None, model=None, task=None, lang=None, lang_guess
 
 router.predict(state, questions, model=None, task=None, lang=None, lang_guess=None,
                hooks=None, on_predict_start=None, on_predict_end=None, hooks_raise=None,
-               hooks_timeout=None, max_len=None, head_max_len=None)
+               hooks_timeout=None, max_len=None)
 
 router.predict_batch(requests, batch_size=None, hooks_timeout=None, min_confidence=None,
                      sort_by_length=False, hooks=None, on_predict_start=None, on_predict_end=None,
@@ -404,22 +375,6 @@ router.loaded               # list of resident checkpoint names
 - Per-call `hooks=` on `route`, `route_batch`, `predict` and `predict_batch` apply to the whole call, including `on_route`. On `predict_batch` the list is composed the same way as on `predict` (installed hooks first, then the per-call list; `None` and `[]` add nothing) and runs once per request.
 - `route()` is public: calling it dispatches `on_route` with the installed hooks plus any
   per-call `hooks`.
-
-### ONNXAgent
-
-```python
-ONNXAgent(model_id_or_path, onnx_path="laya.onnx", subfolder=None,
-          hooks=None, on_predict_start=None, on_predict_end=None,
-          hooks_raise=True, hooks_concurrent=True, hooks_timeout=None)
-
-onnx_agent.system_one(state, questions,
-                      hooks=None, on_predict_start=None, on_predict_end=None, hooks_raise=None,
-                      hooks_timeout=None, max_len=None, head_max_len=None)
-
-onnx_agent.predict(...)     # alias of system_one
-```
-
-`ONNXAgent` has no Router, so it exposes only the predict-level events.
 
 ## Event payloads
 

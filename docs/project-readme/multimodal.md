@@ -192,6 +192,9 @@ HTTP 的采样帧数和音轨策略取自服务加载的检查点。做音频决
 
 ## 5. 复现 v6 两阶段训练
 
+联合训练实现位于 `laya/train.py`。下面用到的仓库脚本、`laya-train` 和 `laya train` 共用同一个命令入口。
+[训练接口参考](../reference/train.md)
+
 ### 准备本地基座、数据和可用 GPU
 
 ```bash
@@ -221,7 +224,7 @@ set -o pipefail
 
 ```bash
 python -m torch.distributed.run --standalone --nproc_per_node=4 \
-  scripts/multimodal/train.py --visual-only --require-original-base \
+  --module laya.train_cli --visual-only --require-original-base \
   --model "$base" --data "$data" --train-split warmup \
   --config "$recipes/head-config.json" --out "$run/head" 2>&1 | tee "$run/head.log"
 ```
@@ -234,12 +237,12 @@ python -m torch.distributed.run --standalone --nproc_per_node=4 \
 
 ```bash
 python -m torch.distributed.run --standalone --nproc_per_node=4 \
-  scripts/multimodal/train.py --visual-only --qwen-training-delta \
+  --module laya.train_cli --visual-only --qwen-training-delta \
   --model "$run/head/best" --data "$data" \
   --config "$recipes/sft-config.json" --out "$run/sft" 2>&1 | tee "$run/sft.log"
 ```
 
-此阶段使用新优化器更新语言 LoRA、视觉 merger 和两个头。开始时 `sft/initialization.json` 应指向 `head/best`。训练中查看 `sft/best` 的选模结果和 `checkpoint_latest.json` 的恢复点。结束后 `sft/training_report.json` 的 `status` 为 `complete`，`sft/last` 是最后一次保存的模型，`sft/best` 是按开发集规则选中的模型。 [SFT 配置](assets/sft-config.json) · [一次参数更新](multimodal-current.md#optimizer-step) · [训练入口](https://github.com/2351548518/laya/blob/4f7e045725adf8c7c7067dfc404de1e54f68b05b/scripts/multimodal/train.py)
+此阶段使用新优化器更新语言 LoRA、视觉 merger 和两个头。开始时 `sft/initialization.json` 应指向 `head/best`。训练中查看 `sft/best` 的选模结果和 `checkpoint_latest.json` 的恢复点。结束后 `sft/training_report.json` 的 `status` 为 `complete`，`sft/last` 是最后一次保存的模型，`sft/best` 是按开发集规则选中的模型。 [SFT 配置](assets/sft-config.json) · [一次参数更新](multimodal-current.md#optimizer-step) · [当前训练入口](../reference/train.md)
 
 <a name="resume"></a>
 
@@ -283,13 +286,49 @@ PY
 
 ```bash
 python -m torch.distributed.run --standalone --nproc_per_node=4 \
-  scripts/multimodal/train.py --visual-only --qwen-training-delta \
+  --module laya.train_cli --visual-only --qwen-training-delta \
   --model "$run/head/best" --data "$data" \
   --config "$recipes/sft-config.json" --out "$run/sft" \
   --resume "$run/sft" 2>&1 | tee -a "$run/sft.log"
 ```
 
 开始后日志应出现 `Resumed joint training at optimizer step ...`。推理和导出选择 `sft/best` 或已完成校准的模型目录，续训选择包含优化器快照的运行目录。 [检查点用途](multimodal-release.md) · [选模与同集结果](multimodal-current.md#matched-development)
+
+<a name="swanlab"></a>
+
+### 启动训练时直接记录到 SwanLab
+
+在训练使用的 Python 环境安装 SwanLab 可选依赖。首次连接账号时，在启动训练的目录执行 `swanlab login --local`，根据终端提示完成授权。 [SwanLab 账号设置](https://swanlab.cn/settings) · [登录命令](https://docs.swanlab.cn/en/api/cli-swanlab-login.html)
+
+```bash
+python -m pip install -e '.[multimodal,swanlab]'
+swanlab login --local
+```
+
+在第五步的头部预热和联合 SFT 命令中追加 `--swanlab online --swanlab-project laya-multimodal-v6`。下面是 SFT 阶段的完整例子，沿用第五步定义的 CUDA 设备和绝对路径。 `--swanlab-name` 可为实验指定名字。
+
+```bash
+python -m torch.distributed.run --standalone --nproc_per_node=4 \
+  --module laya.train_cli --visual-only --qwen-training-delta \
+  --model "$run/head/best" --data "$data" \
+  --config "$recipes/sft-config.json" --out "$run/sft" \
+  --swanlab online --swanlab-project laya-multimodal-v6 2>&1 | tee "$run/sft.log"
+```
+
+从项目根目录用 `torchrun --module laya.train_cli` 启动下一次训练。新建输出目录，并用绝对路径指定基座、数据和配置。若 SwanLab 已在其他目录登录，可从该目录调用当前项目的训练脚本。
+
+在终端打印的 SwanLab 实验链接中打开面板。主进程按优化器步直接记录 `train/loss`、`train/gradient_norm`、实际窗口大小、步速和预计剩余时间。`lr` 区域显示实际使用的学习率。`dev` 区域记录初始及各轮开发集评测，包含模态和题型切片、单框 IoU 和选模分。`final` 单独显示训练结束后的评测。预热和 SFT 按输出目录分组，`--resume` 时在同组创建新的续训实验，曲线沿用原优化器步数。
+
+本地实验数据写到输出目录下的 `swanlog/`。使用 `--swanlab local` 可在自己的机器上记录，再用 `swanlab watch "$run/sft/swanlog"` 打开。在线初始化遇到暂时的网络故障时使用离线记录，连接恢复后可通过 SwanLab 同步。 [本地面板](https://docs.swanlab.cn/en/api/cli-swanlab-watch.html) · [同步离线记录](https://docs.swanlab.cn/en/api/cli-swanlab-sync.html)
+
+### 补录已经启动的旧训练
+
+需要给旧版本的训练补齐曲线时，使用 `monitor_swanlab.py` 从现有日志导入。默认一次性导入，旧训练仍在写日志时可加 `--follow`。下一次启动用上面的训练参数直接记录。
+
+```bash
+python scripts/multimodal/monitor_swanlab.py "$run" \
+  --stage sft --mode online --project laya-multimodal-v6 --follow
+```
 
 <a name="evaluate"></a>
 
@@ -315,7 +354,7 @@ python scripts/multimodal/evaluate.py \
 
 决策准确率检查预测概率最大的选项是否属于目标分布的最高概率档。评分题额外查看 `score_mae`，它衡量预测等级期望与目标等级期望的差。比如预测分布 `[0.1, 0.5, 0.4]` 和目标 `[0, 0.6, 0.4]` 都以等级 1 为最高概率档，这一题在准确率中计为正确，期望分数分别为 `1.3` 和 `1.4`，这一题的绝对误差为 `0.1`。概率质量可结合 NLL、Brier 和 ECE 判断。 [评分损失例子](multimodal-current.md#worked-losses)
 
-在线选模的定位分片固定抽取 512 条。完整分片和抽样分片分别报告。若比较两个模型，把上述命令中的 `--model` 和 `--out` 换成另一个检查点及另一个报告路径，保持数据、采样范围、推理预算和聚合方法一致。v6 的冻结测试分片与来源记录在数据根目录的 `evaluation/manifest.json`。 [同集结果](multimodal-current.md#matched-development) · [基准评测](../benchmarks.md#native-multimodal-checkpoints)
+在线选模的定位分片固定抽取 512 条。完整分片和抽样分片分别报告。若比较两个模型，把上述命令中的 `--model` 和 `--out` 换成另一个检查点及另一个报告路径，保持数据、采样范围、推理预算和聚合方法一致。v6 的冻结测试分片与来源记录在数据根目录的 `evaluation/manifest.json`。 [同集结果](multimodal-current.md#matched-development) · [基准评测](../benchmarks.md)
 
 ### 在独立分片上校准概率
 

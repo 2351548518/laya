@@ -1,47 +1,31 @@
 # Many-option choice: one question, a wider budget, the shortlist, and a tournament
 
-A choice question's options share one `head_max_len` budget, so past roughly 20 labels each label
-is cut to a few tokens and some stop being distinguishable (README, "Honest limits"). This compares
-the ways around that on three public intent sets, each asked as one choice over its whole label set:
+Compare approaches to large text choice sets on the same native checkpoint. Each request supplies
+one utterance and a menu of candidate intents.
 
-| dataset | labels | test rows | development rows |
+| Dataset | Labels | Test rows | Development rows |
 |---|---:|---:|---|
 | BANKING77 (`mteb/banking77`) | 77 | 3,076 | 600 sampled from train |
 | CLINC150 (`clinc/clinc_oos`, `plus`, in-scope only) | 150 | 4,500 | 600 sampled from validation |
 | MASSIVE intent, en-US (`SetFit/amazon_massive_intent_en-US`) | 60 | 2,974 | 600 sampled from validation |
 
-The question is the one `research/scripts/build_benchmark_nb.py` asks of BANKING77: the state is
-`{"message": text}`, each label becomes an option with its underscores turned to spaces and no
-description, and the instruction is ``Which banking intent does `message` express?`` (``Which
-intent does `message` express?`` for the other two). Dataset files are pinned to the revisions in
-`benchmark.py`.
+- `single` submits the whole label set in one request.
+- `wide` sets the request's prompt limit to at least 8,192 tokens.
+- `shortlist` ranks options with mean-pooled native token embeddings and submits up to 20.
+- `tournament` compares groups of 16 before the final question. Use `tournament-<n>` to change the group size.
 
-Strategies, all on the English checkpoint at its defaults (`max_len=512`, `head_max_len=192`):
-
-- `single`: the whole label set in one `predict`.
-- `wide`: the same with `head_max_len=512, max_len=1024`, the first remedy the README lists.
-- `shortlist`: `predict_shortlist` with `k=20` and `embed_fn_from_agent`, the embedder that needs no
-  second model.
-- `tournament`: `predict_tournament` at its default `group_size=16`; `tournament-<n>` sets the
-  group size.
-
-Every row is a separate call, as a caller would make it, timed after three warm-up calls.
+Set `CHECKPOINT` to a [local native checkpoint](../../../README.md#quickstart) and install
+`pyarrow` for datasets stored as Parquet. The runner reads the dataset revisions pinned in
+`benchmark.py` and records the checkpoint and device. The first three requests warm up the model.
 
 ```bash
-python research/benchmarks/tournament/benchmark.py --dataset banking77 --split test --out banking77.json
-python research/benchmarks/tournament/benchmark.py --dataset clinc150 --split test --out clinc150.json
-python research/benchmarks/tournament/benchmark.py --dataset massive --split test --out massive.json
+mkdir -p _local
+python research/benchmarks/tournament/benchmark.py --dataset banking77 --split test \
+  --model "$CHECKPOINT" --device cpu --limit 300 --out _local/banking77-native.json
 ```
 
-The group size was chosen on the development rows only; no tournament ran on a test split before
-the default was fixed:
-
-```bash
-python research/benchmarks/tournament/benchmark.py --dataset banking77 --split train --limit 600 \
-    --strategies single,tournament-8,tournament-12,tournament-16,tournament-24,tournament-32 --out dev.json
-```
-
-`pyarrow` reads the parquet files; it is not a dependency of the package.
+Choose strategies and thresholds on a development split before evaluating the test split. Omit
+`--limit` for the full split.
 
 ## Recorded results
 

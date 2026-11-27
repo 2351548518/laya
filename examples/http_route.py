@@ -18,8 +18,8 @@ from laya.serve import create_app
 def main():
     state = {"message": "Turn lights off"}
     body = {"state": state, "questions": {}}
-    local = Router(default="multilingual")
-    deployed = Router(default="english")
+    local = Router()
+    deployed = Router(models={"support": "models/support"}, default="support")
     local_decision = local.route(state, explain=True)
 
     # Injecting a Router avoids the normal server's startup preload. Honour a key
@@ -34,17 +34,17 @@ def main():
         response = client.post("/v1/route", json={**body, "explain": True})
         response.raise_for_status()
         snapshot = response.json()
-        assert local_decision["model"] == "multilingual"
-        assert snapshot["model"] == "english"
+        assert local_decision["model"] == "multimodal"
+        assert snapshot["model"] == "support"
         assert snapshot["diagnostic"] == local_decision["detection"]["diagnostic"]
         assert {key: snapshot[key] for key in plain.json()} == plain.json()
 
         # A new request with a model pin has a new decision. The earlier snapshot
         # neither pins a later prediction nor manufactures language evidence.
-        response = client.post("/v1/route", json={**body, "model": "multilingual", "explain": True})
+        response = client.post("/v1/route", json={**body, "model": "multimodal", "explain": True})
         response.raise_for_status()
         pinned = response.json()
-        assert pinned["model"] == "multilingual" and pinned["diagnostic"] is None
+        assert pinned["model"] == "multimodal" and pinned["diagnostic"] is None
 
     assert local.loaded == [] and deployed.loaded == []
     print(json.dumps({

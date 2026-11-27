@@ -1,18 +1,15 @@
 # Python API
 
-These pages are generated from the docstrings in `laya/`, so they change with the code. Apart
-from `ONNXAgent` and `laya.train`, every name below can be imported from the top-level package,
-for example `from laya import Router`.
+These pages describe the public local inference and training APIs.
 
-- [MultimodalAgent](multimodal.md) runs native text and media questions with locally trained heads.
-- [Agent](agent.md): `Agent` and `load` run one checkpoint; `ONNXAgent` runs an exported ONNX
-  model.
+- [Agent](agent.md) covers loading native checkpoints.
+- [MultimodalAgent](multimodal.md) covers text, image, video, audio and Box requests.
 - [Router](router.md): `Router` picks the checkpoint for each request; `RouteDecision` records
   the choice.
 - [Helpers](helpers.md): language detection, email cleaning, question presets, shortlisting
   and calibration utilities.
-- [Fine-tuning](train.md): `finetune` and `TrainConfig` from `laya.train`, imported from that
-  module rather than the top-level package, and the pieces they are built from.
+- [Fine-tuning](train.md) covers `finetune_grounding`, `GroundingTrainConfig`, and the shared
+  decision label conversion in `laya.train`.
 - [LangChain components](langchain.md): `LayaRouter`, `LayaGuardrail`, `LayaTriage` and
   `LayaEvaluator`.
 

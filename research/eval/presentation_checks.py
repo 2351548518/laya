@@ -1,59 +1,10 @@
-"""Presentation-sensitivity regression checks for a Laya checkpoint.
+"""Measure option labels and presentation sensitivity with native decision logits.
 
-Why this exists
----------------
-``laya-multilingual``'s ``score`` head has a learned prior against the first-listed
-level (#131). The fix is a position-balanced retrain, and this is the check that says
-whether a retrained checkpoint removed the prior. It needs no labelled data: every
-input is fixed in this file, and both checks compare the checkpoint against itself
-under different presentations of the same question.
+Run the frozen text probes with a trained checkpoint:
 
-Checks
-------
-``score_slot0_identical``
-    The identical-option control from @AlKor13 in #131. A ``score`` question whose K
-    levels all carry the same text, so the rendered options differ only by position
-    and the ``level N:`` prefix ``render_options`` always emits. The metric is the raw
-    marker logit of slot 0 minus the mean over the K slots, averaged over every state
-    and every (text, K) configuration. A checkpoint with no slot-0 deficit sits at or
-    above 0; the gate is one-sided (see "Limits" in README.md).
+    python -m research.eval.presentation_checks --model ./local-checkpoint --lang en,ja
 
-``score_first_slot_permuted``
-    Three real levels presented in all 3! = 6 orders for each state. Every level sits
-    in every slot exactly twice per state, so a checkpoint whose answer does not
-    depend on the order picks the first slot in exactly 1/3 of the decisions. The
-    metric is the observed first-slot rate.
-
-``choice_slot0_identical``
-    The same control for ``choice`` (#602, part a). Choice keys must be unique, so the
-    options are numbered keys with one shared description (``1: a request``,
-    ``2: a request``, ...), the counterpart of score's ``level N:`` prefix. Gated at 4
-    options, with 3 reported beside it; same gate as the score control. It runs with
-    ``--lang`` (or when named in ``--checks``), so the default English report is unchanged.
-
-All metrics read raw marker logits (before temperature) through
-``laya_eval.score_cases``, the same forward pass ``research/scripts/bench_local.py``
-uses. ``parity`` checks that path against ``Agent.system_one`` before anything is
-reported.
-
-Languages
----------
-``--lang`` runs the same two checks on fixed states in Japanese, Korean, Hindi or
-Turkish (#602): translations of the English states, with the level texts in the same
-language. Every one of them routes to ``multilingual`` under ``Router``, so they test
-the checkpoint #131 is about on the scripts it serves. The gates are the English ones.
-Without ``--lang`` the run and its report are exactly what they were.
-
-Usage
------
-    python research/eval/presentation_checks.py --model convaiinnovations/laya
-    python research/eval/presentation_checks.py --model convaiinnovations/laya \\
-        --subfolder multilingual --out multilingual.json
-    python research/eval/presentation_checks.py --model convaiinnovations/laya \\
-        --subfolder multilingual --lang ja,ko,hi,tr --out multilingual-langs.json
-
-Exit status: 0 every check passed, 1 a check failed, 2 the harness could not be
-trusted (parity with ``Agent.system_one`` above ``PARITY_TOL``).
+Report comparisons use the same questions and option order across checkpoints.
 """
 from __future__ import annotations
 
@@ -70,7 +21,7 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__f
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from research.eval.laya_eval import score_cases, softmax_t, temperature_for  # noqa: E402
+from research.eval.laya_eval import score_cases, softmax_t  # noqa: E402
 
 # Fixed English states written for this check. Urgency varies on purpose: a slot
 # prior has to show through states whose honest answer is low, middle and high.
@@ -392,58 +343,46 @@ def agent_score_fn(agent) -> ScoreFn:
     return score
 
 
+def _probability_error(agent, states, questions):
+    """Compare canonical raw-logit decoding with the public native answers."""
+    import torch
+
+    worst = 0.0
+    for state in states:
+        public = agent.predict(state, questions)["answers"]
+        logits = score_cases(agent, [(state, questions)])
+        for (qid, question), values in zip(questions.items(), logits):
+            q = agent._to_internal(question)
+            q.pop("option_order", None)
+            expected = agent._decode(torch.from_numpy(values).to(agent.device), q)["probabilities"]
+            worst = max(worst, max(abs(public[qid]["probabilities"][key] - value)
+                                   for key, value in expected.items()))
+    return worst
+
+
 def parity(agent, states: Optional[Sequence[str]] = None, lang: str = "en") -> float:
-    """Max |p| difference between this harness and Agent.system_one.
-
-    system_one rounds probabilities to 4 decimals, so agreement shows up as <= 5e-5.
-    """
-    from laya.common import QTYPES
-
     spec = LANGUAGES[lang]
     states = spec["states"] if states is None else states
     questions = {"identical": identical_question(spec["identical_texts"][0], 3, spec["instructions"]),
                  "levels": {"type": "score", "instructions": spec["instructions"],
                             "criteria": list(spec["levels"])}}
-    score = agent_score_fn(agent)
-    worst = 0.0
-    for state in states:
-        public = agent.system_one(state, questions)["answers"]
-        for (qid, _q), z in zip(questions.items(), score(state, list(questions.values()))):
-            p = softmax_t(z, temperature_for(agent, QTYPES["score"], len(z)))
-            got = [public[qid]["probabilities"][str(i)] for i in range(len(z))]
-            worst = max(worst, max(abs(a - float(b)) for a, b in zip(got, p)))
-    return worst
+    return _probability_error(agent, states, questions)
 
 
 def choice_parity(agent, states: Optional[Sequence[str]] = None, lang: str = "en") -> float:
-    """`parity` for the choice control's questions, keyed by option name as system_one reports them."""
-    from laya.common import QTYPES
-
     spec = LANGUAGES[lang]
     states = spec["states"] if states is None else states
     questions = {"k%d" % k: choice_identical_question(spec["identical_texts"][0], k, spec["instructions"])
                  for k in CHOICE_KS}
-    score = agent_score_fn(agent)
-    worst = 0.0
-    for state in states:
-        public = agent.system_one(state, questions)["answers"]
-        for (qid, q), z in zip(questions.items(), score(state, list(questions.values()))):
-            p = softmax_t(z, temperature_for(agent, QTYPES["choice"], len(z)))
-            got = [public[qid]["probabilities"][key] for key in q["criteria"]]
-            worst = max(worst, max(abs(a - float(b)) for a, b in zip(got, p)))
-    return worst
+    return _probability_error(agent, states, questions)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="presentation-checks",
         description="Label-free presentation-sensitivity checks for a Laya checkpoint.")
-    parser.add_argument("--model", default="convaiinnovations/laya",
-                        help="checkpoint repo id or local path")
-    parser.add_argument("--subfolder", default=None,
-                        help="checkpoint subfolder, e.g. multilingual")
-    parser.add_argument("--device", default="cpu",
-                        help="default cpu: fp32 and deterministic, which is what the thresholds were set on")
+    parser.add_argument("--model", help="trained native checkpoint directory or Hub ID")
+    parser.add_argument("--device", default="cpu")
     parser.add_argument("--checks", default=None,
                         help="comma-separated subset of: %s. Default: %s; with --lang, all of them"
                              % (", ".join(ALL_CHECKS), ", ".join(CHECKS)))
@@ -468,17 +407,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
 
     import laya
+    from laya.revisions import default_checkpoint
 
+    source = args.model or default_checkpoint()
     started = time.time()
-    agent = laya.load(args.model, device=args.device, subfolder=args.subfolder)
+    agent = laya.load(source, device=args.device)
     agent.model.eval()
     if args.lang is None:
         worst = parity(agent)
         report = run_checks(agent_score_fn(agent), names)
         payload = {
             "config": {
-                "model": args.model,
-                "subfolder": args.subfolder,
+                "model": source,
+                "revision": agent.checkpoint_revision,
                 "device": str(agent.device),
                 "states": len(STATES),
                 "instructions": INSTRUCTIONS,
@@ -520,7 +461,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         worst = max(r["parity_max_abs_diff"] for r in by_lang.values())
         report = {"passed": all(r["passed"] for r in by_lang.values())}
         payload = {
-            "config": {"model": args.model, "subfolder": args.subfolder, "device": str(agent.device),
+            "config": {"model": source, "revision": agent.checkpoint_revision, "device": str(agent.device),
                        "langs": langs, "laya_version": getattr(laya, "__version__", "unknown")},
             "languages": by_lang,
             "parity_max_abs_diff": worst,

@@ -54,7 +54,8 @@ def main(argv=None):
         parser.error("model must be a directory containing multimodal_config.json")
     if args.out:
         output_path = args.out.resolve()
-        if output_path == args.requests.resolve() or args.model.resolve() in output_path.parents:
+        model_path = args.model.resolve()
+        if output_path in (args.requests.resolve(), model_path) or model_path in output_path.parents:
             parser.error("write the report outside the model directory and use a separate request file")
     try:
         request_bytes = args.requests.read_bytes()
@@ -62,7 +63,7 @@ def main(argv=None):
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         parser.error(f"cannot read request JSON: {exc}")
     if not isinstance(cases, list) or not cases or any(
-        not isinstance(case, dict) or not isinstance(case.get("id"), str)
+        not isinstance(case, dict) or not isinstance(case.get("id"), str) or not case["id"].strip()
         or "state" not in case or not isinstance(case.get("questions"), dict) or not case["questions"]
         for case in cases
     ):

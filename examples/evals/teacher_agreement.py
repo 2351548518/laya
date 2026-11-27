@@ -41,8 +41,8 @@ PARQUET_URL = (
     "/data/test-00000-of-00001.parquet"
 )
 PROTOCOL_SHA256 = "6f0ac97a38225f523a61803d25d6868e90813ef6873a8170a7e2f2a9e056ef9b"
-MODEL = "convaiinnovations/laya"
-MODEL_REVISION = "55cf4c4ebb4ebe31b2550e8bdf3bd21b99753851"
+MODEL = "ZeeoRe/jev-multimodal-qwen3.5-4b"
+MODEL_REVISION = "5ea706ae049932f34aa78cb26e119939eb145cc3"
 COUNT = 32
 PROMPT_TEMPLATE = (
     "<bos><|turn>system\n"
@@ -208,7 +208,7 @@ def main() -> None:
         "seed": 0,
     }
     print(f"Loading {MODEL}@{MODEL_REVISION} on CPU", file=sys.stderr, flush=True)
-    with laya.load(MODEL, device="cpu", revision=MODEL_REVISION, backend="eager") as agent:
+    with laya.load(MODEL, device="cpu", revision=MODEL_REVISION) as agent:
         report = evals.evaluate_agreement(
             LocalRunner(agent), reference, repeat, student_provenance=provenance,
             bootstrap_samples=2000, seed=0,

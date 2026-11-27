@@ -23,10 +23,10 @@ from .common import QTYPES, ece_score, temp_bucket, unpermute_probs
 from .evals import file_fingerprint
 from .multimodal import DEFAULT_MULTIMODAL_MODEL, MultimodalAgent, _active_head, _is_adapter_model
 from .multimodal_calibration import ordinal_probabilities
-from .multimodal_data import can_shuffle_choice, read_records, record_input, record_media, record_modality
+from .multimodal_data import can_shuffle_choice, collate_multimodal_inputs, read_records, record_input, record_media, record_modality
 from .multimodal_objectives import decision_loss, expand_lora, grow_lora, learning_rate_factor, lora_target_pattern, optimizer_groups
 from .multimodal_distributed import distributed_context
-from .train import target_from_expected, target_from_gold
+from .train import _train_mode, decision_target as _decision_target, target_from_gold
 
 
 @dataclass
@@ -197,13 +197,6 @@ def filter_split_overlaps(splits):
         splits[split] = kept
     check_splits(**splits)
     return dropped
-
-
-def _decision_target(row, qid, question):
-    """Read the target in canonical option order, preferring soft labels when supplied."""
-    if qid in row.get("gold", {}):
-        return target_from_gold(question, row["gold"][qid])
-    return target_from_expected(question, row["expected"][qid])
 
 
 def _items(agent, rows):
@@ -484,38 +477,6 @@ def _configure_projectors(agent, config):
         base.get_submodule(name).float().requires_grad_(True)
 
 
-def collate_multimodal_inputs(examples, pad_token_id):
-    """Left-pad text and concatenate padded native media tensors in request order.
-
-    Each request was processed independently, so image patches and audio features can have
-    different lengths. Position padding is -1, which the Gemma processor uses for absent patches.
-    """
-    import torch.nn.functional as F
-    result = {}
-    sequence_keys = {"input_ids", "attention_mask", "mm_token_type_ids", "token_type_ids"}
-    for key in set().union(*(example.keys() for example in examples)):
-        values = [example[key] for example in examples if key in example]
-        if key == "_candidate_positions":
-            length = max(example["input_ids"].shape[-1] for example in examples)
-            values = [torch.where(example[key] < 0, example[key], example[key] + length - example["input_ids"].shape[-1])
-                      for example in examples]
-        if not all(isinstance(value, torch.Tensor) for value in values):
-            raise ValueError("cannot batch a non-tensor processor field: " + key)
-        if any(value.ndim != values[0].ndim for value in values):
-            raise ValueError("inconsistent processor dimensions for " + key)
-        sizes = [max(value.shape[axis] for value in values) for axis in range(1, values[0].ndim)]
-        padded = []
-        for value in values:
-            widths = []
-            for axis in reversed(range(1, value.ndim)):
-                difference = sizes[axis - 1] - value.shape[axis]
-                widths.extend([difference, 0] if key in sequence_keys else [0, difference])
-            fill = pad_token_id if key == "input_ids" else -1 if key in {"image_position_ids", "video_position_ids", "_candidate_positions"} else 0
-            padded.append(F.pad(value, widths, value=fill) if widths else value)
-        result[key] = torch.cat(padded, dim=0)
-    return result
-
-
 def _training_order(items, config, rng):
     if not config.balanced_batches:
         indices = list(range(len(items)))
@@ -537,19 +498,6 @@ def _training_order(items, config, rng):
         for kind in sorted(groups):
             order.extend(groups[kind][offset:offset + grain])
     return order
-
-
-def _train_mode(agent, config):
-    agent.model.train()
-    if config.mode != "full":
-        base = agent.model.get_base_model() if _is_adapter_model(agent.model) else agent.model
-        for name in ("model.vision_tower", "model.audio_tower"):
-            try:
-                module = base.get_submodule(name)
-            except AttributeError:
-                continue
-            if module is not None:
-                module.eval()
 
 
 def _restore_checkpoint(agent, path, mode):

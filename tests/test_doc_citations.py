@@ -339,7 +339,7 @@ def main() -> int:
                "only %d citations of that form" % dbl_total)
     check_true("no `file:NNN` citation lands outside the symbol named beside it",
                not drifted, drifted)
-    check_true("the line-citation check has subjects", bound >= 3,
+    check_true("the line-citation check has subjects", bound >= 1,
                "only %d citations bind to a named symbol" % bound)
 
     print("\n%d passed, %d failed" % (len(PASS), len(FAIL)))

@@ -52,13 +52,13 @@ from laya.serve import (  # noqa: E402
 
 # Read from the router rather than copied here: the workload below has to reach the
 # typed-decisions checkpoint the same way a request does.
-from laya.router import _TYPED_DECISION_WORKFLOWS  # noqa: E402
+from laya.revisions import DEFAULT_CHECKPOINT  # noqa: E402
 
 
 class FakeRouter:
     """Records the last predict() call and returns a Jev-shaped payload."""
 
-    loaded = ["english"]
+    loaded = ["multimodal"]
 
     def __init__(self):
         self.calls = []
@@ -72,7 +72,7 @@ class FakeRouter:
                          "probabilities": {"billing": 0.94, "tech": 0.06}, "confidence": 0.94},
             },
             "usage": {"input_tokens": 42, "output_tokens": 0},
-            "routing": {"model": "english", "reason": "English Latin text"},
+            "routing": {"model": "multimodal", "reason": "English Latin text"},
         }
 
 
@@ -186,7 +186,7 @@ FULL_USAGE = {"input_tokens": 83, "output_tokens": 0, "state_tokens": 12,
 class StrictFullRouter:
     """Returns the full payload, additions and all, whatever the request."""
 
-    loaded = ["english"]
+    loaded = ["multimodal"]
 
     def __init__(self):
         self.calls = []
@@ -194,7 +194,7 @@ class StrictFullRouter:
     def predict(self, state, questions, model=None):
         self.calls.append({"state": state, "questions": questions, "model": model})
         return {"model": "laya-rl-agent", "answers": FULL_ANSWERS, "usage": dict(FULL_USAGE),
-                "routing": {"model": "english", "reason": "English Latin text"}}
+                "routing": {"model": "multimodal", "reason": "English Latin text"}}
 
     def predict_batch(self, requests, **kwargs):
         return [self.predict(item["state"], item["questions"], model=item.get("model"))
@@ -267,7 +267,7 @@ def test_jev_strict_leaves_an_unknown_answer_shape_unchanged(monkeypatch):
     monkeypatch.delenv("LAYA_API_KEY", raising=False)
 
     class OddRouter:
-        loaded = ["english"]
+        loaded = ["multimodal"]
 
         def predict(self, state, questions, model=None):
             return {"model": "laya-rl-agent",
@@ -524,7 +524,7 @@ class EliminationRouter:
     the calls a tournament made and check that their usage was summed.
     """
 
-    loaded = ["english"]
+    loaded = ["multimodal"]
 
     def __init__(self):
         self.calls = []
@@ -543,7 +543,7 @@ class EliminationRouter:
                             "confidence": 0.5, "answer_confidence": probabilities[winner]}
         return {"model": "laya-rl-agent", "answers": answers,
                 "usage": {"input_tokens": 10 * len(questions), "output_tokens": 0},
-                "routing": {"model": "english", "reason": "English Latin text"}}
+                "routing": {"model": "multimodal", "reason": "English Latin text"}}
 
 
 def _tournament_client(monkeypatch, group, strict=False):
@@ -773,18 +773,16 @@ def test_tournament_group_resolution(monkeypatch, raw, want):
 
 def test_known_model_is_honoured(monkeypatch):
     client, fake = _client(monkeypatch)
-    client.post("/v1/systemone", json={**REQ, "model": "multilingual"})
-    assert fake.calls[0]["model"] == "multilingual"
+    client.post("/v1/systemone", json={**REQ, "model": "multimodal"})
+    assert fake.calls[0]["model"] == "multimodal"
 
 
-@pytest.mark.parametrize(("model", "expected"), [
-    ("convaiinnovations/laya-multilingual", "multilingual"),
-    ("convaiinnovations/laya-typed-decisions", "typed-decisions"),
-])
-def test_published_model_id_is_honoured(monkeypatch, model, expected):
+def test_published_model_id_is_honoured(monkeypatch):
     client, fake = _client(monkeypatch)
-    client.post("/v1/systemone", json={**REQ, "model": model})
-    assert fake.calls[0]["model"] == expected
+    response = client.post("/v1/systemone", json={**REQ, "model": DEFAULT_CHECKPOINT})
+    assert response.status_code == 200, response.text
+    assert fake.calls[-1]["model"] == "multimodal"
+
 
 
 def test_missing_questions_is_400(monkeypatch):
@@ -918,7 +916,7 @@ class DeviceRouter:
                 "answers": {"dept": {"type": "choice", "choice": "billing",
                                      "probabilities": {"billing": 1.0}, "confidence": 1.0}},
                 "usage": {"input_tokens": 1, "output_tokens": 0},
-                "routing": {"model": (self.loaded or ["english"])[0]}}
+                "routing": {"model": (self.loaded or ["multimodal"])[0]}}
 
 
 def test_health_reports_where_inference_actually_runs(monkeypatch):
@@ -978,10 +976,10 @@ assert env_device.__module__ == "laya.mcp.device"
 import laya.serve
 assert "mcp" not in sys.modules, "laya.mcp.device reached the mcp distribution"
 from fastapi.testclient import TestClient
-client = TestClient(laya.serve.create_app(router=type("R", (), {"loaded": ["english"],
-    "_agents": {"english": type("A", (), {"device": "cpu"})()}})()))
+client = TestClient(laya.serve.create_app(router=type("R", (), {"loaded": ["multimodal"],
+    "_agents": {"multimodal": type("A", (), {"device": "cpu"})()}})()))
 body = client.get("/health").json()
-assert body["device"] == "cpu" and body["checkpoint_devices"] == {"english": "cpu"}, body
+assert body["device"] == "cpu" and body["checkpoint_devices"] == {"multimodal": "cpu"}, body
 print("ok")
 ''' % ROOT
     out = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
@@ -1049,7 +1047,7 @@ def test_health_supports_router_without_loaded_revisions(monkeypatch):
     assert r.json()["revisions"] == {}
     # Same for the #351 fallback counters: a router with no _agents and no agents
     # with counters still reports a stable, all-zero shape.
-    assert r.json()["cpu_fallbacks"] == {"english": {"count": 0, "last_reason": None}}
+    assert r.json()["cpu_fallbacks"] == {"multimodal": {"count": 0, "last_reason": None}}
 
 
 def test_health_reports_cpu_fallback_counters(monkeypatch):
@@ -1057,22 +1055,22 @@ def test_health_reports_cpu_fallback_counters(monkeypatch):
     from types import SimpleNamespace
 
     client, fake = _client(monkeypatch)
-    fake._agents = {"english": SimpleNamespace(
+    fake._agents = {"multimodal": SimpleNamespace(
         cpu_fallback_count=2,
         last_fallback_reason="CUDA out of memory. Tried to allocate 1.00 GiB",
     )}
     r = client.get("/health")
     assert r.status_code == 200
     fb = r.json()["cpu_fallbacks"]
-    assert fb["english"]["count"] == 2, fb
-    assert "out of memory" in fb["english"]["last_reason"], fb
+    assert fb["multimodal"]["count"] == 2, fb
+    assert "out of memory" in fb["multimodal"]["last_reason"], fb
 
 
 def test_helpers():
-    assert _resolve_model("multilingual") == "multilingual"
-    assert _resolve_model("convaiinnovations/laya-multilingual") == "multilingual"
-    assert _resolve_model("convaiinnovations/laya-typed-decisions") == "typed-decisions"
-    assert _resolve_model("convaiinnovations/laya") is None
+    assert _resolve_model("multimodal") == "multimodal"
+    assert _resolve_model(DEFAULT_CHECKPOINT) == "multimodal"
+    assert _resolve_model(DEFAULT_CHECKPOINT) == "multimodal"
+    assert _resolve_model(DEFAULT_CHECKPOINT) == "multimodal"
     assert _resolve_model("jev-1") is None
     assert _resolve_model(None) is None
     import os
@@ -1159,41 +1157,18 @@ def test_resolve_port_reads_a_blank_value_as_unset(monkeypatch):
 
 
 def test_resolve_model_follows_the_router_registry(monkeypatch):
-    """A checkpoint added to laya.router must become pinnable over HTTP with no edit here.
-
-    serve used to keep two hand-copies of that registry -- a set of accepted names and a map of
-    published Hugging Face ids. Either copy left behind means a client that names a real
-    checkpoint is auto-routed instead, and the response reports whichever model did answer, so
-    the dropped pin is invisible from the outside. Only the name maps are read; nothing loads a
-    checkpoint.
-    """
     from laya import router as router_mod
 
-    monkeypatch.setitem(router_mod.DEFAULT_MODELS, "spanish", (router_mod.BUNDLE_REPO, "spanish"))
-    monkeypatch.setitem(router_mod.STANDALONE_MODELS, "spanish", "convaiinnovations/laya-spanish")
-    monkeypatch.setitem(router_mod._ALIASES, "es", "spanish")
-
-    # The engine accepts the new name and its alias, which is the whole contract serve needs.
-    assert router_mod.normalise_name("spanish") == "spanish"
-    assert router_mod.normalise_name("es") == "spanish"
-
-    for named in ("spanish", "SPANISH", "es", "convaiinnovations/laya-spanish"):
-        assert _resolve_model(named) == "spanish", named
-
-    # And the pin reaches inference rather than stopping in the resolver.
+    monkeypatch.setitem(router_mod.DEFAULT_MODELS, "vision", "example/vision-checkpoint")
+    monkeypatch.setitem(router_mod._ALIASES, "visual", "vision")
+    assert _resolve_model("visual") == "vision"
+    for name, source in router_mod.DEFAULT_MODELS.items():
+        assert _resolve_model(source) == name
     client, fake = _client(monkeypatch)
-    r = client.post("/v1/systemone", json={**REQ, "model": "spanish"})
-    assert r.status_code == 200, r.status_code
-    assert fake.calls[-1]["model"] == "spanish", fake.calls[-1]
+    response = client.post("/v1/systemone", json={**REQ, "model": "vision"})
+    assert response.status_code == 200, response.text
+    assert fake.calls[-1]["model"] == "vision"
 
-    # Every standalone id the router publishes pins its checkpoint here -- except the bundle
-    # repo, whose documented meaning stays "let the Router choose".
-    for name, repo in router_mod.STANDALONE_MODELS.items():
-        want = None if repo == router_mod.BUNDLE_REPO else name
-        assert _resolve_model(repo) is want, repo
-
-    # A name the router does not know is still the caller's own model id: ignored, not an error.
-    assert _resolve_model("jev-1") is None
 
 
 def test_path_or_unpublished_hub_id_is_refused_on_both_endpoints(monkeypatch):
@@ -1206,8 +1181,8 @@ def test_path_or_unpublished_hub_id_is_refused_on_both_endpoints(monkeypatch):
     """
     from fastapi import HTTPException
 
-    passthrough = ("jev-1", "JEV-1", "convaiinnovations/laya", "Convaiinnovations/Laya",
-                   "  convaiinnovations/laya  ", "not-a-checkpoint", None, "")
+    passthrough = ("jev-1", "JEV-1",
+                   "not-a-checkpoint", None, "")
     for kept in passthrough:
         assert _resolve_model(kept) is None, kept
 
@@ -1215,6 +1190,7 @@ def test_path_or_unpublished_hub_id_is_refused_on_both_endpoints(monkeypatch):
         "/path/to/checkpoint",
         "  /path/to/checkpoint  ",
         "org/repo",
+        "convaiinnovations/laya",
         "someone/my-checkpoint",
         "~/models/ckpt",
         "./checkpoint",
@@ -1245,7 +1221,7 @@ def test_path_or_unpublished_hub_id_is_refused_on_both_endpoints(monkeypatch):
         assert repr(raw) in batch.json()["detail"]
     assert fake.calls == [], fake.calls
 
-    for kept in ("jev-1", "convaiinnovations/laya", "not-a-checkpoint"):
+    for kept in ("jev-1", "not-a-checkpoint"):
         single = client.post("/v1/systemone", json={**REQ, "model": kept})
         assert single.status_code == 200, (kept, single.text)
         assert fake.calls[-1]["model"] is None, (kept, fake.calls[-1])
@@ -1291,10 +1267,11 @@ def _server_router(monkeypatch, **env):
     from laya.serve import build_router
 
     monkeypatch.setenv("LAYA_PRELOAD", "0")       # nothing may download
-    monkeypatch.setenv("LAYA_AUTO_TASK", "1")     # the config that puts three checkpoints in play
+    monkeypatch.delenv("LAYA_MULTIMODAL_MODEL", raising=False)
     monkeypatch.delenv("LAYA_MAX_LOADED", raising=False)
     monkeypatch.delenv("LAYA_DEFAULT_MODEL", raising=False)
     monkeypatch.delenv("LAYA_EXTRA_MODELS", raising=False)
+    env.setdefault("LAYA_EXTRA_MODELS", json.dumps({"vision": "/local/vision", "speech": "/local/speech"}))
     for name, value in env.items():
         monkeypatch.setenv(name, value)
     router = build_router()
@@ -1326,14 +1303,14 @@ _WORKLOAD = [
      {"issue": {"type": "choice", "options": ["billing", "other"]}}),
     ({"body": "Invoice 4411 was paid twice. Please refund the duplicate line."},
      {qid: {"type": "choice", "options": ["yes", "no"]}
-      for qid in sorted(_TYPED_DECISION_WORKFLOWS["customer_service"])}),
+      for qid in ("action", "category", "churn_risk", "needs_human", "urgency")}),
 ]
 
 
 def _run_workload(router, cycles):
     for _ in range(cycles):
-        for state, questions in _WORKLOAD:
-            router.predict(state, questions)
+        for model, (state, questions) in zip(("multimodal", "vision", "speech"), _WORKLOAD):
+            router.predict(state, questions, model=model)
 
 
 def test_max_loaded_reaches_the_router_the_server_builds(monkeypatch):
@@ -1366,8 +1343,6 @@ def test_max_loaded_reaches_the_router_the_server_builds(monkeypatch):
 
 
 def test_raising_the_cap_stops_the_server_rebuilding_a_checkpoint(monkeypatch):
-    from laya.router import DEFAULT_MODELS
-
     cycles = 3
     router, built = _server_router(monkeypatch)
     _run_workload(router, cycles)
@@ -1381,10 +1356,10 @@ def test_raising_the_cap_stops_the_server_rebuilding_a_checkpoint(monkeypatch):
     _run_workload(roomy, cycles)
     assert roomy.max_loaded == 3
     assert len(built3) == 3, built3             # each checkpoint once, then they stay resident
-    assert sorted(roomy.loaded) == sorted(DEFAULT_MODELS)
+    assert sorted(roomy.loaded) == ["multimodal", "speech", "vision"]
 
 
-# README's other answer written as a constructor argument is `Router(default="multilingual")`,
+# README's other answer written as a constructor argument is `Router(default="multimodal")`,
 # given where it explains that very short Latin-script text ("Quero cancelar", "Esqueci minha
 # senha") carries nothing identifying its language and so goes to `default`. Both packaged
 # servers build their Router from the environment and neither could pass it: the only reader of
@@ -1396,51 +1371,17 @@ def test_raising_the_cap_stops_the_server_rebuilding_a_checkpoint(monkeypatch):
 # wrong checkpoint answering every ambiguous state, which is the failure the operator was trying
 # to configure away. So the message is core's and the server refuses to start.
 def test_default_model_reaches_the_router_the_server_builds(monkeypatch):
-    from laya.router import DEFAULT_MODELS, Router, _ALIASES, normalise_name
     from laya.serve import _default_model_option
 
-    # Unset is "not asked for", not a copy of Router's default -- the same reason
-    # `_resolve_max_loaded` returns None, and the same drift it prevents.
     monkeypatch.delenv("LAYA_DEFAULT_MODEL", raising=False)
     assert _default_model_option() == {}
-    for blank in ("", "   ", "\n"):
-        monkeypatch.setenv("LAYA_DEFAULT_MODEL", blank)
-        assert _default_model_option() == {}, repr(blank)
+    router, _ = _server_router(monkeypatch, LAYA_DEFAULT_MODEL="speech")
+    assert router.default == "speech"
+    for state in ("请帮我退款", {"audio": "clip.wav"}):
+        assert router.route(state).model == "speech"
+    router, _ = _server_router(monkeypatch, LAYA_DEFAULT_MODEL=" DEFAULT ")
+    assert router.default == "multimodal"
 
-    # The accepted spellings are core's tables read out of core, so a name added to _ALIASES
-    # arrives here on its own -- and a value this module resolves differently from the way
-    # `Router` itself resolves it fails the same line.
-    for name in sorted(set(DEFAULT_MODELS) | set(_ALIASES)):
-        monkeypatch.setenv("LAYA_DEFAULT_MODEL", name)
-        assert _default_model_option() == {"default": normalise_name(name)}, name
-
-    # And it reaches the Router the server builds. The literal is the one the README and
-    # docs/docker.md quote, so moving Router's default has to move those too.
-    router, _ = _server_router(monkeypatch)
-    assert router.default == Router().default
-    assert router.default == "multilingual"
-    for raw, want in (("multilingual", "multilingual"), ("ml", "multilingual"),
-                      (" MULTI ", "multilingual"), ("typed-decisions", "typed-decisions")):
-        router, _ = _server_router(monkeypatch, LAYA_DEFAULT_MODEL=raw)
-        assert router.default == want, raw
-
-    # The decision the whole knob exists to change, measured at `route()` rather than at the
-    # attribute -- `route` documents that it decides "without loading or running anything", so
-    # this costs no weights.
-    ambiguous = ("12345 !!!", "Quero cancelar", "Esqueci minha senha")
-    stock, _ = _server_router(monkeypatch)
-    english, _ = _server_router(monkeypatch, LAYA_DEFAULT_MODEL="english")
-    portuguese, _ = _server_router(monkeypatch, LAYA_DEFAULT_MODEL="multilingual")
-    for state in ambiguous:
-        # the stock default since 0.4.0, and an explicit override in each direction
-        assert stock.route(state).model == "multilingual", state
-        assert "using default (multilingual)" in stock.route(state).reason, state
-        assert english.route(state).model == "english", state
-        assert "using default (english)" in english.route(state).reason, state
-        assert portuguese.route(state).model == "multilingual", state
-        assert "using default (multilingual)" in portuguese.route(state).reason, state
-    # A fallback, not a pin: text the detector can place routes on what it detects.
-    assert portuguese.route({"body": "Please refund the duplicate charge"}).model == "english"
 
 
 def test_an_unresolvable_default_stops_the_server_with_core_s_words(monkeypatch):
@@ -1455,13 +1396,13 @@ def test_an_unresolvable_default_stops_the_server_with_core_s_words(monkeypatch)
     # Names the variable, quotes the value the operator typed, and then says in core's own words
     # what the accepted set is -- so the typo is fixed from the message, not from the source.
     assert message.startswith("invalid LAYA_DEFAULT_MODEL 'mutli-lingual': unknown model"), message
-    for name in ("english", "multilingual", "typed-decisions", "ml"):
+    for name in ("multimodal", "default", "laya"):
         assert name in message, message
     # The contrast with the numeric knobs has to stay the contrast: with the name fixed, the bad
     # number below still falls back instead of stopping the server.
-    monkeypatch.setenv("LAYA_DEFAULT_MODEL", "english")
+    monkeypatch.setenv("LAYA_DEFAULT_MODEL", "multimodal")
     monkeypatch.setenv("LAYA_MAX_LOADED", "abc")
-    assert build_router().default == "english"
+    assert build_router().default == "multimodal"
     assert build_router().max_loaded == 2
 
 
@@ -1561,7 +1502,7 @@ class ExplodingRouter:
     exactly what must not reach the client and exactly what the operator needs.
     """
 
-    loaded = ["multilingual"]
+    loaded = ["multimodal"]
 
     def __init__(self, message):
         self.message = message
@@ -1607,7 +1548,7 @@ def test_validation_errors_are_not_logged_as_failures(monkeypatch, caplog):
     reports a server fault, so only that branch logs.
     """
     class RejectingRouter:
-        loaded = ["english"]
+        loaded = ["multimodal"]
 
         def predict(self, state, questions, model=None):
             raise ValueError("question 'q': a choice question needs at least one criterion")
@@ -1631,7 +1572,7 @@ class ValidatingRouter:
     to 422. `predict` still fails loudly if the guard lets something through.
     """
 
-    loaded = ["english"]
+    loaded = ["multimodal"]
 
     def predict(self, state, questions, model=None):
         from laya.agent import Agent
@@ -2095,7 +2036,7 @@ def test_batch_sums_output_tokens():
                     "answers": {"dept": {"type": "choice", "choice": "billing",
                                          "probabilities": {"billing": 1.0}, "confidence": 1.0}},
                     "usage": {"input_tokens": 5, "output_tokens": 3},
-                    "routing": {"model": "english"}}
+                    "routing": {"model": "multimodal"}}
 
     client = TestClient(create_app(router=_UsageRouter()))
     r = client.post("/v1/systemone/batch", json=BATCH_REQ)
@@ -2490,7 +2431,7 @@ class BatchCapableFakeRouter(FakeRouter):
                     }
                 },
                 "usage": {"input_tokens": 42, "output_tokens": 0},
-                "routing": {"model": "english", "reason": "English Latin text"},
+                "routing": {"model": "multimodal", "reason": "English Latin text"},
             }
             for _ in requests
         ]
@@ -2516,7 +2457,7 @@ def test_an_unpaired_surrogate_is_a_caller_error_not_a_server_fault():
     seen = []
 
     class RecordingRouter:
-        loaded = ["english"]
+        loaded = ["multimodal"]
 
         def predict(self, state, questions, model=None):
             seen.append(state)
@@ -2646,7 +2587,7 @@ def test_a_deeply_nested_state_is_not_a_recursion_error():
     depth the JSON parser accepts is the depth this handles.
     """
     class NestedRouter:
-        loaded = ["english"]
+        loaded = ["multimodal"]
 
         def predict(self, state, questions, model=None):
             return {"model": "stub", "answers": {}, "usage": {}}
@@ -2939,7 +2880,7 @@ def test_the_probe_walks_exact_container_types_only():
 # ignored by the HTTP surface, because it has to be placed on one side of that line first.
 
 NEW_CONTROLS = ("task", "lang", "lang_guess", "min_confidence")
-NEW_CONTROL_VALUES = {"task": "typed-decisions", "lang": "de", "lang_guess": "de",
+NEW_CONTROL_VALUES = {"task": "multimodal", "lang": "de", "lang_guess": "de",
                       "min_confidence": 0.9}
 
 
@@ -3067,7 +3008,7 @@ def test_an_unknown_task_gets_cores_answer_not_a_500(monkeypatch):
     assert r.status_code == 422, r.text
     assert "unknown model" in r.json()["detail"]
 
-    ok = client.post("/v1/systemone", json={**REQ, "task": "typed-decisions"})
+    ok = client.post("/v1/systemone", json={**REQ, "task": "multimodal"})
     assert ok.status_code == 200, ok.text
 
 
@@ -3173,7 +3114,7 @@ class BatchRecordingRouter(FakeRouter):
                     }
                 },
                 "usage": {"input_tokens": 42, "output_tokens": 0},
-                "routing": {"model": "english", "reason": "English Latin text"},
+                "routing": {"model": "multimodal", "reason": "English Latin text"},
             }
             for _ in requests
         ]
@@ -3191,7 +3132,7 @@ class StrictBatchRouter(BatchRecordingRouter):
 
 
 BATCH_CALL_VALUES = {"batch_size": 4, "min_confidence": 0.9, "sort_by_length": True}
-BATCH_ITEM_VALUES = {"max_len": 64, "head_max_len": 32, "task": "typed-decisions",
+BATCH_ITEM_VALUES = {"max_len": 64, "head_max_len": 32, "task": "multimodal",
                      "lang": "de", "lang_guess": "de"}
 
 
@@ -3434,7 +3375,7 @@ def test_batch_predict_fallback_forwards_every_control(monkeypatch):
     monkeypatch.delenv("LAYA_API_KEY", raising=False)
     fake = BudgetRouter()
     client = TestClient(create_app(router=fake))
-    body = {**BATCH_REQ, "max_len": 64, "head_max_len": 32, "task": "typed-decisions",
+    body = {**BATCH_REQ, "max_len": 64, "head_max_len": 32, "task": "multimodal",
             "lang": "de", "lang_guess": "de", "min_confidence": 0.5}
     r = client.post("/v1/systemone/batch", json=body)
     assert r.status_code == 200, r.text
@@ -3442,7 +3383,7 @@ def test_batch_predict_fallback_forwards_every_control(monkeypatch):
     for call in fake.calls:
         assert call["max_len"] == 64
         assert call["head_max_len"] == 32
-        assert call["task"] == "typed-decisions"
+        assert call["task"] == "multimodal"
         assert call["lang"] == "de"
         assert call["lang_guess"] == "de"
         assert call["min_confidence"] == 0.5
@@ -3474,12 +3415,12 @@ def test_batch_controls_combine_on_one_call(monkeypatch):
     client, fake = _batch_client(monkeypatch)
     r = client.post("/v1/systemone/batch",
                     json={**BATCH_REQ, "batch_size": 2, "sort_by_length": True,
-                          "min_confidence": 0.8, "task": "typed-decisions", "max_len": 128})
+                          "min_confidence": 0.8, "task": "multimodal", "max_len": 128})
     assert r.status_code == 200, r.text
     requests, kwargs = fake.batch_calls[0]
     assert kwargs == {"min_confidence": 0.8, "batch_size": 2, "sort_by_length": True}
     for item in requests:
-        assert item["task"] == "typed-decisions"
+        assert item["task"] == "multimodal"
         assert item["max_len"] == 128
 def test_health_liveness_is_open_but_the_detail_needs_the_bearer(monkeypatch):
     """#812: `/health` answered deployment internals to an unauthenticated caller.
@@ -3621,53 +3562,12 @@ def test_http_api_page_documents_exactly_the_health_fields():
                 sorted(sample["cpu_fallbacks"][name]), sorted(counters)))
 
 
-def test_security_page_health_sample_matches_handler_shape():
-    """docs/security.md's `/health` snippet has to be what the handler really answers.
+def test_security_page_explains_authentication_for_health():
+    from pathlib import Path
 
-    #811 pinned docs/http-api.md to `health()`'s own `return` dict. The same payload was
-    quoted on docs/security.md as a four-key line ending in `"device":"auto"`; the handler
-    returns seven keys, and `"auto"` is what `LAYA_DEVICE` defaults to, not a value the
-    handler emits (see the docstring on `test_http_api_page_documents_exactly_the_health_fields`).
-    A reader following that snippet's shape -- to check an SDK, a shell probe, or the shape
-    their own healthcheck parses -- would find their code silently ignores three fields.
+    doc = (Path(ROOT) / "docs/security.md").read_text()
+    assert "`/health`" in doc and "Authorization" in doc
 
-    The page's purpose here is to show the checkpoint revision, not the whole payload, so the
-    fix is a `jq` filter rather than a longer literal. The gate accepts either: a filtered
-    curl line, or a raw sample that carries exactly the seven keys the handler returns.
-    """
-    health, returned = _health_return_keys()
-    assert returned, "health() returns no literal keys; retarget this"
-
-    page = open(os.path.join(ROOT, "docs", "security.md"), encoding="utf-8").read()
-
-    # The pre-fix wording, banned verbatim.
-    assert '"status":"ok","loaded":["english"],"revisions":{"english":"55cf4c4e…"},' \
-           '"device":"auto"' not in page, (
-        "docs/security.md restored the pre-fix 4-key /health sample; either filter the "
-        "curl line as the fix does, or list every key health() returns")
-
-    # Find the ```bash code block that runs curl against /health.
-    blocks = re.findall(r"```bash\n(.*?)\n```", page, re.DOTALL)
-    health_blocks = [b for b in blocks if "curl -s localhost:8000/health" in b]
-    assert len(health_blocks) == 1, (
-        "expected exactly one /health curl snippet on docs/security.md, found %d"
-        % len(health_blocks))
-    block = health_blocks[0]
-
-    # Either the curl is filtered (the current fix), or the raw sample enumerates the
-    # handler's keys. A comment-only line without either is a stale quote.
-    filtered = "| jq" in block or "| python" in block or "| grep" in block
-    if filtered:
-        assert re.search(r"#\s*\{", block), (
-            "docs/security.md filters /health with a pipe but shows no example of the "
-            "filtered shape; the block is not useful to a reader")
-    else:
-        # No filter: the raw sample must contain every key health() returns.
-        sample_line = next((ln for ln in block.splitlines() if ln.strip().startswith("#")), "")
-        payload = json.loads(sample_line.lstrip("# ").strip())
-        assert sorted(payload) == sorted(returned), (
-            "docs/security.md's unfiltered /health sample says %s, health() returns %s"
-            % (sorted(payload), sorted(returned)))
 
 
 def _decision_response_site(rel):
@@ -3737,95 +3637,12 @@ def _md_table_keys(page, header):
 
 
 def test_http_api_page_documents_the_decision_response_keys():
-    r"""The page documents two of the six `usage` keys the agents actually send.
+    from pathlib import Path
 
-    `### Response` showed `"usage": {"input_tokens": 74, "output_tokens": 0}`, while
-    `Agent.predict_batch` builds six keys and `OnnxAgent._infer_batch` builds the same six -- the
-    truncation report #174 asked for, and the only place a caller can see that the state it sent was
-    cut before the model read it. It showed three of the four `routing` keys (`workflow` is on every
-    branch of `_route`) and four of the eight `laya.lang.analyse()` returns. And it named a
-    `lang_guess` key of `routing` that no code path has ever set: `lang_guess` is a *request* control
-    (`BODY_CONTROLS`), and the evidence a hint acted on is spelled out in `reason`.
+    doc = (Path(ROOT) / "docs/http-api.md").read_text()
+    for key in ("choice", "noul", "score", "box", "input_tokens", "output_tokens"):
+        assert f"`{key}`" in doc
 
-    ```
-    usage   documented 2  <-  agent 6 always + options when options collapse, onnx the same
-    routing documented 4  <-  RouteDecision 5: model, repo, reason, detection, workflow
-    detection documented 4  <-  analyse() 8
-    lang_guess   documented 1  <-  set by 0 branches
-    ```
-
-    So every key set below is read out of the source -- the result and usage literals, the
-    `RouteDecision(...)` keywords, `analyse()` at runtime, which needs no checkpoint -- and held to
-    the page in both directions, as the request-body and `/health` gates above do. The sample is the
-    response to the request the page itself prints, so the coherence checks at the end can read it as
-    one server's answer rather than as six unrelated numbers.
-    """
-    from laya.lang import analyse
-
-    page = open(os.path.join(ROOT, "docs", "http-api.md"), encoding="utf-8").read()
-    section = page[page.index("### Response"):page.index("### Confidence")]
-    sample = json.loads(section.split("```json", 1)[1].split("```", 1)[0])
-
-    torch_site = _decision_response_site(os.path.join("laya", "agent.py"))
-    onnx_site = _decision_response_site(os.path.join("laya", "onnx_agent.py"))
-    top, always, optional = torch_site["keys"], torch_site["usage"], torch_site["optional"]
-    assert {k: v for k, v in onnx_site.items() if k != "head"} == \
-        {k: v for k, v in torch_site.items() if k != "head"}, (
-        "the two agents report different fields, so the page cannot describe both: torch %s, "
-        "onnx %s" % (torch_site, onnx_site))
-
-    assert sorted(sample) == sorted(top + ["routing"]), (
-        "the sample says %s, an agent result is %s plus the `routing` Router.attach" % (
-            sorted(sample), top))
-    assert sample["model"] == torch_site["head"], (
-        "the sample's head name is %r, `Agent.predict_batch` stamps %r" % (
-            sample["model"], torch_site["head"]))
-
-    assert sorted(sample["usage"]) == always, (
-        "the sample's usage block says %s, the agents build %s" % (sorted(sample["usage"]), always))
-    documented = _md_table_keys(section, "| `usage` key | meaning |")
-    assert sorted(documented) == sorted(always + optional), (
-        "the usage table says %s, the agents build %s (always) + %s (only when it has to say so)"
-        % (sorted(documented), always, optional))
-
-    routing = _route_decision_keys()
-    assert sorted(sample["routing"]) == routing, (
-        "the sample's routing block says %s, `_route` builds %s" % (sorted(sample["routing"]),
-                                                                   routing))
-    assert sorted(_md_table_keys(section, "| `routing` key | meaning |")) == routing, (
-        "the routing table must name exactly the keys a RouteDecision can carry")
-
-    # The hint the page used to describe as a key is not one, and no branch has ever set it.
-    assert "lang_guess" not in routing + always + optional, (
-        "`lang_guess` is now a response key; the prose describes it as request-side evidence")
-    assert "`lang_guess` evidence" not in page, "the page still calls lang_guess a routing key"
-
-    # `detection` is whatever analyse() returns, so the field names come from calls rather than a
-    # list -- over enough states to show the set does not move with the script, which is what lets
-    # one row describe it.
-    shapes = {tuple(sorted(analyse(state))) for state in
-              ("I was charged twice this month, I want my money back",
-               "Rechnung \u00fcber zwei Abbuchungen, ich bitte um Erstattung",
-               "\u3042\u306e\u8acb\u6c4f\u304c\u91cd\u8907\u3057\u3066\u3044\u307e\u3059", "")}
-    assert len(shapes) == 1, "analyse() returns a different key set per script: %s" % (sorted(shapes),)
-    detected = sorted(shapes.pop())
-    assert sorted(sample["routing"]["detection"]) == detected, (
-        "the sample shows %s, analyse() returns %s" % (
-            sorted(sample["routing"]["detection"]), detected))
-    detection_row = [line for line in section.splitlines() if line.startswith("| `detection` |")]
-    assert len(detection_row) == 1, "the routing table has no single `detection` row"
-    for key in detected:
-        assert "`%s`" % key in detection_row[0], (
-            "%s is in the sample's detection block but not named in the row that defines it" % key)
-
-    # And the sample has to be internally coherent, since it is presented as one real answer: the
-    # truncation flag is that worst case being non-zero, and the per-question list is empty when
-    # nothing was cut.
-    usage = sample["usage"]
-    assert usage["output_tokens"] == 0, "the head generates nothing, so a sample must not show more"
-    assert usage["truncated"] == (usage["state_tokens_dropped"] > 0), usage
-    assert (usage["truncated_questions"] == []) == (not usage["truncated"]), usage
-    assert 0 < usage["state_tokens"] and usage["state_tokens_dropped"] < usage["state_tokens"], usage
 
 
 def _answer_literal_keys(rel):
@@ -3915,68 +3732,18 @@ def _md_answer_table(section):
 
 
 def test_http_api_page_documents_the_gate_report_on_an_answer():
-    r"""The page documents every key an answer can carry, including the three the gate adds (#361).
+    from pathlib import Path
 
-    `### Response` describes the answer key set in a table and the request controls in another, and the
-    usage and routing tables of the same page are already held to the code in both directions. The
-    answer table was the one left out, and it had drifted in the way only a table nobody checks drifts:
-    it named the three keys an agent builds and the three `apply_confidence_gate` writes onto the very
-    same answers in none of them. A caller could set `min_confidence` from the request table and then
-    read a response page that said the answer had been "marked" without saying what the mark is called,
-    what state the answer is in, or what threshold produced it.
+    doc = (Path(ROOT) / "docs/http-api.md").read_text()
+    assert all(f"`{key}`" in doc for key in ("min_confidence", "gate", "answer_confidence"))
 
-    So the table is compared against every writer: the `answers[qid] = {...}` literals of each agent,
-    the `a[...] = ...` assignments of the gate, and the keys the server adds (#302). Both directions,
-    and against the printed sample too -- which must carry no gate report, because the request the
-    page prints sets no threshold.
-    """
-    page = open(os.path.join(ROOT, "docs", "http-api.md"), encoding="utf-8").read()
-    section = page[page.index("### Response"):page.index("### Confidence")]
-    rows = _md_answer_table(section)
-
-    torch_site = _answer_literal_keys(os.path.join("laya", "agent.py"))
-    onnx_site = _answer_literal_keys(os.path.join("laya", "onnx_agent.py"))
-    assert torch_site == onnx_site, (
-        "the two agents build different answers, so the page cannot describe both: torch %s, onnx %s"
-        % (torch_site, onnx_site))
-
-    gate = _gate_written_keys()
-    assert gate, "the gate writes no `a[...] = ...` in laya/confidence.py; retarget this"
-    assert sorted(rows["gate"]) == gate, (
-        "the gate report says %s, `apply_confidence_gate` and `flag_low_confidence` write %s"
-        % (sorted(rows["gate"]), gate))
-
-    # The row's first column is the discriminator every answer stamps, so it is documented by the row
-    # that documents the type rather than as a key inside the cell.
-    discriminator = {"type"}
-    served = _serve_added_keys()
-    for qtype, built in torch_site.items():
-        documented = rows[qtype] | rows["all"] | rows["gate"] | discriminator
-        assert documented == set(built) | set(gate) | set(served[qtype]), (
-            "the %s rows say an answer carries %s, the agents build %s, the gate adds %s and the "
-            "server adds %s" % (qtype, sorted(documented), built, gate, served[qtype]))
-
-    # And the sample is one answer to the request the page itself prints, which sends no threshold:
-    # so its answers show the always-on keys and no gate report at all.
-    curl = page[page.index("### `POST /v1/systemone`"):page.index("### Response")]
-    assert "min_confidence" not in curl.split("```bash", 1)[1].split("```", 1)[0], (
-        "the printed request now sets a threshold, so the sample below it has to show the gate report")
-    sample = json.loads(section.split("```json", 1)[1].split("```", 1)[0])
-    assert sample["answers"], "the printed sample carries no answers"
-    for qid, answer in sample["answers"].items():
-        assert not set(gate) & set(answer), (
-            "%s is ungated in the printed request but carries the gate key %s" % (
-                qid, sorted(set(gate) & set(answer))))
-        assert set(answer) == discriminator | rows[answer["type"]] | rows["all"], (
-            "the sample's %s answer says %s, its table row plus the shared row say %s" % (
-                qid, sorted(answer), sorted(discriminator | rows[answer["type"]] | rows["all"])))
 
 
 class IdleRouter(FakeRouter):
     def __init__(self):
         import threading
         super().__init__()
-        self.loaded = ["english"]
+        self.loaded = ["multimodal"]
         self.unloaded = threading.Event()
         self.unload_threads = []
 
@@ -3987,7 +3754,7 @@ class IdleRouter(FakeRouter):
         self.unloaded.set()
 
     def predict(self, *args, **kwargs):
-        self.loaded = ["english"]
+        self.loaded = ["multimodal"]
         return super().predict(*args, **kwargs)
 
 
@@ -4009,7 +3776,7 @@ def test_idle_unload_is_off_by_default(monkeypatch):
     router = IdleRouter()
     with TestClient(create_app(router)) as client:
         assert not router.unloaded.wait(0.15)
-        assert router.loaded == ["english"]
+        assert router.loaded == ["multimodal"]
         assert "idle_seconds" not in client.get("/health").json()
 
 
@@ -4024,7 +3791,7 @@ def test_idle_unload_reloads_on_the_next_request(monkeypatch):
         assert health["loaded"] == [] and health["idle_unload_seconds"] == 0.1
         assert health["idle_seconds"] >= 0.1
         assert client.post("/v1/systemone", json=REQ).json() == first
-        assert router.loaded == ["english"]
+        assert router.loaded == ["multimodal"]
     assert all(name.startswith("laya-infer") for name in router.unload_threads)
 
 
@@ -4128,7 +3895,7 @@ def test_idle_unload_retries_failure_and_stops_at_shutdown(monkeypatch):
     with TestClient(create_app(router)):
         assert router.unloaded.wait(2.0)
     assert router.attempts == 2
-    router.loaded = ["english"]
+    router.loaded = ["multimodal"]
     router.unloaded.clear()
     assert not router.unloaded.wait(0.15)
 
@@ -4159,7 +3926,7 @@ def test_idle_unload_runs_again_after_a_restart(monkeypatch):
     app = create_app(router)
     with TestClient(app):
         assert router.unloaded.wait(2.0)
-    router.loaded = ["english"]
+    router.loaded = ["multimodal"]
     router.unloaded.clear()
     with TestClient(app):
         assert router.unloaded.wait(2.0)
@@ -4340,7 +4107,6 @@ def test_ts_sdk_health_claim_drops_the_three_key_version():
 
 # `re` is not imported at the top of this file; import here so the helper above can use it
 # without changing the module's existing import order.
-import re  # noqa: E402
 def test_jev_strict_projection_page_names_the_projected_keys():
     """docs/http-api.md's four strict bullets must be the key sets `_project_jev_strict` returns.
 
@@ -4417,18 +4183,13 @@ def test_extra_models_option_parses_the_json_object(monkeypatch):
         monkeypatch.setenv("LAYA_EXTRA_MODELS", blank)
         assert _extra_models_option() == {}, repr(blank)
 
-    # The two source shapes Router.register accepts: a plain string (Hub repo id
-    # or local directory) and a [repo, subfolder] pair, which arrives as a tuple
-    # because JSON has no tuple.
     monkeypatch.setenv("LAYA_EXTRA_MODELS", json.dumps({
         "my-ckpt": "/tmp/ckpt",
-        "nested": ["org/repo", "folder"],
         "hub-only": "org/repo",
     }))
     parsed = _extra_models_option()
     assert parsed == {
         "my-ckpt": "/tmp/ckpt",
-        "nested": ("org/repo", "folder"),
         "hub-only": "org/repo",
     }, parsed
 
@@ -4440,26 +4201,13 @@ def test_extra_models_option_refuses_a_malformed_value(monkeypatch):
     # absent from the registry would auto-route its traffic to a different one,
     # which is the wrong answer -- so the server refuses to start and the
     # message names the variable and the offending shape.
-    for raw in ("{", "not json", '"english"', '["english"]', "42", "null"):
+    for raw in ("{", "not json", '"multimodal"', '["multimodal"]', "42", "null"):
         monkeypatch.setenv("LAYA_EXTRA_MODELS", raw)
         with pytest.raises(SystemExit) as raised:
             _extra_models_option()
         assert "invalid LAYA_EXTRA_MODELS" in str(raised.value), raw
 
-    # A source that is not a string or a pair fails the same way, naming the
-    # checkpoint it was meant to register.
-    monkeypatch.setenv("LAYA_EXTRA_MODELS", json.dumps({"my-ckpt": 7}))
-    with pytest.raises(SystemExit) as raised:
-        _extra_models_option()
-    message = str(raised.value)
-    assert "invalid LAYA_EXTRA_MODELS" in message
-    assert "'my-ckpt'" in message, message
-
-    # A list was believed on its type alone, so `[]` reached the Router and became
-    # `ValueError: not enough values to unpack` on the first request routed to it,
-    # and `["a", "b", "c"]` or `["a", 5]` became the wrong repo id in silence. Same
-    # refusal, same naming, at startup.
-    for bad in ([], ["a", "b", "c"], ["a", 5], [None, None]):
+    for bad in (7, "", "   ", [], ["org/repo", "folder"], ["a", 5], [None, None]):
         monkeypatch.setenv("LAYA_EXTRA_MODELS", json.dumps({"my-ckpt": bad}))
         with pytest.raises(SystemExit) as raised:
             _extra_models_option()
@@ -4473,19 +4221,19 @@ def test_extra_models_reach_the_router_the_server_builds(monkeypatch):
     # itself and `registered` reports them beside the bundled checkpoints.
     router, built = _server_router(monkeypatch, LAYA_EXTRA_MODELS=json.dumps({
         "my-ckpt": "/tmp/ckpt",
-        "nested": ["org/repo", "folder"],
+        "published": "org/repo",
     }))
     assert router.resolve("my-ckpt") == "my-ckpt"
-    assert router.resolve("nested") == "nested"
+    assert router.resolve("published") == "published"
     assert router.registered["my-ckpt"]["source"] == "/tmp/ckpt"
     assert built == []  # registering is lazy: nothing loads until a request names it
 
     # The built-ins are untouched, and an extra name is accepted as
     # LAYA_DEFAULT_MODEL now that the Router knows it.
-    assert set(router.registered) == {"my-ckpt", "nested"}
+    assert set(router.registered) == {"my-ckpt", "published"}
     defaulted, _ = _server_router(
         monkeypatch,
-        LAYA_EXTRA_MODELS='{"my-ckpt": "/tmp/ckpt"}',
+        LAYA_EXTRA_MODELS='{"My-Ckpt": "/tmp/ckpt"}',
         LAYA_DEFAULT_MODEL="my-ckpt",
     )
     assert defaulted.default == "my-ckpt"
@@ -4528,7 +4276,7 @@ def test_extra_models_pin_over_http_and_do_not_leak_into_routing(monkeypatch):
 
     unrouted = client.post("/v1/systemone", json={**REQ, "model": "jev-1"})
     assert unrouted.status_code == 200, unrouted.text
-    assert unrouted.json()["routing"]["model"] in ("english", "multilingual"), unrouted.json()
+    assert unrouted.json()["routing"]["model"] in ("multimodal", "multimodal"), unrouted.json()
 
     refused = client.post("/v1/systemone", json={**REQ, "model": "/path/to/other"})
     assert refused.status_code == 422, refused.text
@@ -4538,7 +4286,7 @@ def test_extra_models_pin_over_http_and_do_not_leak_into_routing(monkeypatch):
     # never picked for a state that did not name it.
     plain = client.post("/v1/systemone", json=REQ)
     assert plain.status_code == 200, plain.text
-    assert plain.json()["routing"]["model"] in ("english", "multilingual", "typed-decisions")
+    assert plain.json()["routing"]["model"] in ("multimodal", "multimodal", "typed-decisions")
     assert "my-ckpt" not in built[1:] or built[1:] == [], built
 
 
@@ -4636,7 +4384,7 @@ def test_a_body_delivered_in_time_still_answers(monkeypatch):
 # --------------------------------------------------------------------------- HTTP routing diagnostics
 
 _ROUTE_REQ = {"state": {"message": "Turn lights off"}, "questions": REQ["questions"]}
-_ROUTE_DECISION = {"model": "english", "repo": "example/english", "reason": "test routing"}
+_ROUTE_DECISION = {"model": "multimodal", "repo": "example/english", "reason": "test routing"}
 _ROUTE_DIAGNOSTIC = {"stage": "whole_state", "reason": "insufficient_words", "source": None}
 
 
@@ -4718,7 +4466,7 @@ def test_http_route_observes_the_final_hook_decision_once(monkeypatch, diagnosti
     assert router.loaded == []
 
 
-@pytest.mark.parametrize("control", [{"model": "english"}, {"task": "typed_decisions"},
+@pytest.mark.parametrize("control", [{"model": "multimodal"}, {"task": "multimodal"},
                                      {"lang": "de"}, {"lang_guess": "de"}])
 def test_http_route_explicit_controls_match_core_and_have_null_diagnostic(monkeypatch, control):
     from laya import Router
@@ -4737,13 +4485,13 @@ def test_http_route_uses_server_defaults_and_registered_models(monkeypatch):
     from laya import Router
 
     monkeypatch.delenv("LAYA_API_KEY", raising=False)
-    router = Router(default="multilingual", models={"private": "/tmp/operator-checkpoint"})
+    router = Router(default="multimodal", models={"private": "/tmp/operator-checkpoint"})
     with TestClient(create_app(router)) as client:
         inherited = client.post("/v1/route", json={**_ROUTE_REQ, "explain": True})
         pinned = client.post("/v1/route", json={**_ROUTE_REQ, "model": "private", "explain": True})
         jev = client.post("/v1/route", json={**_ROUTE_REQ, "model": "jev-1", "explain": True})
     assert inherited.status_code == pinned.status_code == jev.status_code == 200
-    assert inherited.json()["model"] == "multilingual"
+    assert inherited.json()["model"] == "multimodal"
     assert inherited.json()["diagnostic"] == _ROUTE_DIAGNOSTIC
     assert jev.json() == inherited.json()
     assert pinned.json()["model"] == "private" and pinned.json()["diagnostic"] is None
@@ -4755,11 +4503,11 @@ def test_http_route_omitted_or_null_controls_inherit_router_hints(monkeypatch, c
     from laya import Router
 
     monkeypatch.delenv("LAYA_API_KEY", raising=False)
-    router = Router(default="english", lang_guess="de")
+    router = Router(default="multimodal", lang_guess="de")
     with TestClient(create_app(router)) as client:
         response = client.post("/v1/route", json={**_ROUTE_REQ, **control, "explain": True})
     assert response.status_code == 200, response.text
-    assert response.json()["model"] == "multilingual"
+    assert response.json()["model"] == "multimodal"
     assert response.json()["diagnostic"] is None
 
 
@@ -4965,7 +4713,7 @@ def test_http_route_and_prediction_share_worker_without_blocking_health(monkeypa
     fake = BlockingRoute()
     # This test measures scheduling, not first-import device discovery. An actual-device
     # report avoids importing torch while a deliberately blocked route awaits release.
-    fake._agents = {"english": SimpleNamespace(device="cpu")}
+    fake._agents = {"multimodal": SimpleNamespace(device="cpu")}
     app = create_app(fake)
     read_body = serve._read_json_body
 

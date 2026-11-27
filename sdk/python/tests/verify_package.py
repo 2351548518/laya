@@ -46,7 +46,6 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("dist", type=Path)
     parser.add_argument("--server-python", type=Path)
-    parser.add_argument("--legacy-server-fixture", type=Path)
     args = parser.parse_args()
     tests = Path(__file__).resolve().parent
     dist = args.dist.resolve()
@@ -86,12 +85,7 @@ def main():
             server_python = args.server_python.absolute()
             command(python, "-I", tests / "integration.py", "--server-python", server_python,
                     cwd=root, env=env)
-            if args.legacy_server_fixture:
-                command(python, "-I", tests / "integration.py", "--server-python", server_python,
-                        "--server-fixture", args.legacy_server_fixture.resolve(), "--legacy-fixture",
-                        cwd=root, env=env)
-        elif args.legacy_server_fixture:
-            parser.error("--legacy-server-fixture requires --server-python")
+
 
 
 if __name__ == "__main__":

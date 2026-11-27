@@ -135,21 +135,23 @@ check("summary/empty", summarise([], [], [], []), {"n": 0})
 class _FakeAgent:
     temperature_by_options = {"choice:11+": 0.5}
     temperature = [1.0, 1.0, 1.0]
-    temperature_by_options_raw = {"choice:11+": 0.10058280825614929}
-    temperature_raw = [1.0, 1.0, 1.0]
 
 
 _fa = _FakeAgent()
 from laya.common import QTYPES  # noqa: E402
 
-check("temp/clamped path is used by default",
+check("temp/checkpoint option bucket",
       temperature_for(_fa, QTYPES["choice"], 20), 0.5)
-check("temp/raw path under unclamped",
-      round(temperature_for(_fa, QTYPES["choice"], 20, unclamped=True), 6), 0.100583)
 check("temp/falls back to the per-type list",
       temperature_for(_fa, QTYPES["choice"], 3), 1.0)
-check("temp/raw falls back too",
-      temperature_for(_fa, QTYPES["choice"], 3, unclamped=True), 1.0)
+_fa.modality_calibration = {"text": {
+    "temperature_by_options": {"choice:11+": 0.75}, "temperature": [1.2, 1.3, 1.4],
+}}
+check("temp/native text bucket",
+      temperature_for(_fa, QTYPES["choice"], 20), 0.75)
+check("temp/native text type fallback",
+      temperature_for(_fa, QTYPES["choice"], 3), 1.2)
+
 
 
 # ------------------------------------------------------------------- constants

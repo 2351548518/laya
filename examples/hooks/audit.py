@@ -40,7 +40,7 @@ QUESTIONS = {
 
 
 # Direct Agent use.
-agent = laya.load("convaiinnovations/laya", on_predict_end=on_predict_end)
+agent = laya.load( on_predict_end=on_predict_end)
 agent.system_one("I was charged twice for the same invoice.", QUESTIONS)
 
 # One call, several states: the hook still fires once, and writes one record per decision.

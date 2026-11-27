@@ -25,10 +25,10 @@ ANSWER = {
     "answers": {"dept": {"type": "choice", "choice": "billing",
                          "probabilities": {"billing": 0.9, "tech": 0.1}, "confidence": 0.9}},
     "usage": {"input_tokens": 40, "output_tokens": 0},
-    "routing": {"model": "english", "repo": "convaiinnovations/laya", "reason": "English Latin text"},
+    "routing": {"model": "multimodal", "repo": "ZeeoRe/jev-multimodal-qwen3.5-4b", "reason": "default native checkpoint"},
 }
-HEALTH = {"status": "ok", "loaded": ["english"], "revisions": {"english": "abc"},
-          "device": "mps", "device_is_preference": False, "checkpoint_devices": {"english": "mps"}}
+HEALTH = {"status": "ok", "loaded": ["multimodal"], "revisions": {"multimodal": "abc"},
+          "device": "mps", "device_is_preference": False, "checkpoint_devices": {"multimodal": "mps"}}
 
 
 class FakeServe(BaseHTTPRequestHandler):
@@ -114,8 +114,8 @@ def test_auto_model_is_not_sent_but_a_pinned_one_is(serve):
     router = RemoteRouter(serve)
     router.predict("x", _questions(), model="auto")
     assert "model" not in FakeServe.requests[-1][2]
-    router.predict("x", _questions(), model="multilingual")
-    assert FakeServe.requests[-1][2]["model"] == "multilingual"
+    router.predict("x", _questions(), model="multimodal")
+    assert FakeServe.requests[-1][2]["model"] == "multimodal"
 
 
 def test_bearer_token_is_sent_when_configured(serve):
@@ -232,8 +232,8 @@ def test_unreachable_server_is_a_clean_error():
 
 def test_loaded_and_revisions_come_from_health(serve):
     router = RemoteRouter(serve)
-    assert router.loaded == ["english"]
-    assert router.loaded_revisions == {"english": "abc"}
+    assert router.loaded == ["multimodal"]
+    assert router.loaded_revisions == {"multimodal": "abc"}
     assert RemoteRouter("http://127.0.0.1:9", timeout=2).loaded == []
 
 
@@ -243,28 +243,28 @@ def test_routing_stays_local_and_needs_no_server(monkeypatch):
         raise AssertionError("routing attempted an HTTP request")
     monkeypatch.setattr(router, "_request", no_http)
     decision = router.route({"text": "Mein Konto wurde zweimal belastet"}, _questions())
-    assert decision.model == "multilingual"
-    assert router.route_batch([{"state": "Mein Konto wurde zweimal belastet", "questions": _questions()}])[0].model == "multilingual"
+    assert decision.model == "multimodal"
+    assert router.route_batch([{"state": "Mein Konto wurde zweimal belastet", "questions": _questions()}])[0].model == "multimodal"
 
 
 def test_predict_batch_is_one_call_per_request_in_order(serve):
     router = RemoteRouter(serve)
     items = [{"state": "a", "questions": _questions()},
-             {"state": "b", "questions": _questions(), "model": "english", "max_len": 256}]
+             {"state": "b", "questions": _questions(), "model": "multimodal", "max_len": 256}]
     results = router.predict_batch(items, batch_size=8, sort_by_length=True, min_confidence=0.5)
     assert results == [ANSWER, ANSWER]
     posts = [r for r in FakeServe.requests if r[0] == "POST"]
     assert [p[2]["state"] for p in posts] == ["a", "b"]
-    assert posts[1][2]["model"] == "english" and posts[1][2]["max_len"] == 256
+    assert posts[1][2]["model"] == "multimodal" and posts[1][2]["max_len"] == 256
     assert all(p[2]["min_confidence"] == 0.5 for p in posts)
 
 
 def test_lifecycle_is_server_owned(serve):
     router = RemoteRouter(serve)
-    assert router.preload(["english"]) is router
+    assert router.preload(["multimodal"]) is router
     assert router.unload() is None
     with pytest.raises(RemoteError) as info:
-        router.load("english")
+        router.load("multimodal")
     assert info.value.code == "unsupported_remote"
 
 
@@ -282,7 +282,7 @@ def test_tools_translate_remote_errors(serve):
 def test_predict_tool_shape_through_a_remote_router(serve):
     out = laya_predict({"text": "billed twice"}, _questions(), router=RemoteRouter(serve))
     assert out["answers"] == ANSWER["answers"]
-    assert out["routing"]["model"] == "english"
+    assert out["routing"]["model"] == "multimodal"
     assert "device" not in out          # no in-process agent to read a device from
     assert out["latency_ms"] >= 0
 
@@ -290,7 +290,7 @@ def test_predict_tool_shape_through_a_remote_router(serve):
 def test_status_reports_the_server_not_local_torch(serve):
     out = laya_status(router=RemoteRouter(serve), preload=False)
     assert out["mode"] == "remote" and out["base_url"] == serve
-    assert out["loaded"] == ["english"] and out["device"] == "mps"
+    assert out["loaded"] == ["multimodal"] and out["device"] == "mps"
     assert out["server"]["status"] == "ok"
     assert "torch_version" not in out
     down = laya_status(router=RemoteRouter("http://127.0.0.1:9", timeout=2))
@@ -315,7 +315,7 @@ def test_tournament_is_refused_before_remote_requests(serve, n):
     assert FakeServe.requests == []
 
 
-@pytest.mark.parametrize("model", ["auto", "english"])
+@pytest.mark.parametrize("model", ["auto", "multimodal"])
 def test_predict_long_is_refused_before_remote_requests(monkeypatch, serve, model):
     # laya-serve has no long-state endpoint, so the scan has nowhere to run. Without this refusal
     # the call reached Router.predict_long and came back as internal_error ("hooks are callables").
@@ -421,8 +421,8 @@ def test_remote_route_tools_do_not_contact_the_server(serve, explain):
     state = {"text": "Mein Konto wurde zweimal belastet"}
     single = laya_route(state, _questions(), router=router, explain=explain)
     batch = laya_route_batch([{"state": state, "questions": _questions()}], router=router, explain=explain)
-    assert single["model"] == "multilingual"
-    assert batch == {"decisions": [single], "model_counts": {"multilingual": 1}}
+    assert single["model"] == "multimodal"
+    assert batch == {"decisions": [single], "model_counts": {"multimodal": 1}}
     assert ("diagnostic" in single) is explain
     if explain:
         assert set(single["diagnostic"]) == {"stage", "reason", "source"}
@@ -514,7 +514,7 @@ def test_remote_timeout_is_forwarded_and_http_failures_are_validated(monkeypatch
 def test_remote_transport_preserves_options_and_all_wire_controls(serve):
     questions = {"dept": {"type": "choice", "instructions": "Which team handles `message`?",
                           "criteria": {"billing": "refunds", "tech": "bugs"}}}
-    controls = {"task": "typed_decisions", "lang": "de", "lang_guess": "de", "max_len": 512,
+    controls = {"task": "default", "lang": "de", "lang_guess": "de", "max_len": 512,
                 "head_max_len": 128, "min_confidence": 0.7}
     state = {"message": "Rückerstattung bitte"}
     RemoteRouter(serve).predict(state, questions, **controls)

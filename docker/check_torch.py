@@ -56,7 +56,7 @@ def main():
     if len(sys.argv) != 2:
         sys.stderr.write(
             "usage: check_torch.py <cpu|cu###>  -- the TORCH_INDEX the image was built with\n"
-            "       (the Dockerfile passes cpu, cu128 or cu130; see its TORCH_INDEX ARG)\n")
+            "       (Compose defaults: cpu, cu126, cu130)\n")
         sys.exit(2)
     if platform.system() == "Linux" and platform.machine() in ("aarch64", "arm64"):
         try:

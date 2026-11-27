@@ -217,9 +217,8 @@ def test_the_docs_name_the_fallback_and_refuse_to_call_the_shipped_number_calibr
         "the docstring must enumerate the fallbacks in order, and the count it teaches must be the "
         "code's: %d returning reads, one of them the preferred `answer_confidence`" % len(reads))
     assert "LAYA_JEV_STRICT" in flat, "the shape that lacks the field has to be named"
-    assert "over-confident" in flat, "the shipped level must not be called calibrated"
-    assert "is not *calibrated* as shipped" in flat
-    assert "The calibrated confidence" not in doc, "main's opening claim, verbatim"
+    assert "observed correctness" in flat
+    assert "TypeSafe choice and score formulas" in flat
 
     page = (pathlib.Path(__file__).resolve().parent.parent
             / "docs" / "evals.md").read_text(encoding="utf-8")
@@ -2436,8 +2435,8 @@ def test_questions_fingerprint_covers_the_instructions():
     """`instructions` is the prompt. Excluding it made the fingerprint say "same question" for
     two questions the model answers differently.
 
-    `laya/common.py::build_head` renders `"%s question: %s" % (q["type"], instructions)` into the
-    tokenized head, `laya/agent.py::Agent._check_question` makes the field mandatory ("add the
+    `native question formatting` renders `"%s question: %s" % (q["type"], instructions)` into the
+    tokenized head, `laya/agent.py::DecisionAgent._check_question` makes the field mandatory ("add the
     text the model should answer"), and Laya's own identity key for sharing forward passes,
     `laya/router.py::_question_schema`, hashes the whole questions dict, instructions included --
     as does this module's own batch grouping at `laya/evals.py::evaluate`.
@@ -2554,7 +2553,7 @@ print(questions_fingerprint(dataset))
 def test_questions_fingerprint_normalizes_instructions_the_way_the_engine_does():
     """Two questions that render the same text are the same question, whatever their JSON shape.
 
-    `laya/agent.py::Agent._to_internal` turns a non-string `instructions` into
+    `laya/agent.py::DecisionAgent._to_internal` turns a non-string `instructions` into
     `json.dumps(ins, ensure_ascii=False)` before tokenizing, and `tests/test_criteria.py:229-251`
     pins why: the default `ensure_ascii=True` escaped non-ASCII to literal `\\uXXXX` and a German
     question answered noul=0.1652 as a dict against 0.2650 as the identical plain string. The
@@ -3132,8 +3131,8 @@ def test_questions_fingerprint_covers_labels():
     """`labels` decides the option text, so it belongs in the key.
 
     The same argument `test_questions_fingerprint_covers_the_instructions` makes for
-    `instructions`. `laya/agent.py::Agent._check_question` validates `labels` through
-    `laya/common.py::_resolve_noul_labels`, `laya/agent.py::Agent._to_internal` carries it into
+    `instructions`. `laya/agent.py::DecisionAgent._check_question` validates `labels` through
+    `laya/common.py::_resolve_noul_labels`, `laya/agent.py::DecisionAgent._to_internal` carries it into
     the internal question, and the resolver is what produces the option text the model actually
     reads. Two question sets differing only in
     `labels` therefore ask the model different things, and hashing them alike let the gate pass
@@ -3179,9 +3178,9 @@ def test_questions_fingerprint_keeps_criteria_order():
 def test_questions_fingerprint_covers_option_order():
     """`option_order` moves what the model reads and re-maps the answer, so it is a fifth field.
 
-    `laya/agent.py::Agent._check_question` accepts only a permutation of the option indices,
+    `laya/agent.py::DecisionAgent._check_question` accepts only a permutation of the option indices,
     `Agent._to_internal` copies it into the internal question, and from there it reaches
-    `laya/common.py::build_sequence` (the tokenized head) and `unpermute_probs` on the way back, so
+    `native processor` (the tokenized head) and `unpermute_probs` on the way back, so
     a permuted question is a different question in exactly the sense this key exists to notice.
     `research/eval/metamorphic.py::permute_options` is one of that harness's two transforms, and
     this suite's own `test_questions_fingerprint_follows_the_question_not_the_row` states "option
@@ -3435,9 +3434,9 @@ def _fake_router(monkeypatch, recorded):
             # The gate is a real part of the Router interface since #361; a stub without it would
             # turn a `--min-confidence` run into a TypeError and hide whether the CLI really
             # forwarded, rather than only parsing, the flag.
-            return {"model": model or "english", "answers": {"intent": choice_answer("a")}}
+            return {"model": model or "multimodal", "answers": {"intent": choice_answer("a")}}
 
-        loaded_revisions = {"english": SHA}
+        loaded_revisions = {"multimodal": SHA}
 
     monkeypatch.setattr(laya, "Router", FakeRouter)
 
@@ -3449,12 +3448,12 @@ def test_cli_forwards_the_pin_and_records_the_commit_that_answered(tmp_path, mon
     _fake_router(monkeypatch, recorded)
     dataset = _write_dataset(tmp_path, [{"state": "s", "questions": Q, "expected": {"intent": "a"}}])
     out = tmp_path / "report.json"
-    assert evals_cli.main(["run", dataset, "--model", "english", "--device", "cpu",
-                           "--revision", "english=" + SHA, "--json", str(out)]) == 0
+    assert evals_cli.main(["run", dataset, "--model", "multimodal", "--device", "cpu",
+                           "--revision", "multimodal=" + SHA, "--json", str(out)]) == 0
     assert recorded["revision"] is None
-    assert recorded["revisions"] == {"english": SHA}
+    assert recorded["revisions"] == {"multimodal": SHA}
     # The report is the artifact a reviewer commits, so it has to carry the commit itself.
-    assert json.loads(out.read_text())["config"]["revisions"] == {"english": SHA}
+    assert json.loads(out.read_text())["config"]["revisions"] == {"multimodal": SHA}
 
 
 def test_cli_bare_revision_pins_every_checkpoint(tmp_path, monkeypatch):
@@ -3469,8 +3468,8 @@ def test_cli_bare_revision_pins_every_checkpoint(tmp_path, monkeypatch):
     assert recorded["revision"] == SHA and recorded["revisions"] == {}
 
 
-def test_cli_records_an_unpinned_run_too(tmp_path, monkeypatch):
-    """The default branch is what an unpinned baseline was taken on; the report must say so."""
+def test_cli_records_an_implicitly_pinned_run_too(tmp_path, monkeypatch):
+    """Record the resolved revision when the caller leaves checkpoint selection at its default."""
     from laya import evals_cli
 
     recorded = {}
@@ -3479,7 +3478,7 @@ def test_cli_records_an_unpinned_run_too(tmp_path, monkeypatch):
     out = tmp_path / "r.json"
     assert evals_cli.main(["run", dataset, "--json", str(out)]) == 0
     assert recorded["revision"] is None and recorded["revisions"] == {}
-    assert json.loads(out.read_text())["config"]["revisions"] == {"english": SHA}
+    assert json.loads(out.read_text())["config"]["revisions"] == {"multimodal": SHA}
 
 
 def test_cli_rejects_a_typo_in_a_pinned_checkpoint_name(tmp_path, monkeypatch, capsys):
@@ -3499,14 +3498,14 @@ def test_cli_rejects_a_typo_in_a_pinned_checkpoint_name(tmp_path, monkeypatch, c
 
 
 def test_cli_accepts_a_checkpoint_alias_in_a_pin(tmp_path, monkeypatch):
-    """`Router` owns the alias table, so `en=` must reach it rather than be second-guessed here."""
+    """`Router` owns the checkpoint aliases, including `default`."""
     from laya import evals_cli
 
     recorded = {}
     _fake_router(monkeypatch, recorded)
     dataset = _write_dataset(tmp_path, [{"state": "s", "questions": Q, "expected": {"intent": "a"}}])
-    assert evals_cli.main(["run", dataset, "--revision", "en=" + SHA]) == 0
-    assert recorded["revisions"] == {"english": SHA}
+    assert evals_cli.main(["run", dataset, "--revision", "default=" + SHA]) == 0
+    assert recorded["revisions"] == {"multimodal": SHA}
 
 
 # ------------------------------------------------------------------ --model checkpoint name
@@ -3548,9 +3547,9 @@ def test_cli_accepts_a_checkpoint_alias_for_the_forced_model(tmp_path, monkeypat
 
     monkeypatch.setattr(evals_cli.evals, "evaluate", spy)
     dataset = _write_dataset(tmp_path, [{"state": "s", "questions": Q, "expected": {"intent": "a"}}])
-    assert evals_cli.main(["run", dataset, "--model", "EN "]) == 0
+    assert evals_cli.main(["run", dataset, "--model", " DEFAULT "]) == 0
     # Validated, not rewritten: the spelling asked for is what the row and the report carry.
-    assert asked["model"] == "EN "
+    assert asked["model"] == " DEFAULT "
 
 
 # --------------------------------------------------------------- opt-in slice gates
@@ -3877,15 +3876,15 @@ def test_parse_revisions_rejects_half_a_pair(pair, fragment):
 
 
 @pytest.mark.parametrize("pairs, spelled", [
-    (["english=abc", "english=def"], None),
-    (["English=abc", "english=def"], ("English", "english")),    # case folds onto one checkpoint
-    (["en=abc", "english=def"], ("en", "english")),              # `en` is an alias of `english`
-    (["laya=abc", "default=def"], ("laya", "default")),          # two aliases, neither a real key
+    (["multimodal=abc", "multimodal=def"], None),
+    (["Multimodal=abc", "multimodal=def"], ("Multimodal", "multimodal")),
+    (["default=abc", "multimodal=def"], ("default", "multimodal")),
+    (["laya=abc", "default=def"], ("laya", "default")),
 ])
 def test_parse_revisions_rejects_two_commits_for_one_checkpoint(pairs, spelled):
     """The `NAME=SHA` form refuses the clash the bare form already refuses.
 
-    `--revision english=abc --revision english=def` named one checkpoint and two commits for it. The
+    `--revision multimodal=abc --revision multimodal=def` named one checkpoint and two commits for it. The
     run loads one commit, so one of them is dropped -- and the report's `revisions` block records the
     commit that answered, never the request, so the survivor is the only thing left to read.
     `Router.resolve` folds case and aliases onto the key it loads, so the same is true however the
@@ -3896,7 +3895,7 @@ def test_parse_revisions_rejects_two_commits_for_one_checkpoint(pairs, spelled):
     with pytest.raises(EvalError) as exc:
         evals_cli._parse_revisions(pairs)
     message = str(exc.value)
-    assert "two commits" in message and "'english'" in message
+    assert "two commits" in message and "'multimodal'" in message
     # named in the order they were given, the way the bare-form message reports its two commits
     assert message.index("'abc'") < message.index("'def'")
     if spelled is None:

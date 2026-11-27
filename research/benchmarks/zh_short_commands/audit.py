@@ -238,18 +238,25 @@ def audit_report(doc):
 def audit_provenance(doc):
     """Say out loud what was scored. A real run must pin a weight, not just a repo id."""
     checkpoint = doc["config"]["checkpoint"]
-    for key in ("checkpoint", "subfolder", "device"):
+    for key in ("checkpoint", "device"):
         if not checkpoint.get(key):
             raise ValueError("provenance is missing %r" % key)
     if checkpoint.get("stub"):
         return "stub run: no checkpoint was loaded"
+    if "artifacts" in checkpoint:
+        artifacts = checkpoint["artifacts"]
+        if not artifacts or not any(item["file"].endswith(".safetensors") for item in artifacts):
+            raise ValueError("native report does not name checkpoint weights")
+        if any(len(item["sha256"]) != 64 or item["bytes"] <= 0 for item in artifacts):
+            raise ValueError("invalid native checkpoint artifact identity")
+        return "%s, %d hashed checkpoint files" % (checkpoint["checkpoint"], len(artifacts))
     for key in ("weight_sha256", "weight_bytes"):
         if not checkpoint.get(key):
             raise ValueError(
                 "no %s: the archive does not say which weights produced these numbers, "
                 "and the reported hash is the only way to tell two checkpoints apart" % key)
-    return "%s/%s %s bytes sha256 %s" % (
-        checkpoint["checkpoint"], checkpoint["subfolder"], checkpoint["weight_bytes"],
+    return "%s %s bytes sha256 %s" % (
+        "/".join(filter(None, (checkpoint["checkpoint"], checkpoint.get("subfolder")))), checkpoint["weight_bytes"],
         checkpoint["weight_sha256"][:16] + "...")
 
 
