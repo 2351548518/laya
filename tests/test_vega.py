@@ -1080,7 +1080,8 @@ def test_sample_frames_reports_the_time_each_frame_came_from(monkeypatch):
     png = buf.getvalue()
 
     def fake_run(args, what):
-        return png if float(args[4]) in (1.25, 6.25, 8.75) else b""   # t=3.75 yields nothing
+        time = float(args[args.index("-ss") + 1])
+        return png if time in (1.25, 6.25, 8.75) else b""   # t=3.75 yields nothing
 
     monkeypatch.setattr(v, "_run", fake_run)
     monkeypatch.setattr(v.shutil, "which", lambda name: "/usr/bin/ffmpeg")
