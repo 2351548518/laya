@@ -20,13 +20,13 @@ data=multimodal-data/example/native
 run=multimodal-runs/example
 
 laya-multimodal train --model "$base" --data "$data" --train-split warmup \
-  --out "$run/head" --config configs/multimodal/head.json \
+  --out "$run/head" --config configs/head.json \
   --visual-only --require-original-base --allow-unadmitted
 
 warmup_checkpoint=$(python -c 'import json, sys; print(json.load(sys.stdin)["checkpoint"])' \
   < "$run/head/training_report.json")
 laya-multimodal train --model "$warmup_checkpoint" --data "$data" \
-  --out "$run/sft" --config configs/multimodal/sft.json --visual-only --allow-unadmitted
+  --out "$run/sft" --config configs/sft.json --visual-only --allow-unadmitted
 ```
 
 示例允许使用未保存处理器准入记录的本地 JSONL。如果已有准入记录，省略 `--allow-unadmitted`。

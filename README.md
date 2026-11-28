@@ -55,7 +55,7 @@ laya_multimodal/
     integrations/               Framework adapters and tool selection
         shared/                 Request options, decision responses and adapter errors
     mcp/                        MCP server and decision tools
-configs/multimodal/             Starter head warmup and LoRA configurations
+configs/                       Serving, head warmup and LoRA configurations
 scripts/multimodal/             Data preparation, evaluation, calibration and export
 benchmarks/, verify/            Latency reports and native checkpoint smoke checks
 research/                       Evaluation fixtures, audit code and historical results
@@ -216,13 +216,13 @@ run=multimodal-runs/example
 
 torchrun --standalone --nproc_per_node=4 --module laya_multimodal.train \
   --model "$base" --data "$data" --train-split warmup --out "$run/head" \
-  --config configs/multimodal/head.json --visual-only --require-original-base --allow-unadmitted
+  --config configs/head.json --visual-only --require-original-base --allow-unadmitted
 
 warmup_checkpoint=$(python -c 'import json, sys; print(json.load(sys.stdin)["checkpoint"])' \
   < "$run/head/training_report.json")
 torchrun --standalone --nproc_per_node=4 --module laya_multimodal.train \
   --model "$warmup_checkpoint" --data "$data" --out "$run/sft" \
-  --config configs/multimodal/sft.json --visual-only --allow-unadmitted
+  --config configs/sft.json --visual-only --allow-unadmitted
 ```
 
 Use `--allow-unadmitted` for local examples prepared without processor admission records. The v6

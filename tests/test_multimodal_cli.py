@@ -233,8 +233,8 @@ def test_evaluation_output_cannot_replace_an_input_dataset(tmp_path, capsys, dat
 
 
 def test_portable_recipes_preserve_the_measured_optimizer_settings():
-    head = json.loads((ROOT / 'configs/multimodal/head.json').read_text(encoding='utf-8'))
-    fit = json.loads((ROOT / 'configs/multimodal/sft.json').read_text(encoding='utf-8'))
+    head = json.loads((ROOT / 'configs/head.json').read_text(encoding='utf-8'))
+    fit = json.loads((ROOT / 'configs/sft.json').read_text(encoding='utf-8'))
     for values in [head, fit]:
         GroundingTrainConfig(**values).validate()
         assert values['global_batch_size'] == 64 and values['micro_batch'] == 4

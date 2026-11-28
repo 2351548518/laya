@@ -53,7 +53,7 @@ laya_multimodal/
     integrations/               框架适配与工具选择
         shared/                 公用的请求参数、决策响应与异常
     mcp/                        MCP 服务与决策工具
-configs/multimodal/             头部预热和 LoRA 示例配置
+configs/                       服务、头部预热和 LoRA 配置
 scripts/multimodal/             数据准备、评测、校准和模型导出
 benchmarks/, verify/            延迟基准和原生检查点冒烟测试
 research/                       评测样例、审计代码和历史结果
@@ -202,13 +202,13 @@ run=multimodal-runs/example
 
 torchrun --standalone --nproc_per_node=4 --module laya_multimodal.train \
   --model "$base" --data "$data" --train-split warmup --out "$run/head" \
-  --config configs/multimodal/head.json --visual-only --require-original-base --allow-unadmitted
+  --config configs/head.json --visual-only --require-original-base --allow-unadmitted
 
 warmup_checkpoint=$(python -c 'import json, sys; print(json.load(sys.stdin)["checkpoint"])' \
   < "$run/head/training_report.json")
 torchrun --standalone --nproc_per_node=4 --module laya_multimodal.train \
   --model "$warmup_checkpoint" --data "$data" --out "$run/sft" \
-  --config configs/multimodal/sft.json --visual-only --allow-unadmitted
+  --config configs/sft.json --visual-only --allow-unadmitted
 ```
 
 没有处理器准入记录的本地示例可使用 `--allow-unadmitted`。v6 配方使用经原始 Qwen 处理器
