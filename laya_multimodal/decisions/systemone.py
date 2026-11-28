@@ -1,218 +1,226 @@
-"""TypeSafe System One image uploads and reference placement."""
+"""TypeSafe System One request validation and context limits."""
 from __future__ import annotations
 
-import base64
+from contextvars import ContextVar
 from dataclasses import dataclass
-from email import policy
-from email.parser import BytesParser
+import gzip
 import io
-import re
-from typing import Any
-from uuid import uuid4
-
-from .questions import serialize_state
+import math
+import zlib
 
 IMAGE_HEADER = "TypeSafe-Danger-Zone-Images"
-MAX_IMAGE_REQUEST_BYTES = 32 * 1024**2
-MAX_IMAGE_BYTES = 16 * 1024**2
-MIN_IMAGE_SIDE = 280
-MAX_IMAGE_SIDE = 1568
+LONG_CONTEXT_HEADER = "TypeSafe-Danger-Zone-Long-Context"
+MODEL_IDS = ("jev-mm-qwen-4b", "jev-mm-gemma-e2b")
+MODEL_ALIAS = "jev-mm-latest"
+TYPESAFE_MODEL_ALIAS = "jev-latest"
+MAX_REQUEST_BYTES = 32 * 1024**2
 MAX_CHOICE_OPTIONS = 255
 MAX_SCORE_LEVELS = 10
-IMAGE_FORMATS = {"png": "PNG", "jpg": "JPEG", "jpeg": "JPEG"}
+_DEFAULT_INSTRUCTIONS = {
+    "choice": "Select the option that fits the state.",
+    "score": "Assess the state using the ordered criteria.",
+    "noul": "Does the state satisfy the true criterion?",
+    "box": "Locate the subject in the image.",
+}
 
 
-class ImageRequestError(ValueError):
+class SystemOneValidationError(ValueError):
+    """A field-specific error using the OpenAPI 422 response envelope."""
+
+    def __init__(self, loc, message, kind="value_error"):
+        super().__init__(message)
+        self.detail = [{"loc": loc, "msg": message, "type": kind}]
+
+
+class SystemOneRequestError(ValueError):
     def __init__(self, message, status=400):
         super().__init__(message)
         self.status = status
 
 
-def image_form_parts(content_type, body):
-    """Read the bounded multipart body, keeping file parts as binary data."""
-    try:
-        message = BytesParser(policy=policy.default).parsebytes(
-            b"Content-Type: " + content_type.encode("latin-1") + b"\r\n\r\n" + body
-        )
-        if message.defects or not message.is_multipart():
-            raise ImageRequestError("invalid multipart body")
-        parts = {}
-        for part in message.iter_parts():
-            name = part.get_param("name", header="content-disposition")
-            if (part.get_content_disposition() != "form-data" or not name or name in parts
-                    or part.is_multipart() or part.defects
-                    or part.get("Content-Transfer-Encoding", "binary").lower() not in ("7bit", "8bit", "binary")):
-                raise ImageRequestError("multipart parts must have unique names and contain raw bytes")
-            if not parts:
-                if name != "request" or part.get_content_type() != "application/json":
-                    raise ImageRequestError("the first multipart part must be application/json named 'request'")
-            elif part.get("Content-Type") and part.get_content_type() not in {
-                    "image/png", "image/jpeg", "image/jpg", "application/octet-stream"}:
-                raise ImageRequestError("image parts must contain PNG or JPEG")
-            parts[name] = part.get_payload(decode=True)
-        if "request" not in parts:
-            raise ImageRequestError("multipart body needs a 'request' part")
-        return parts.pop("request"), parts
-    except (RecursionError, UnicodeError) as error:
-        raise ImageRequestError("invalid multipart body") from error
+def uses_typesafe_model(model):
+    # Older Laya clients send the unversioned jev-1 as an auto-routing hint.
+    return isinstance(model, str) and model.lower().startswith("jev-") and model.lower() != "jev-1"
 
 
-def _asset_bytes(asset, files, used_parts):
-    if not isinstance(asset, dict) or set(asset) - {"type", "format", "part", "data_base64"}:
-        raise ImageRequestError("an asset must declare image file data")
-    if asset.get("type", "image") != "image":
-        raise ImageRequestError("System One assets must be images")
-    fmt = asset.get("format")
-    if fmt is not None and (not isinstance(fmt, str) or fmt not in IMAGE_FORMATS):
-        raise ImageRequestError("image format must be png, jpg or jpeg")
-    if "part" in asset:
-        name = asset["part"]
-        if not isinstance(name, str) or name not in files or name in used_parts:
-            raise ImageRequestError("each multipart image asset must refer to its own file part")
-        used_parts.add(name)
-        data = files[name]
+def _validate_json_tree(value, depth):
+    if isinstance(value, (int, float)):
+        try:
+            finite = math.isfinite(value)
+        except OverflowError:
+            finite = False
+        if not finite:
+            raise SystemOneRequestError("JSON numbers must be finite")
+    if isinstance(value, (dict, list)):
+        if depth >= 64:
+            raise SystemOneRequestError("JSON values may contain at most 64 nested levels")
+        for child in value.values() if isinstance(value, dict) else value:
+            _validate_json_tree(child, depth + 1)
+
+
+def _validate_entry(value, loc, *, nullable=False, depth=0):
+    _validate_json_tree(value, depth)
+    if not (isinstance(value, (str, dict, list)) or nullable and value is None):
+        expected = "Expected a string, object or array"
+        raise SystemOneValidationError(loc, expected + (" or null" if nullable else ""))
+
+
+def adapt_systemone_question(question):
+    """Supply native prompt text for omitted instructions and null score levels."""
+    if not isinstance(question, dict):
+        return question
+    kind = question.get("type")
+    if not isinstance(kind, str) or kind not in _DEFAULT_INSTRUCTIONS:
+        return question
+    instructions = question.get("instructions")
+    if (instructions is None or isinstance(instructions, str) and not instructions.strip()
+            or isinstance(instructions, (list, dict)) and not instructions):
+        question = {**question, "instructions": _DEFAULT_INSTRUCTIONS[kind]}
+    criteria = question.get("criteria")
+    if kind == "score" and isinstance(criteria, list) and None in criteria:
+        # Keep each level index, including levels that have an empty description.
+        question = {**question, "criteria": ["" if level is None else level for level in criteria]}
+    return question
+
+
+def validate_systemone_question(question, loc):
+    """Validate a primitive and adapt optional descriptions for the local readouts."""
+    if not isinstance(question, dict):
+        raise SystemOneValidationError(loc, "Expected a question object")
+    kind = question.get("type")
+    if not isinstance(kind, str) or kind not in _DEFAULT_INSTRUCTIONS:
+        raise SystemOneValidationError([*loc, "type"], "Expected choice, score, noul or box")
+    instructions = question.get("instructions")
+    _validate_entry(instructions, [*loc, "instructions"], nullable=True)
+    criteria = question.get("criteria")
+    criteria_loc = [*loc, "criteria"]
+    if kind in ("choice", "score"):
+        typ = dict if kind == "choice" else list
+        limit = MAX_CHOICE_OPTIONS if kind == "choice" else MAX_SCORE_LEVELS
+        if not isinstance(criteria, typ) or not 1 <= len(criteria) <= limit:
+            raise SystemOneValidationError(criteria_loc, f"Expected {typ.__name__} with 1 to {limit} entries")
+    elif kind == "noul" and criteria is not None:
+        if not isinstance(criteria, dict) or not criteria.keys() <= {"true", "false"}:
+            raise SystemOneValidationError(criteria_loc, "Expected an object with optional true and false keys")
+    elif kind == "box" and "criteria" in question:
+        raise SystemOneValidationError(criteria_loc, "Box does not take criteria")
+    if criteria is not None:
+        for key, description in criteria.items() if isinstance(criteria, dict) else enumerate(criteria):
+            _validate_entry(description, [*criteria_loc, key], nullable=True, depth=1)
+    result = {"type": kind, "instructions": instructions}
+    if criteria is not None:
+        result["criteria"] = criteria
+    for key in ("option_order", "labels"):
+        if key in question:
+            result[key] = question[key]
+    return adapt_systemone_question(result)
+
+
+def validate_systemone_request(body):
+    """Validate the canonical envelope and return the questions passed to inference."""
+    for name in ("model", "state", "questions"):
+        if name not in body:
+            raise SystemOneValidationError(["body", name], "Field required", "missing")
+    if not isinstance(body["model"], str) or not body["model"].strip():
+        raise SystemOneValidationError(["body", "model"], "Model name must be nonempty")
+    _validate_entry(body["state"], ["body", "state"])
+    questions = body["questions"]
+    if not isinstance(questions, dict) or not questions:
+        raise SystemOneValidationError(["body", "questions"], "At least one question is required", "too_short")
+    result = {}
+    for name, question in questions.items():
+        loc = ["body", "questions", name]
+        if not isinstance(name, str) or not name.strip():
+            raise SystemOneValidationError(loc, "Expected a nonempty question name")
+        if isinstance(question, dict) and question.get("type") == "choice":
+            criteria = question.get("criteria")
+            # The local SDKs also accept ordered lists of unique string labels.
+            if (isinstance(criteria, list) and 1 <= len(criteria) <= MAX_CHOICE_OPTIONS
+                    and all(isinstance(label, str) for label in criteria)
+                    and len(set(criteria)) == len(criteria)):
+                question = {**question, "criteria": dict.fromkeys(criteria)}
+        result[name] = validate_systemone_question(question, loc)
+    if "assets" in body and (not isinstance(body["assets"], dict) or not body["assets"]):
+        raise SystemOneValidationError(["body", "assets"], "Expected a nonempty object of image assets")
+    return result
+
+
+def decode_systemone_body(body, encoding, limit):
+    """Decode at most one compression layer within the request size limit."""
+    encoding = encoding.strip().lower()
+    if encoding in ("", "identity"):
+        return body
+    if encoding in ("gzip", "x-gzip"):
+        try:
+            with gzip.GzipFile(fileobj=io.BytesIO(body)) as stream:
+                decoded = stream.read(limit + 1)
+        except (OSError, EOFError, zlib.error) as error:
+            raise SystemOneRequestError("Invalid gzip request body") from error
+    elif encoding == "zstd":
+        import zstandard
+
+        try:
+            frame = zstandard.get_frame_parameters(body)
+            if frame.window_size > 8 * 1024**2:
+                raise SystemOneRequestError("The zstd window must be at most 8 MiB")
+            if frame.content_size == zstandard.CONTENTSIZE_UNKNOWN:
+                decompressor = zstandard.ZstdDecompressor()
+                with decompressor.stream_reader(body) as stream:
+                    decoded = stream.read(limit + 1)
+                if len(decoded) <= limit:
+                    # A stream can end without signalling a truncated frame. Verify its end.
+                    decompressor.decompress(body, max_output_size=max(1, len(decoded)), allow_extra_data=False)
+            elif frame.content_size > limit:
+                raise SystemOneRequestError("Request body too large", 413)
+            else:
+                decoded = zstandard.ZstdDecompressor().decompress(body, allow_extra_data=False)
+        except zstandard.ZstdError as error:
+            raise SystemOneRequestError("Invalid zstd request body") from error
     else:
-        encoded = asset.get("data_base64")
-        if not isinstance(encoded, str) or fmt is None:
-            raise ImageRequestError("inline images need data_base64 and format")
-        try:
-            data = base64.b64decode(encoded, validate=True)
-        except ValueError:
-            raise ImageRequestError("invalid image data_base64") from None
-    if len(data) > MAX_IMAGE_BYTES:
-        raise ImageRequestError("image file exceeds 16 MiB", 413)
-    return data, IMAGE_FORMATS.get(fmt)
+        raise SystemOneRequestError("Expected one supported Content-Encoding", 415)
+    if len(decoded) > limit:
+        raise SystemOneRequestError("Request body too large", 413)
+    return decoded
 
 
-@dataclass(frozen=True)
-class ImageReferences:
-    images: tuple[Any, ...]
-    marker: str
-
-    @property
-    def candidate_marker(self):
-        return self.marker + "candidate\ue002"
-
-    def split_prompt(self, prompt):
-        """Use the processor's typed image tokens at each reference in the rendered question."""
-        pattern = re.compile(re.escape(self.marker) + r"(\d+)\ue002")
-        content, image_ids = [], []
-        offset = 0
-        for match in pattern.finditer(prompt):
-            if match.start() > offset:
-                content.append({"type": "text", "text": prompt[offset:match.start()]})
-            content.append({"type": "image"})
-            image_ids.append(int(match[1]))
-            offset = match.end()
-        if offset < len(prompt):
-            content.append({"type": "text", "text": prompt[offset:]})
-        return content, image_ids
+class ContextLengthError(ValueError):
+    def __init__(self, tokens, limit, scope="per_question_context"):
+        super().__init__(f"multimodal input needs {tokens} tokens, exceeds max_len={limit}; shorten text/media or increase the budget")
+        self.tokens, self.limit, self.scope = tokens, limit, scope
 
 
-def prepare_image_request(state, questions, assets, files, *, images_enabled):
-    """Decode uploaded still images and mark references in JSON values for local inference."""
-    if not images_enabled:
-        raise ImageRequestError("set " + IMAGE_HEADER + ": true for assets or box questions")
-    if not isinstance(assets, dict) or not assets:
-        raise ImageRequestError("image and box requests need an assets object")
-    if any(not ref.strip() for ref in assets):
-        raise ImageRequestError("image references must be nonempty")
-    lengths = [len(ref.encode("utf-8")) for ref in assets]
-    if max(lengths) > 1024 or sum(lengths) > 65536:
-        raise ImageRequestError("image reference length exceeds the request limit", 413)
+@dataclass
+class _ContextBudget:
+    per_question: int
+    per_request: int
+    used: int = 0
 
-    from PIL import Image
-
-    used_parts, images, pixel_sizes = set(), [], []
-    decoded_size = 0
-    for asset in assets.values():
-        data, fmt = _asset_bytes(asset, files, used_parts)
-        try:
-            with Image.open(io.BytesIO(data), formats=("PNG", "JPEG")) as image:
-                if fmt is not None and image.format != fmt:
-                    raise ImageRequestError("image bytes do not match the declared format")
-                if getattr(image, "is_animated", False):
-                    raise ImageRequestError("assets must be still images")
-                if max(image.size) > MAX_IMAGE_SIDE:
-                    raise ImageRequestError("image width or height exceeds 1568 pixels", 413)
-                if min(image.size) < MIN_IMAGE_SIDE:
-                    raise ImageRequestError("image width and height must each be at least 280 pixels")
-                size = 3 * image.width * image.height
-                decoded_size += size
-                if decoded_size > MAX_IMAGE_REQUEST_BYTES:
-                    raise ImageRequestError("decoded images exceed the request limit", 413)
-                images.append(image.convert("RGB"))
-                pixel_sizes.append(size)
-        except Image.DecompressionBombError:
-            raise ImageRequestError("image dimensions exceed the request limit", 413) from None
-        except (OSError, SyntaxError, ValueError) as exc:
-            if isinstance(exc, ImageRequestError):
-                raise
-            raise ImageRequestError("asset is not a readable PNG or JPEG") from None
-    if used_parts != files.keys():
-        raise ImageRequestError("every multipart file part must be named by an asset")
-
-    return bind_image_references(state, questions, dict(zip(assets, images)), pixel_sizes)
+    def reserve(self, length, checkpoint_limit):
+        limit = min(checkpoint_limit, self.per_question)
+        if length > limit:
+            raise ContextLengthError(length, limit)
+        if self.used + length > self.per_request:
+            raise ContextLengthError(self.used + length, self.per_request, "per_request_context")
+        self.used += length
 
 
-def image_reference_prefix(state, references):
-    """Identify an array of distinct image placeholders followed by one text value."""
-    if not isinstance(state, list) or len(state) != len(references) + 1:
-        return None
-    names, text = state[:-1], state[-1]
-    if (not isinstance(text, str) or not all(isinstance(name, str) for name in names)
-            or set(names) != references.keys()):
-        return None
-    return names, text
+_CONTEXT_BUDGET = ContextVar("system_one_context_budget", default=None)
 
 
-def bind_image_references(state, questions, images, pixel_sizes=None):
-    """Bind either checked HTTP images or lazy local paths to the same prompt layout."""
-    marker = "\ue000" + uuid4().hex + "\ue001"
-    refs = {name: index for index, name in enumerate(images)}
-    pattern = re.compile("|".join(re.escape(ref) for ref in sorted(refs, key=len, reverse=True)))
-    used_refs = set()
-    expanded_size = 0
-
-    def replace(match):
-        nonlocal expanded_size
-        name = match[0]
-        index = refs[name]
-        used_refs.add(name)
-        if pixel_sizes is not None:
-            expanded_size += pixel_sizes[index]
-            if expanded_size > MAX_IMAGE_REQUEST_BYTES:
-                raise ImageRequestError("expanded image references exceed the request limit", 413)
-        return marker + str(index) + "\ue002"
-
-    def rewrite(value):
-        if isinstance(value, str):
-            return pattern.sub(replace, value)
-        if isinstance(value, list):
-            return [rewrite(item) for item in value]
-        if isinstance(value, dict):
-            return {key: rewrite(item) for key, item in value.items()}
-        return value
-
+def run_systemone(predict, long_context=False):
+    per_question, per_request = (262144, 262144) if long_context else (32768, 65536)
+    reset = _CONTEXT_BUDGET.set(_ContextBudget(per_question, per_request))
     try:
-        text = serialize_state(rewrite(state))
-        converted = {}
-        for qid, q in questions.items():
-            if not isinstance(q, dict):
-                raise ImageRequestError("questions must be objects")
-            question = {**q}
-            for name in ("instructions", "criteria"):
-                if name in q:
-                    question[name] = rewrite(q[name])
-            if q.get("type") == "box" and isinstance(question.get("instructions"), (dict, list)):
-                question["instructions"] = serialize_state(question["instructions"])
-            converted[qid] = question
-    except RecursionError:
-        raise ImageRequestError("image references are nested too deeply") from None
-    if used_refs != refs.keys():
-        raise ImageRequestError("each image asset must be referenced in state, instructions or criteria")
-    prefix = image_reference_prefix(state, images)
-    if prefix is not None and not pattern.search(prefix[1]) and converted == questions:
-        names, context = prefix
-        return {"text": context, "image": [images[name] for name in names]}, converted
-    return {"text": text, "image": ImageReferences(tuple(images.values()), marker)}, converted
+        return predict()
+    finally:
+        _CONTEXT_BUDGET.reset(reset)
+
+
+def check_context_length(length, checkpoint_limit, backbone_limit=None):
+    budget = _CONTEXT_BUDGET.get()
+    if budget is not None:
+        if isinstance(backbone_limit, int) and backbone_limit > 0:
+            checkpoint_limit = min(checkpoint_limit, backbone_limit)
+        budget.reserve(length, checkpoint_limit)
+    elif length > checkpoint_limit:
+        raise ContextLengthError(length, checkpoint_limit)

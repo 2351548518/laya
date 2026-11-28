@@ -60,6 +60,7 @@ serve = [
     "fastapi>=0.110.0",
     "uvicorn>=0.27.0",
     "python-multipart>=0.0.9",  # multipart image and media uploads
+    "zstandard>=0.22",  # TypeSafe System One compressed request bodies
 ]
 # `pip install laya-multimodal[mcp]` adds the MCP stdio server (laya_multimodal.mcp / the laya-multimodal-mcp-server CLI).
 mcp = ["mcp>=2.2.0"]

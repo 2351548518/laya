@@ -274,14 +274,16 @@ curl -fsS http://127.0.0.1:8000/v1/systemone \
 
 | 接口 | 用途 |
 | --- | --- |
+| `GET /v1/models` | 列出已部署模型名和默认别名 |
 | `POST /v1/systemone` | 文本决策、含命名 PNG 或 JPEG 的决策与单框定位 |
 | `POST /v1/systemone/batch` | 多条状态共享问题的批量预测 |
 | `POST /v1/multimodal` | 传入一份图片、音频或视频，可附加文本上下文 |
 | `POST /v1/route` | 查看检查点路由 |
 | `GET /health` | 检查服务存活状态 |
 
-命名图片使用 System One 的图片资产格式，遵守对应请求头和尺寸限制。原生检查点可指定
-`multimodal` 或 `default`。设置 `LAYA_API_KEY` 可启用 Bearer 认证。Python 和 TypeScript SDK 提供请求编码和响应校验。
+用 `jev-mm-latest` 选择默认检查点。配置 `LAYA_SERVE_CONFIG=configs/serve.json` 并填入本地检查点路径后，
+可以按名称调用 Qwen 和 Gemma。命名图片使用 System One 资产格式和对应请求头。设置 `LAYA_API_KEY` 可启用 Bearer 认证。
+Python 和 TypeScript SDK 提供请求编码和响应校验。
 如需接入 MCP，安装 `.[multimodal,mcp]` 并运行 `laya-multimodal-mcp-server`。
 Windows 可用 `start.bat` 启动同一 HTTP 服务。
 [HTTP 格式与限制](docs_zh/http-api.md) · [SDK 示例](docs_zh/multimodal-clients.md) · [MCP 设置](docs_zh/cli-mcp.md)

@@ -31,7 +31,8 @@ Everything is environment variables, so one image serves a laptop dev run and a 
 | `LAYA_PORT` | bind port | `8000` |
 | `LAYA_ROOT_PATH` | public URL prefix when served behind a reverse proxy | empty |
 | `LAYA_DEVICE` | torch device for every checkpoint | auto |
-| `LAYA_MULTIMODAL_MODEL` | trained native checkpoint directory or Hub ID | released Qwen3.5-4B |
+| `LAYA_MULTIMODAL_MODEL` | trained native checkpoint directory or Hub ID when a serving profile is absent | released Qwen3.5-4B |
+| `LAYA_SERVE_CONFIG` | JSON file mapping short API model names to checkpoint sources | unset |
 | `LAYA_PRELOAD` | build the checkpoints at startup, not lazily | `1` |
 | `LAYA_MODELS` | comma-separated checkpoint names to preload | registered checkpoints, or only `multimodal` when `LAYA_MULTIMODAL_MODEL` is set |
 | `LAYA_THREADS` | cap torch intra-op threads on CPU; keep it <= physical cores -- oversubscribing logical cores is a large regression | torch default |
@@ -42,11 +43,11 @@ Everything is environment variables, so one image serves a laptop dev run and a 
 | `LAYA_EXTRA_MODELS` | JSON object mapping names to local native checkpoint directories or Hub repo IDs | empty |
 | `LAYA_API_KEY` | require `Authorization: Bearer <key>` on prediction and routing, restrict health details, and disable `/docs`, `/redoc` and `/openapi.json` | none |
 | `LAYA_LOG_LEVEL` | uvicorn log level | `info` |
-| `LAYA_MAX_CONCURRENT` | requests admitted past auth at once; excess gets `503` | `16` |
+| `LAYA_MAX_CONCURRENT` | simultaneous admitted requests. Excess System One requests get `529`, other endpoints get `503` | `16` |
 | `LAYA_BODY_READ_TIMEOUT` | seconds a request may spend delivering its body before the server answers `408` and releases the admission slot it was holding. Unparseable, non-positive or infinite input falls back | `10` |
 | `LAYA_MAX_BATCH_TOKENS` | tokens one `/v1/systemone/batch` FORWARD PASS may collate (`states` x questions x row width); a larger batch is split into several passes, not refused | `131072` |
-| `LAYA_JEV_STRICT` | select System One response fields with no per-answer `action` / `answer_confidence`. Set to `0` for the extended Laya text response. Image requests always use the System One response format | `1` for single requests, `0` for batch |
-| `LAYA_TOURNAMENT_GROUP` | answer a `choice` with more options than this by elimination, in groups of this size, on `/v1/systemone` and `/v1/systemone/batch`, and raise their option cap from 100 to 255. See [Large choices](#large-choices-with-laya_tournament_group). Unset, or outside 2 to 100, is off | `0` |
+| `LAYA_JEV_STRICT` | System One responses have no per-answer `action` / `answer_confidence`. Set to `0` for extended Laya text responses. Public model names and TypeSafe headers select the System One format | `1` for single requests, `0` for batch |
+| `LAYA_TOURNAMENT_GROUP` | split large choices on the local text and batch extensions into groups of 2 to 100. See [Large choices](#large-choices-with-laya_tournament_group) | `0` |
 
 For a deployment published under a prefix such as `/laya`, set `LAYA_ROOT_PATH=/laya`.
 FastAPI uses it when generating OpenAPI and Swagger UI URLs. Configure the reverse proxy to
@@ -64,7 +65,33 @@ not fall by the size of the checkpoint.
 ## Endpoints
 
 The default checkpoint answers text on `/v1/systemone` and native media on `/v1/multimodal`.
-Set `LAYA_MULTIMODAL_MODEL` to a local trained checkpoint. Use Gemma 4 for audio.
+Use a trained Gemma 4 checkpoint for audio.
+
+### `GET /v1/models`
+
+Use the prediction Bearer key if the deployment sets `LAYA_API_KEY`. Each entry in `models`
+has a `name`, `description`, and `release_date` for the current deployment. The default name
+is `jev-mm-qwen-4b`. The published alias `jev-mm-latest` selects the deployment's default model.
+Existing TypeSafe clients can keep sending `jev-latest` when they point to this server.
+`POST /v1/systemone` returns the short name of the checkpoint that answered.
+
+Set `LAYA_SERVE_CONFIG=configs/serve.json` to serve the two locally configured checkpoints.
+
+```json
+{
+  "default": "jev-mm-qwen-4b",
+  "models": {
+    "jev-mm-qwen-4b": "models/releases/jev-multimodal-qwen3.5-4b/native",
+    "jev-mm-gemma-e2b": "multimodal-runs/paired-decision-v5/full/gemma/sft/best"
+  }
+}
+```
+
+Set the sources to your trained checkpoints. Sources can be Hub IDs or local paths
+relative to the service's working directory. With this profile, the server preloads Qwen
+and loads Gemma when requested. Without a profile, `LAYA_MULTIMODAL_MODEL` selects a single
+checkpoint. Set `"model": "jev-mm-gemma-e2b"` in an audio request to
+`/v1/multimodal`. [TypeSafe model listing](https://docs.typesafe.ai/models#listing-models)
 
 The extended decision response includes `gate` details when a `min_confidence` policy
 is applied. It records the threshold and the decision on whether to abstain.
@@ -192,6 +219,7 @@ name `rows[i]` still sees every record. One answer per record is one entry of `s
 
 ```bash
 curl -s localhost:8000/v1/systemone -H 'content-type: application/json' -d '{
+  "model": "jev-mm-latest",
   "state": "I was charged twice this month, I want my money back",
   "questions": {
     "queue":   {"type": "choice", "instructions": "Which team?",
@@ -205,9 +233,9 @@ curl -s localhost:8000/v1/systemone -H 'content-type: application/json' -d '{
 
 | field | required | meaning |
 |---|---|---|
-| `state` | yes | the one context every question in the request is answered against: text, email, ticket or JSON; a missing or `null` state is a `400` |
+| `state` | yes | the text, JSON object, or array shared by the questions |
 | `questions` | yes | object keyed by question ID. Use `choice`, `score`, `noul`, or `box` with uploaded images |
-| `model` | no | selects a registered checkpoint or uses the default according to the rules below |
+| `model` | TypeSafe requests | Name from `GET /v1/models`. `jev-latest` is also accepted as a compatibility alias for `jev-mm-latest`. |
 | `assets` | no | image reference map with inline PNG/JPEG data or multipart file part names |
 | `task` | no | select a registered checkpoint by name when `model` is omitted |
 | `lang` | no | optional language metadata for an attached engine |
@@ -227,10 +255,15 @@ LangChain node with a `base_url` (`laya_multimodal.integrations.langchain`), so 
 now get the same answer. Upload images to System One with `assets`. Requests with
 inline `image`, `audio` or `video` fields go to `/v1/multimodal`.
 
-Use `multimodal`, `default`, the released checkpoint ID
-`ZeeoRe/jev-multimodal-qwen3.5-4b`, or a name registered in `LAYA_EXTRA_MODELS`.
-Client model IDs such as `jev-1` select the server's default. Arbitrary paths and
-unregistered Hub repo IDs return HTTP 422. Configure checkpoint sources on the service.
+Use a public model name for TypeSafe validation and response fields. Choice accepts an
+option-description map with 1 to 255 entries. Score accepts 1 to 10 ordered level descriptions.
+Noul accepts optional `true` and `false` criteria, and Box accepts instructions only.
+Instructions can be strings, objects, or arrays. Omitted or null instructions use a default for
+the question type. A null Score description is accepted as an empty description. Its index
+is kept and its `legend` entry is the empty string. Existing local clients can omit `model`
+to use the deployment's usual routing. The local SDKs can also send Choice label arrays,
+`option_order` for decision questions and `labels` for Noul.
+[TypeSafe Advanced](https://docs.typesafe.ai/primitives/advanced) · [OpenAPI](https://api.typesafe.ai/openapi.json)
 
 ### Image assets and single-box questions
 
@@ -240,8 +273,11 @@ under a reference in `assets` and use the reference in a string value in `state`
 `instructions` or `criteria`. Reusing the reference places the image at each occurrence.
 Use an array of image references followed by a text value to place the images before
 the text in the native model prompt.
-A `box` question needs one distinct referenced image. The response carries `left`, `top`,
-`right` and `bottom` in `[0, 1]` and localization confidence.
+A `box` question selects one search image. With several images in state, name the target
+path in backticks, such as `frames[1].photo`. You can also reference an image in
+`instructions` as a visual example. A Box with several possible search images needs an
+explicit target. The response gives `left`, `top`, `right` and `bottom` in `[0, 1]`
+and a confidence from the checkpoint's localization quality readout.
 
 ```bash
 curl -fsS http://127.0.0.1:8000/v1/systemone \
@@ -352,7 +388,8 @@ Single requests default to `model`, `answers` and `usage` with the two token cou
 - a `box` answer keeps `type`, `box` and `confidence`
 
 Choice and score `confidence` use the TypeSafe formulas applied to the returned probabilities.
-A score's `legend` preserves structured criteria and original image references.
+Standard requests return normalized distributions. The score is the expected level computed
+from that same distribution. The `legend` preserves structured criteria and image references.
 The server logs text truncation. Use the extended text response for in-band routing and
 truncation details. The batch extension defaults to the full response and its optional strict
 projection retains the batch's Laya confidence values.
@@ -374,21 +411,27 @@ When narrowing needs to discard a supplied option order, the extension includes
 
 | Limit | Value |
 | --- | --- |
-| Standard JSON body | 2 MiB |
-| System One image upload body | 32 MiB with the image header enabled |
+| TypeSafe request body | 32 MiB, both compressed and decoded |
+| Local JSON extensions | 2 MiB |
 | Individual System One image file | 16 MiB |
-| Serialized text state | 50,000 characters |
-| Questions per request | 64 |
+| Serialized text state on local extensions | 50,000 characters |
+| Questions per local extension request | 64 |
 | States per batch | 64 |
-| Choice options per question | 100 for regular text requests. The image path, an explicit `model: "multimodal"` on single requests and tournament mode allow up to 255 |
-| Score levels per question | 32 for text and 10 for System One image requests |
-| Total answer options | 512 |
+| Choice options per question | TypeSafe allows 255, subject to the readout's capacity. Local text extensions default to 100 |
+| Score levels per question | TypeSafe allows 10. Local text extensions allow 32 |
+| Total answer options on local extensions | 512 |
 | Concurrent admitted requests | `LAYA_MAX_CONCURRENT`, default 16 |
 
-The serving limits apply before model preprocessing. The checkpoint also limits the total
-prompt length and the options its readout can score. Native requests use `max_len` for the
-input budget. A prompt that exceeds it returns HTTP 422. Shorten the state, media or option
-text to fit, or raise the request budget within `LAYA_MAX_TOKEN_BUDGET`.
+TypeSafe requests accept UTF-8 JSON and one `gzip`, `x-gzip`, or `zstd` compression layer.
+The zstd window is limited to 8 MiB. Finite numbers and up to 64 nested levels are allowed
+in state, instructions and criteria.
+
+The TypeSafe caps are 32,768 tokens per question and 65,536 per request. This runtime counts
+actual processed tokens across questions. `TypeSafe-Danger-Zone-Long-Context: true` raises
+the protocol caps to 262,144 and uses an explicitly configured `LAYA_MAX_TOKEN_BUDGET` if
+present. The actual backbone and deployment budgets apply in either mode. An over-budget
+TypeSafe request returns `400` with `detail.type: "max_tokens_exceeded"`.
+[TypeSafe errors](https://docs.typesafe.ai/api/errors) · [TypeSafe context limits](https://docs.typesafe.ai/models#context-length)
 
 `LAYA_MAX_BATCH_TOKENS` guides the HTTP batch chunk size. The native agent prepares each
 state and packs compatible questions within its own token budget.
@@ -402,9 +445,11 @@ state and packs compatible questions within its own token budget.
 | `401` | `LAYA_API_KEY` is set and the bearer token is missing or wrong | `invalid or missing bearer token` |
 | `408` | request body arrived after the configured read deadline | request body read timed out |
 | `413` | any limit above | which limit and by how much |
-| `422` | the question is well-formed JSON but invalid to Laya (unknown type, options over the head budget), or a request control (`lang`, `min_confidence`, a hook argument) is not in the form this endpoint accepts | names the question or the field and what to fix |
+| `415` | unsupported or stacked content encodings | the accepted compression rule |
+| `422` | invalid fields, questions or controls | TypeSafe requests receive a list of `loc`, `msg` and `type` objects. Local extensions include a validation message |
 | `500` | inference failed for any other reason | `inference failed` -- always this string, so paths, weights and memory state never leak; the cause is in the server log |
-| `503` | `LAYA_MAX_CONCURRENT` requests are already in flight | `server busy, try again later` |
+| `503` | a local extension is overloaded or its native checkpoint is unavailable | check the deployment or retry |
+| `529` | the System One admission limit is reached | `server busy, try again later` with `Retry-After` |
 
 The unpaired-surrogate `400` is the one that looks unusual. `\udXXX` with no pair is legal JSON, but
 the character it names cannot be UTF-8 encoded, so the tokenizer raises `TypeError` on it -- the
@@ -434,6 +479,7 @@ as long as it keeps the socket open.
 
 `POST /v1/systemone/batch` accepts an array of `states` and one shared `questions` object.
 It returns `results` in the input order and sums the token counts in `total_usage`.
-Use `POST /v1/multimodal` for an inline audio or video file. Named PNG and JPEG assets for
+Use `POST /v1/multimodal` for an inline audio or video file. Pass `model` to select a public
+alias such as `jev-mm-gemma-e2b` for audio. Named PNG and JPEG assets for
 text or single-box decisions use `POST /v1/systemone`.
 [Python, TypeScript and curl examples](multimodal-clients.md)

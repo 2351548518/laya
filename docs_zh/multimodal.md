@@ -85,7 +85,7 @@ result = router.predict("Current scene", questions, image="scene.jpg")
 
 HTTP 服务安装 `.[multimodal,serve]`，设置 `LAYA_MULTIMODAL_MODEL`，
 运行 `laya-multimodal-serve`。文本和命名图片使用 `POST /v1/systemone`。`assets`
-可在状态、题目指令或候选说明中绑定图片。原生文本请求可指定 `"model": "multimodal"`。
+可在状态、题目指令或候选说明中绑定图片。指定 `"model": "jev-mm-latest"` 选择默认检查点。
 内联音频、视频字节用 `POST /v1/multimodal`，可用模态和音轨行为由加载的检查点决定。
 [HTTP API](http-api.md) · [媒体客户端](multimodal-clients.md)
 
@@ -97,8 +97,9 @@ Qwen3.5 的 Python 文本请求可通过 `batch_size=4` 把兼容题目作为独
 ## 本地 JSONL 加载
 
 `load_rows` 接收使用 System One `request` 结构的本地 JSONL，监督标签写在同一行的外层。
-联合训练使用这一结构，每行一道题。两种加载器均从 JSONL 文件目录解析相对路径。平铺字段的
-原生 JSONL 和问题内含 `label` 的 Kev 文本也可直接读取。
+联合训练使用这一结构，每行一道题。两种加载器均从 JSONL 文件目录解析相对路径。
+`request` 中省略的指令采用与 HTTP API 相同的默认文本，空评分描述保留原档位索引。
+平铺字段的原生 JSONL 和问题内含 `label` 的 Kev 文本也可直接读取。
 
 `request.state` 的图片占位符指向 `request.assets`，`media_files` 将命名 part 映射到
 磁盘文件。图片占位符在前、文本在后的数组形成图像优先的提示。发送 multipart HTTP 时，把
@@ -178,7 +179,7 @@ MAE 和 RPS，也提供记录中存在的模态、类型、任务和来源切片
 ## 源码与本地目录
 
 运行和训练模块在 `laya_multimodal/`，通用命令在 `scripts/multimodal/`，入门配方在
-`configs/multimodal/`。原生多模态 CI 在 CPU 上运行小型本地样本。
+`configs/`。原生多模态 CI 在 CPU 上运行小型本地样本。
 
 本地数据、权重和训练输出分别位于 `multimodal-data/`、`models/` 和 `multimodal-runs/`。
 私有准备脚本、对比实验和日志放在 Git 忽略的 `_local/`。

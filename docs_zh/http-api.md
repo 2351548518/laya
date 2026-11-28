@@ -28,7 +28,8 @@ LAYA_HOST=127.0.0.1 laya-multimodal-serve
 | `LAYA_PORT` | 监听端口 | `8000` |
 | `LAYA_ROOT_PATH` | 反向代理公开的 URL 前缀 | 空 |
 | `LAYA_DEVICE` | 检查点的 PyTorch 设备 | `auto` |
-| `LAYA_MULTIMODAL_MODEL` | 训练后的目录或 Hub ID | 已发布的 Qwen3.5-4B |
+| `LAYA_MULTIMODAL_MODEL` | 未加载服务配置时使用的训练后目录或 Hub ID | 已发布的 Qwen3.5-4B |
+| `LAYA_SERVE_CONFIG` | 将简短模型名映射到检查点的 JSON 文件 | 空 |
 | `LAYA_PRELOAD` | 启动时加载检查点 | `1` |
 | `LAYA_MODELS` | 逗号分隔的预加载模型名 | 已注册检查点。指定原生模型时为 `multimodal` |
 | `LAYA_THREADS` | CPU 算子线程上限，按物理核心数配置 | PyTorch 默认 |
@@ -39,11 +40,11 @@ LAYA_HOST=127.0.0.1 laya-multimodal-serve
 | `LAYA_EXTRA_MODELS` | 从名称到本地目录或 Hub ID 的 JSON 映射 | 空 |
 | `LAYA_API_KEY` | 要求预测和路由带 `Authorization: Bearer <key>`，限制健康详情，并关闭 `/docs`、`/redoc` 和 `/openapi.json` | 空 |
 | `LAYA_LOG_LEVEL` | Uvicorn 日志级别 | `info` |
-| `LAYA_MAX_CONCURRENT` | 通过认证后可同时处理的请求数，超额返回 `503` | `16` |
+| `LAYA_MAX_CONCURRENT` | 同时接入的请求数。System One 超额返回 `529`，其他接口返回 `503` | `16` |
 | `LAYA_BODY_READ_TIMEOUT` | 读取请求体的秒数上限，超时返回 `408` 并释放请求名额 | `10` |
 | `LAYA_MAX_BATCH_TOKENS` | `/v1/systemone/batch` 单次前向的 token 预算，大批次可拆成多次前向 | `131072` |
-| `LAYA_JEV_STRICT` | 严格 System One 格式，`0` 为扩展文本响应。图像请求使用严格格式 | 单条 `1`，批量 `0` |
-| `LAYA_TOURNAMENT_GROUP` | 大候选集的淘汰分组大小，有效范围 2–100。开启后最多 255 个选择项 | `0` |
+| `LAYA_JEV_STRICT` | `0` 为本地扩展文本响应。使用公开模型名或 TypeSafe 请求头时采用 System One 格式 | 单条 `1`，批量 `0` |
+| `LAYA_TOURNAMENT_GROUP` | 本地文本和批量扩展的大候选集淘汰分组，有效范围 2–100 | `0` |
 
 经反向代理公开 `/laya` 时，设 `LAYA_ROOT_PATH=/laya` 并让代理在转发前去掉该前缀。
 应用内部仍接收 `/health`、`/v1/systemone` 等原始路径。为临时使用配置空闲卸载时，
@@ -57,12 +58,37 @@ LAYA_HOST=127.0.0.1 laya-multimodal-serve
 | 方法和路径 | 用途 |
 | --- | --- |
 | `GET /health` | 存活及经认证的模型状态 |
+| `GET /v1/models` | 查询已部署的模型名和公开别名 `jev-mm-latest` |
 | `POST /v1/route` | 查看路由 |
 | `POST /v1/systemone` | 文本和命名图像，包括单框 |
 | `POST /v1/systemone/batch` | 多条状态共用题目 |
 | `POST /v1/multimodal` | 一个内联媒体文件 |
 
 设置 `min_confidence` 时，扩展响应中的 `gate` 提供是否应暂缓使用答案的依据。
+
+### `GET /v1/models`
+
+服务配置了 `LAYA_API_KEY` 时，使用与推理相同的 Bearer 密钥。响应的 `models` 为每个
+已部署名称返回 `name`、`description` 和部署发布日期 `release_date`。默认名称为
+`jev-mm-qwen-4b`，公开别名 `jev-mm-latest` 指向部署的默认模型。已有 TypeSafe 客户端接入
+本地服务时可以沿用 `jev-latest`。`POST /v1/systemone` 响应中的 `model` 给出实际处理请求的模型名。
+
+设置 `LAYA_SERVE_CONFIG=configs/serve.json`，在同一服务中使用本地 Qwen 和 Gemma 检查点。
+
+```json
+{
+  "default": "jev-mm-qwen-4b",
+  "models": {
+    "jev-mm-qwen-4b": "models/releases/jev-multimodal-qwen3.5-4b/native",
+    "jev-mm-gemma-e2b": "multimodal-runs/paired-decision-v5/full/gemma/sft/best"
+  }
+}
+```
+
+将来源设为实际训练检查点，支持 Hub ID 或相对于服务工作目录的本地路径。使用这份配置时，
+服务预加载 Qwen，首次请求 Gemma 时再加载。省略服务配置时，可用 `LAYA_MULTIMODAL_MODEL`
+选择单个检查点。音频请求在 `/v1/multimodal` 中指定 `"model": "jev-mm-gemma-e2b"`。
+[TypeSafe 模型列表](https://docs.typesafe.ai/models#listing-models)
 
 ### `GET /health`
 
@@ -137,6 +163,7 @@ python examples/http_route.py
 
 ```bash
 curl -s localhost:8000/v1/systemone -H 'content-type: application/json' -d '{
+  "model": "jev-mm-latest",
   "state": "I was charged twice this month, I want my money back",
   "questions": {
     "queue":   {"type": "choice", "instructions": "Which team?",
@@ -150,9 +177,9 @@ curl -s localhost:8000/v1/systemone -H 'content-type: application/json' -d '{
 
 | 字段 | 必需 | 含义 |
 | --- | --- | --- |
-| `state` | 是 | 文本或 JSON 上下文，缺失或 `null` 返回 `400` |
+| `state` | 是 | 题目共用的文本、JSON 对象或数组 |
 | `questions` | 是 | 按 ID 索引的 `choice`、`score`、`noul` 或含图片的 `box` |
-| `model` | 否 | 按名称选择检查点 |
+| `model` | TypeSafe 请求必填 | `GET /v1/models` 返回的名称。`jev-latest` 是 `jev-mm-latest` 的兼容别名。 |
 | `assets` | 否 | 内联 PNG/JPEG 或 multipart 图片的引用映射 |
 | `task` | 否 | 省略 `model` 时指定已注册名称 |
 | `lang` | 否 | 后端使用的语言信息 |
@@ -164,9 +191,13 @@ curl -s localhost:8000/v1/systemone -H 'content-type: application/json' -d '{
 省略的控制沿用部署配置。钩子参数 `hooks`、`on_predict_start`、`on_predict_end`、
 `hooks_raise`、`hooks_timeout` 由服务端管理，通过请求发送会返回 `422`。
 
-可以指定 `multimodal`、`default`、已发布的 `ZeeoRe/jev-multimodal-qwen3.5-4b`
-或 `LAYA_EXTRA_MODELS` 中的名称。客户端模型 ID 如 `jev-1` 使用服务默认检查点。
-不可在请求中指定任意路径或未注册的 Hub ID，它们会返回 `422`。
+使用公开模型名启用 TypeSafe 校验和响应格式。选择题接收 1–255 个选项的映射，评分题
+接收 1–10 个有序档位，Noul 支持可选的 `true` 和 `false` 条件。Box 使用
+`instructions`。指令支持字符串、对象和数组，省略或传 `null` 时使用题型的默认指令。
+评分档位描述传 `null` 时保留档位编号，并在 `legend` 中以空字符串表示。现有本地客户端
+可省略 `model`，继续使用服务的常规路由。本地 SDK 也可发送 Choice 标签数组、决策题的
+`option_order` 和 Noul 的 `labels`。
+[TypeSafe Advanced](https://docs.typesafe.ai/primitives/advanced) · [OpenAPI](https://api.typesafe.ai/openapi.json)
 
 <a name="image-assets-and-single-box-questions"></a>
 
@@ -175,7 +206,9 @@ curl -s localhost:8000/v1/systemone -H 'content-type: application/json' -d '{
 发送 `TypeSafe-Danger-Zone-Images: true`，把 PNG 或 JPEG 图片绑定到 `assets`。
 在 `state`、`instructions` 或 `criteria` 的字符串值中引用名字。图像边长均须为
 280–1,568 像素。数组中先列图片引用再放文本，可让原生提示按此顺序放入图像和文字。
-单框题使用一张独立的引用图片，返回 0 到 1 的坐标与定位质量。
+每道 Box 题选择一张搜索图。状态中有多张图时，在指令中用反引号指定图片路径，例如
+`frames[1].photo`。指令还可引用一张视觉示例图。搜索图不明确时返回错误，可以补充路径。
+响应包含 0 到 1 的四条边坐标和定位质量。
 
 ```bash
 curl -fsS http://127.0.0.1:8000/v1/systemone \
@@ -271,7 +304,8 @@ TypeSafe 的选择置信度为 `(p_max - 1/n)/(1 - 1/n)`。评分置信度是到
 - `noul` 保留 `type`、`noul`。
 - `box` 保留 `type`、`box`、`confidence`。
 
-选择和评分用 TypeSafe 置信度，`legend` 保留结构化档位和原始图片引用。要在文本响应中看到
+选择和评分用 TypeSafe 置信度。标准响应归一化候选概率，评分由同一份分布计算期望值。
+`legend` 保留结构化档位和原始图片引用。要在文本响应中看到
 路由和截断细节，用 `LAYA_JEV_STRICT=0`。批量默认是扩展响应，启用批量的严格字段投影时，
 仍沿用批量的置信度。成功响应带 `Server-Timing: inference;dur=<ms>` 和 `X-Inference-Time-Ms`。
 
@@ -290,20 +324,25 @@ TypeSafe 的选择置信度为 `(p_max - 1/n)/(1 - 1/n)`。评分置信度是到
 
 | 项目 | 默认上限 |
 | --- | --- |
-| 普通 JSON 请求体 | 2 MiB |
-| 启用图像请求头的 System One 请求体 | 32 MiB |
+| TypeSafe 请求体 | 压缩前后均为 32 MiB |
+| 本地 JSON 扩展 | 2 MiB |
 | 单张 System One 图像文件 | 16 MiB |
-| 序列化文本状态 | 50,000 字符 |
-| 单请求题目 | 64 |
+| 本地扩展的序列化文本状态 | 50,000 字符 |
+| 本地扩展的单请求题目 | 64 |
 | 每批状态 | 64 |
-| 每道选择题候选 | 普通文本 100。图片、显式 `model: "multimodal"` 的单条请求及分组淘汰可到 255 |
-| 每道评分题档位 | 普通文本 32，System One 图像题 10 |
-| 全部答案选项 | 512 |
+| 每道选择题候选 | TypeSafe 上限 255，受检查点读出头容量约束。本地文本扩展默认 100 |
+| 每道评分题档位 | TypeSafe 10，本地文本扩展 32 |
+| 本地扩展的全部答案选项 | 512 |
 | 同时接入的请求 | `LAYA_MAX_CONCURRENT`，默认 16 |
 
-超出检查点 `max_len` 或服务端限制时，缩短文本、媒体或候选说明，或在
-`LAYA_MAX_TOKEN_BUDGET` 范围内提高预算。`LAYA_MAX_BATCH_TOKENS` 用于划分 HTTP 批量，
-原生 Agent 再按自身 token 预算打包兼容的题目。 [输入预算](multimodal.md#local-prediction)
+TypeSafe 请求使用 UTF-8 JSON，支持一层 `gzip`、`x-gzip` 或 `zstd` 压缩。zstd 窗口
+上限 8 MiB。状态、指令和条件支持有限数值和最多 64 层嵌套。
+
+TypeSafe 的协议上限为每题 32,768 token、每次请求 65,536 token。本地按各题实际处理
+的 token 计数。`TypeSafe-Danger-Zone-Long-Context: true` 将协议上限提高到 262,144，
+并在显式配置时采用 `LAYA_MAX_TOKEN_BUDGET`。两种模式都受本地基座与部署预算约束。
+超出预算返回 `400`，其中 `detail.type` 为 `max_tokens_exceeded`。
+[TypeSafe 错误](https://docs.typesafe.ai/api/errors) · [TypeSafe 上下文](https://docs.typesafe.ai/models#context-length)
 
 <a name="errors"></a>
 
@@ -315,9 +354,11 @@ TypeSafe 的选择置信度为 `(p_max - 1/n)/(1 - 1/n)`。评分置信度是到
 | `401` | 服务启用认证，Bearer 密钥缺失或错误 |
 | `408` | 请求体读取超时 |
 | `413` | 超过服务的大小或记录数上限 |
-| `422` | 题目、媒体或请求控制不符合接口要求 |
+| `415` | 请求使用了不受支持的压缩格式或多层压缩 |
+| `422` | 题目、媒体或请求控制无效。TypeSafe 格式返回含 `loc`、`msg` 和 `type` 的错误列表 |
 | `500` | 推理或路由异常，详情记入服务日志 |
-| `503` | 请求名额已满或原生媒体检查点未配置 |
+| `503` | 本地扩展请求名额已满或原生媒体检查点未配置 |
+| `529` | System One 请求名额已满，响应包含 `Retry-After` |
 
 <a name="concurrency-model"></a>
 
@@ -333,5 +374,6 @@ TypeSafe 的选择置信度为 `(p_max - 1/n)/(1 - 1/n)`。评分置信度是到
 
 `POST /v1/systemone/batch` 接收 `states` 数组和共用的 `questions`，按输入顺序给出
 `results`，并在 `total_usage` 汇总 token。`POST /v1/multimodal` 接收一个媒体文件，
-以 `{"base64": "..."}` 放在 `image`、`audio` 或 `video` 字段。命名 PNG 和 JPEG
+以 `{"base64": "..."}` 放在 `image`、`audio` 或 `video` 字段。通过 `model` 选择
+处理该文件的已部署模型，例如用 `jev-mm-gemma-e2b` 处理音频。命名 PNG 和 JPEG
 图片资产使用 `POST /v1/systemone`。 [Python、TypeScript 与 curl 示例](multimodal-clients.md)

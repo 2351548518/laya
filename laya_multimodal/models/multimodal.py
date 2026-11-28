@@ -34,7 +34,8 @@ from ..decisions.hooks import PredictContext, aggregate_usage, compose_hooks, di
 from .readout import CandidateScorer, candidate_positions
 from .modality_calibration import ordinal_probabilities, validate_ordinal_calibration
 from .revisions import default_checkpoint, resolve_revision, snapshot_revision, verify_digests
-from ..decisions.systemone import ImageReferences
+from ..decisions.image_assets import ImageReferences
+from ..decisions.systemone import check_context_length
 
 DEFAULT_MULTIMODAL_MODEL = "google/gemma-4-E2B-it"
 MULTIMODAL_MODELS = {
@@ -255,7 +256,8 @@ class MultimodalAgent(DecisionAgent):
         self.detection_trained = bool(grounding and grounding.get("detection_trained"))
         if grounding or grounding_slots is not None:
             from .grounding import GroundingHead
-            if grounding_slots is not None:_positive("grounding_slots", grounding_slots)
+            if grounding_slots is not None:
+                _positive("grounding_slots", grounding_slots)
             slots = grounding["slots"] if grounding else _positive("grounding_slots", grounding_slots)
             compact_grounding = bool(grounding and grounding_slots == 1 and grounding.get("architecture", "set-v1") != "single-v1")
             if grounding and grounding_slots is not None and grounding_slots != slots and not compact_grounding:
@@ -488,7 +490,7 @@ class MultimodalAgent(DecisionAgent):
         if isinstance(qdef, dict) and qdef.get("type") == "box":
             if set(qdef) - {"type", "instructions"}:
                 raise ValueError("Box takes only type and instructions; it has no criteria or option_order")
-            if not isinstance(qdef.get("instructions"), str) or not qdef['instructions'].strip():
+            if not isinstance(qdef.get("instructions"), str) or not qdef["instructions"].strip():
                 raise ValueError("Box instructions must be a nonempty string")
             DecisionAgent._check_question(qid, dict(qdef, type="noul"))
             return
@@ -516,15 +518,24 @@ class MultimodalAgent(DecisionAgent):
         if is_box:
             if image_refs is None and (len(images) != 1 or request.get("video") is not None):
                 raise ValueError("Box currently requires exactly one image; select a video frame or image explicitly")
-            prompt = "State: %s\nLocate in the image: %s\nReturn the target bounding box." % (request.get("text", ""), q["ins"])
+            state_text = request.get("text", "")
+            if image_refs is not None:
+                state_text = image_refs.box_state(state_text, q["ins"])
+            prompt = "State: %s\nLocate in the image: %s\nReturn the target bounding box." % (state_text, q["ins"])
         elif candidate:
-            prompt = "State: %s\n%s question: %s\nOptions:\n" % (request.get("text", ""), q["t"], q["ins"])
+            parts = ["State: %s\n%s question: %s\nOptions:\n" % (request.get("text", ""), q["t"], q["ins"])]
+            # Insert markers before the chat template adds image tokens, so the
+            # suffix positions can be recovered from the rendered prompt.
+            suffix = image_refs.candidate_marker if image_refs is not None else " ->"
+            offset = len(parts[0])
             for slot, index in enumerate(order):
-                prompt += "Candidate %d: %s" % (slot + 1, options[index])
-                start = len(prompt)
-                prompt += " ->\n"
-                spans.append((start, len(prompt) - 1))
-            prompt += "Decide using the full state, question and candidates."
+                row = "Candidate %d: %s" % (slot + 1, options[index])
+                start = offset + len(row)
+                spans.append((start, start + len(suffix)))
+                parts.append(row + suffix + "\n")
+                offset = start + len(suffix) + 1
+            parts.append("Decide using the full state, question and candidates.")
+            prompt = "".join(parts)
         elif getattr(self, "prompt_version", "v1") == "v2":
             if q["t"] == "choice":
                 options = [render_criterion(value) if value not in (None, "") else str(key)
@@ -537,12 +548,8 @@ class MultimodalAgent(DecisionAgent):
             prompt += "\n".join("%s: %s" % (self.symbols[slot], options[index]) for slot, index in enumerate(order))
             prompt += "\nState: %s\nSelect exactly one option. Answer with its letter or digit only." % request.get("text", "")
         if image_refs is not None:
-            # Locate the candidate suffixes after the chat template inserts its image tokens.
-            # The markers are removed before the text reaches the processor/tokenizer.
-            for start, end in reversed(spans):
-                prompt = prompt[:start] + image_refs.candidate_marker + prompt[end:]
             content, image_ids = image_refs.split_prompt(prompt)
-            if is_box and len(set(image_ids)) != 1:
+            if is_box and q["ins"] not in image_refs.box_targets and len(set(image_ids)) != 1:
                 raise ValueError("each box question requires a single referenced image")
             images = [read_image(image_refs.images[i]) if isinstance(image_refs.images[i], (str, os.PathLike))
                       else image_refs.images[i] for i in image_ids]
@@ -617,8 +624,9 @@ class MultimodalAgent(DecisionAgent):
             inputs["_candidate_positions"] = candidate_positions(offsets, text_length, spans)
         length = inputs["input_ids"].shape[-1]
         limit = self.max_len if max_len is None else _positive("max_len", max_len)
-        if length > limit:
-            raise ValueError("multimodal input needs %d tokens, exceeds max_len=%d; shorten text/media or increase the budget" % (length, limit))
+        config = getattr(getattr(self, "model", None), "config", None)
+        config = getattr(config, "text_config", config)
+        check_context_length(length, limit, getattr(config, "max_position_embeddings", None))
         inputs = {k: v.to(device=self.device, dtype=self.dtype if v.is_floating_point() else v.dtype)
                   if isinstance(v, torch.Tensor) else v for k, v in inputs.items()}
         return inputs, q, metadata

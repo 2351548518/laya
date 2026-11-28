@@ -111,7 +111,8 @@ not work already running on the server. See the SDK guide for an example.
 ## Native media prediction
 
 `predictMultimodal` posts `/v1/multimodal` with one image, audio file or video and a
-question set. It uses the server's configured native checkpoint. `state` supplies optional
+question set. `model` selects a deployed checkpoint, such as `jev-mm-gemma-e2b` for audio.
+`state` supplies optional
 context, `maxLen` maps to `max_len`, and `minConfidence` maps to `min_confidence`.
 The response adds single-box answers and native `usage.forward_passes`.
 [Setup and typed example](multimodal-clients.md#typescript)

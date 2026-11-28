@@ -44,7 +44,7 @@ class APITests(unittest.TestCase):
     def test_predict_multimodal_parameters(self):
         from laya_client.types import BoxAnswer, MultimodalPrediction
         signature = inspect.signature(LayaClient.predict_multimodal)
-        self.assertEqual(list(signature.parameters), ["self", "questions", "state", "image", "audio", "video",
+        self.assertEqual(list(signature.parameters), ["self", "questions", "state", "model", "image", "audio", "video",
                                                      "max_len", "min_confidence", "timeout"])
         for param in list(signature.parameters.values())[2:]:
             self.assertEqual(param.kind, inspect.Parameter.KEYWORD_ONLY)

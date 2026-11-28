@@ -61,7 +61,8 @@ class LayaClient:
         """Predict choice, score and noul answers; omitted controls inherit server settings."""
         if not isinstance(state, (str, dict, list)):
             raise LayaValidationError("state must be text, a JSON object or an array")
-        body = self._prediction_body(questions, model, task, lang, lang_guess, max_len, head_max_len, min_confidence)
+        body = self._prediction_body(questions, model, task, lang, lang_guess, max_len, head_max_len, min_confidence,
+                                     question_mode="systemone" if model is not None else "local")
         body["state"] = state
         result = self._request("/v1/systemone", body, timeout)
         prediction(result, questions)
@@ -97,11 +98,12 @@ class LayaClient:
         return cast(BatchPrediction, result)
 
     def predict_multimodal(self, questions: Questions, *, state: Optional[State] = None,
+                           model: Optional[str] = None,
                            image: Optional[bytes] = None, audio: Optional[bytes] = None,
                            video: Optional[bytes] = None, max_len: Optional[int] = None,
                            min_confidence: Optional[MinConfidence] = None,
                            timeout: Optional[float] = None) -> MultimodalPrediction:
-        """Send one image, audio file or video as bytes to the configured native checkpoint."""
+        """Send one image, audio file or video as bytes to a deployed native checkpoint."""
         media = [(name, value) for name, value in (("image", image), ("audio", audio), ("video", video))
                  if value is not None]
         if len(media) != 1:
@@ -111,8 +113,8 @@ class LayaClient:
             raise LayaValidationError(kind + " must contain nonempty file bytes")
         if state is not None and not isinstance(state, (str, dict, list)):
             raise LayaValidationError("state must be text, a JSON object or an array")
-        body = self._prediction_body(questions, None, None, None, None, max_len, None, min_confidence,
-                                     multimodal=True)
+        body = self._prediction_body(questions, model, None, None, None, max_len, None, min_confidence,
+                                     question_mode="media")
         if state is not None:
             body["state"] = state
         body[kind] = {"base64": base64.b64encode(value).decode("ascii")}
@@ -121,18 +123,18 @@ class LayaClient:
         return cast(MultimodalPrediction, result)
 
     def predict_image_assets(self, state: State, questions: Questions, assets: dict[str, ImageAsset], *,
-                             model: str = "multimodal", timeout: Optional[float] = None) -> SystemOneImagePrediction:
+                             model: str = "jev-mm-latest", timeout: Optional[float] = None) -> SystemOneImagePrediction:
         """Evaluate named PNG/JPEG references through the System One JSON endpoint."""
         if not isinstance(state, (str, dict, list)):
             raise LayaValidationError("state must be text, a JSON object or an array")
         if not isinstance(assets, dict) or not assets or any(
                 not isinstance(name, str) or not name.strip() or not isinstance(asset, dict)
-                or set(asset) != {"type", "format", "data_base64"} or asset["type"] != "image"
-                or asset["format"] not in ("png", "jpg", "jpeg")
-                or not isinstance(asset["data_base64"], str) or not asset["data_base64"]
+                or set(asset) - {"type", "format", "data_base64"} or asset.get("type", "image") != "image"
+                or asset.get("format") not in ("png", "jpg", "jpeg")
+                or not isinstance(asset.get("data_base64"), str) or not asset["data_base64"]
                 for name, asset in assets.items()):
             raise LayaValidationError("assets must be named PNG/JPEG images with data_base64")
-        body = self._prediction_body(questions, model, None, None, None, None, None, None, multimodal=True)
+        body = self._prediction_body(questions, model, None, None, None, None, None, None, question_mode="assets")
         body.update(state=state, assets=assets)
         result = self._request("/v1/systemone", body, timeout, images_enabled=True)
         prediction(result, questions, image_assets=True)
@@ -140,8 +142,8 @@ class LayaClient:
 
     @staticmethod
     def _prediction_body(questions, model, task, lang, lang_guess, max_len, head_max_len, min_confidence,
-                         *, multimodal=False):
-        questions_value(questions, multimodal=multimodal)
+                         *, question_mode="local"):
+        questions_value(questions, mode=question_mode)
         body: dict[str, Any] = {"questions": questions}
         for key, value in (("model", model), ("task", task), ("lang", lang), ("lang_guess", lang_guess)):
             if value is not None:

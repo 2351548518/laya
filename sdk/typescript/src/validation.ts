@@ -40,7 +40,7 @@ export function validateJson(value: unknown, path = 'request', ancestors = new S
  */
 const QUESTION_FIELDS = new Set(['type', 'instructions', 'criteria', 'option_order', 'labels']);
 
-export function validateQuestions(questions: unknown, multimodal = false): void {
+export function validateQuestions(questions: unknown, mode: 'local' | 'systemone' | 'assets' | 'media' = 'local'): void {
   if (!isRecord(questions) || Object.keys(questions).length === 0) {
     throw new LayaValidationError('questions must be an object containing at least one question');
   }
@@ -48,7 +48,9 @@ export function validateQuestions(questions: unknown, multimodal = false): void 
     const invalid = (message: string): never => { throw new LayaValidationError(`questions.${id}: ${message}`); };
     if (!isRecord(q)) invalid('expected a question object');
     const question = q as Record<string, unknown>;
-    if (!Object.hasOwn(question, 'instructions')) invalid('instructions is required');
+    if ((mode === 'local' || mode === 'media') && !Object.hasOwn(question, 'instructions')) {
+      invalid('instructions is required');
+    }
     if (Object.keys(question).some(key => !QUESTION_FIELDS.has(key))) {
       invalid('unknown question field');
     }
@@ -73,10 +75,16 @@ export function validateQuestions(questions: unknown, multimodal = false): void 
         }
         break;
       case 'box':
-        if (!multimodal) invalid('type must be choice, score, or noul');
-        if (typeof question.instructions !== 'string' || !question.instructions.trim() ||
-            Object.keys(question).some(key => key !== 'type' && key !== 'instructions')) {
-          invalid('box requires only type and nonempty text instructions');
+        if (mode !== 'assets' && mode !== 'media') invalid('type must be choice, score, or noul');
+        if (Object.keys(question).some(key => key !== 'type' && key !== 'instructions')) {
+          invalid('box accepts only type and instructions');
+        }
+        if (mode === 'media' && (typeof question.instructions !== 'string' || !question.instructions.trim())) {
+          invalid('native media box requires nonempty text instructions');
+        }
+        if (mode === 'assets' && question.instructions != null && typeof question.instructions !== 'string' &&
+            !isRecord(question.instructions) && !Array.isArray(question.instructions)) {
+          invalid('box instructions must be a string, object, array or null');
         }
         break;
       default: invalid('type must be choice, score, or noul');

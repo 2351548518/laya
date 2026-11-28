@@ -10,8 +10,9 @@ from pathlib import Path
 import re
 from typing import Any, Dict, List
 
-from .decisions.questions import render_options
-from .decisions.systemone import bind_image_references
+from .decisions.image_assets import bind_image_references
+from .decisions.questions import render_options, serialize_state
+from .decisions.systemone import adapt_systemone_question
 
 MEDIA_FIELDS = ("image", "audio", "video")
 MEDIA_CONTROLS = ("sampling_rate", "video_audio", "video_bounds", "video_frames", "video_encoding")
@@ -45,6 +46,15 @@ def _file_part(asset, media_files, used_parts, directory, verify):
     return _media_path(media_files[name], directory, verify)
 
 
+def _request_question(question):
+    question = adapt_systemone_question(question)
+    if isinstance(question, dict) and question.get("type") == "box":
+        instructions = question.get("instructions")
+        if isinstance(instructions, (dict, list)):
+            return {**question, "instructions": serialize_state(instructions)}
+    return question
+
+
 def normalize_record(row, directory, *, verify_media=True):
     """Load labelled native, Kev or System One records into the local trainer's layout."""
     if not isinstance(row, dict):
@@ -57,7 +67,10 @@ def normalize_record(row, directory, *, verify_media=True):
         if "state" not in request or "questions" not in request:
             raise ValueError("request needs state and questions")
         state = row["state"] = request["state"]
-        row["questions"] = request["questions"]
+        questions = request["questions"]
+        if isinstance(questions, dict):
+            questions = {qid: _request_question(question) for qid, question in questions.items()}
+        row["questions"] = questions
         orders = row.pop("option_orders", {})
         if orders:
             if not isinstance(orders, dict) or not isinstance(row["questions"], dict):
@@ -86,8 +99,8 @@ def normalize_record(row, directory, *, verify_media=True):
         if assets:
             if any(not ref.strip() for ref in assets):
                 raise ValueError("image references must be nonempty")
-            if any(not isinstance(asset, dict) or asset.get("type") != "image" for asset in assets.values()):
-                raise ValueError("System One dataset assets must declare type image")
+            if any(not isinstance(asset, dict) or asset.get("type", "image") != "image" for asset in assets.values()):
+                raise ValueError("System One dataset assets must be images")
             row["_image_assets"] = {ref: _file_part(asset, media_files, used_parts, directory, verify_media)
                                     for ref, asset in assets.items()}
         native_media = {}
@@ -107,6 +120,8 @@ def normalize_record(row, directory, *, verify_media=True):
                 raise ValueError("combine media through the native extension or through image assets")
             row["state"] = {"text": state, **native_media,
                             **{key: request[key] for key in MEDIA_CONTROLS if key in request}}
+        elif not assets and isinstance(state, dict) and any(key in state for key in MEDIA_FIELDS):
+            row["state"] = serialize_state(state)
     else:
         state = row.get("state")
         if isinstance(state, dict) and any(state.get(key) is not None for key in MEDIA_FIELDS):
@@ -186,6 +201,7 @@ def record_modality(row):
 def record_media(row):
     if row.get("_image_assets"):
         yield from row["_image_assets"].values()
+        return
     state = row["state"]
     if isinstance(state, dict):
         for kind in MEDIA_FIELDS:

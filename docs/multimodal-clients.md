@@ -89,6 +89,10 @@ For in-process text and media inference with the same native checkpoint, use
 
 ## System One image assets
 
+Both SDKs accept structured and optional Box instructions on the image-asset method.
+For text decisions with optional instructions, use `model="jev-mm-latest"` in Python
+or `{ model: 'jev-mm-latest' }` in TypeScript.
+
 Use `predict_image_assets` in Python or `predictImageAssets` in TypeScript when a decision
 references one or more named images in the state, instructions or criteria. Both methods
 attach `TypeSafe-Danger-Zone-Images: true` and return named answers with token counts.

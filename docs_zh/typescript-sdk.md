@@ -83,7 +83,8 @@ SDK 提供 `predict`、`predictBatch`、`predictImageAssets`、`predictMultimoda
 
 ## 媒体预测
 
-`predictMultimodal` 使用服务器配置的原生检查点，接受一个图片、音频或视频文件以及题目集。
+`predictMultimodal` 接受一个图片、音频或视频文件以及题目集。`model` 可选择部署的模型，
+例如用 `jev-mm-gemma-e2b` 处理音频。
 `state` 提供附加上下文。`maxLen`、`minConfidence` 映射到 `max_len`、`min_confidence`。
 返回值可含单框结果和 `usage.forward_passes`。 [类型化示例](multimodal-clients.md#typescript)
 

@@ -1,0 +1,7 @@
+{
+  "default": "jev-mm-qwen-4b",
+  "models": {
+    "jev-mm-qwen-4b": "models/releases/jev-multimodal-qwen3.5-4b/native",
+    "jev-mm-gemma-e2b": "multimodal-runs/paired-decision-v5/full/gemma/sft/best"
+  }
+}

@@ -124,8 +124,9 @@ print(result["answers"]["target"]["box"])
 ```
 
 `predict_multimodal` sends one `POST /v1/multimodal` request with bytes from exactly one
-image, audio file or video. The configured checkpoint determines supported modalities.
-The optional `state`, `max_len`, `min_confidence` and `timeout` arguments apply to this
+image, audio file or video. Select a deployed model with `model`, for example
+`model="jev-mm-gemma-e2b"` for audio. The optional
+`state`, `max_len`, `min_confidence` and `timeout` arguments apply to this
 request. `choice`, `score` and `noul` keep their typed fields. A `box` answer includes
 normalized coordinates and localization confidence. `usage.forward_passes` counts the
 questions executed by the server. [Media contract](https://github.com/2351548518/laya/blob/main/docs/multimodal-clients.md)

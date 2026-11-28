@@ -95,7 +95,7 @@ result = router.predict("Current scene", questions, image="scene.jpg")
 For the HTTP server, install `.[multimodal,serve]`, set `LAYA_MULTIMODAL_MODEL` to the same
 checkpoint and start `laya-multimodal-serve`. Use `POST /v1/systemone` for text and image questions.
 The `assets` map places pictures in the state, instructions or criteria. Set
-`"model": "multimodal"` for native text decisions. Use `POST /v1/multimodal` for inline audio
+`"model": "jev-mm-latest"` to select the default checkpoint. Use `POST /v1/multimodal` for inline audio
 and video file bytes. The configured backbone determines which modalities and video audio
 the service can process. [HTTP API](http-api.md) · [Media examples](multimodal-clients.md)
 
@@ -106,8 +106,9 @@ independent rows within a padded token budget.
 
 `load_rows` accepts local JSONL with a System One `request` and labels stored next to it.
 The joint trainer accepts the same envelope with one question per row. Both readers resolve
-local media relative to the JSONL file. Existing flat native JSONL and Kev text records with
-a `label` on each question also load directly.
+local media relative to the JSONL file. Request-shaped records use the same default instructions
+and keep the same Score level indices as the HTTP API when descriptions are omitted. Existing
+flat native JSONL and Kev text records with a `label` on each question also load directly.
 
 Image placeholders in `request.state` reference `request.assets`. The `media_files` map resolves
 each named part on disk. An array of image placeholders followed by a text string uses the
@@ -196,7 +197,7 @@ same frame selection are evaluated together, with their results returned in the 
 ## Source and local workspace layout
 
 Core runtime and training modules live in `laya_multimodal/`. Find the portable commands in
-`scripts/multimodal/` and starter settings in `configs/multimodal/`. The native multimodal CI
+`scripts/multimodal/` and starter settings in `configs/`. The native multimodal CI
 lane runs the relevant suites on CPU using small local fixtures.
 
 The ignored `_local/` directory holds dataset-specific preparation code, private research

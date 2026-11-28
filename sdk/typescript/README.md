@@ -104,8 +104,9 @@ console.log(result.answers.target.box);
 ```
 
 `predictMultimodal` sends exactly one nonempty `image`, `audio` or `video` byte array to
-`POST /v1/multimodal`. It accepts `state`, `maxLen`, `minConfidence`, `signal` and
-`timeoutMs` in its options. The configured native checkpoint determines support for
+`POST /v1/multimodal`. It accepts `model`, `state`, `maxLen`, `minConfidence`, `signal` and
+`timeoutMs` in its options. Use `model: 'jev-mm-gemma-e2b'` to select a deployed Gemma model for audio.
+The selected checkpoint determines support for
 each media type. The response retains typed decision IDs and candidate labels.
 A `box` answer contains one set of normalized coordinates and localization confidence.
 
@@ -323,7 +324,7 @@ and TLS at your application proxy or gateway.
 | `GET /health` | None for liveness | `{status}`, plus `loaded` and `device` with the bearer |
 | `POST /v1/systemone` | `{state, questions, model?, assets?}` | `{model, answers, usage}` plus optional `routing` |
 | `POST /v1/systemone/batch` | `{states, questions, model?, batch_size?, sort_by_length?}` | `{results, total_usage}` in input order |
-| `POST /v1/multimodal` | `{state?, questions, image\|audio\|video, max_len?, min_confidence?}` | `{model, answers, usage, routing?}`, including single-box answers |
+| `POST /v1/multimodal` | `{model?, state?, questions, image\|audio\|video, max_len?, min_confidence?}` | `{model, answers, usage, routing?}`, including single-box answers |
 
 Laya errors use FastAPI's `{detail: ...}` body: 400 for malformed requests, 401
 for authentication, 413 for request limits, 422 for invalid questions, and 500

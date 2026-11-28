@@ -17,6 +17,15 @@ const multimodal = await client.predictMultimodal({ image: photo }, {
 const boxLeft: number = multimodal.answers.target.box.left;
 const mediaLabel: 'billing' | 'support' = multimodal.answers.team.choice;
 const forwardPasses: number = multimodal.usage.forward_passes;
+const audioRoute: string | undefined = multimodal.routing?.model;
+const structuredImage = await client.predictImageAssets({ scene: 'image-ref' }, {
+  target: { type: 'box', instructions: { locate: ['the red cup'] } },
+  visible: { type: 'noul' },
+}, { 'image-ref': { type: 'image', format: 'png', data_base64: 'AA==' } });
+const boxQuality: number | null = structuredImage.answers.target.confidence;
+const optionalQuestion: number = (await client.predict('State', {
+  urgent: { type: 'noul' },
+}, { model: 'jev-mm-latest' })).answers.urgent.noul;
 // @ts-expect-error A request contains one media file.
 await client.predictMultimodal({ image: photo, video: photo }, questions);
 // @ts-expect-error Client methods accept media bytes.

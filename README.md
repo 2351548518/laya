@@ -293,15 +293,16 @@ curl -fsS http://127.0.0.1:8000/v1/systemone \
 
 | Endpoint | Use |
 | --- | --- |
+| `GET /v1/models` | List deployed model names and the default alias |
 | `POST /v1/systemone` | Text decisions and named PNG or JPEG assets, including a single box |
 | `POST /v1/systemone/batch` | Multiple states with shared questions |
 | `POST /v1/multimodal` | One inline image, audio file or video with optional text context |
 | `POST /v1/route` | Inspect checkpoint routing |
 | `GET /health` | Check service liveness |
 
-Use the System One image asset contract for named images, including the required image header
-and size limits. Select `multimodal` or `default` for the native checkpoint. Set `LAYA_API_KEY`
-to require bearer authentication.
+Use `jev-mm-latest` to select the default checkpoint. Set `LAYA_SERVE_CONFIG=configs/serve.json`
+and point its Qwen and Gemma entries to your checkpoints to serve both. Named images use the
+System One asset format and image header. Set `LAYA_API_KEY` to require bearer authentication.
 The Python and TypeScript SDKs handle request encoding and response validation.
 Install `.[multimodal,mcp]` and run `laya-multimodal-mcp-server` for an MCP client.
 On Windows, `start.bat` launches the native HTTP service.

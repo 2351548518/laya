@@ -53,47 +53,18 @@ def answer_confidence_value(answer: Dict[str, Any]) -> Optional[float]:
     return None
 
 
-def jev_confidence(answer: Dict[str, Any]) -> Optional[float]:
-    """The `confidence` Jev would report for this answer's `probabilities`, or None (#302).
-
-    Laya's `confidence` is normalized entropy, and Jev's is a different formula, so a threshold
-    carried over from Jev selects about twice as much on Laya. These are TypeSafe's own formulas
-    (`system-one-adapter-python`, `_utils/confidence_metrics.py`):
-
-        choice  (max(p) - 1/n) / (1 - 1/n)
-        score   max(0, 1 - sum(p_i * |i - mode|) / D), D the same sum for a uniform distribution
-
-    Both are 1.0 for a single option, and a zero total is read as uniform, as the adapter does.
-    A noul answer has no Jev `confidence`, and a malformed document -- a probability that does not
-    read as a number, a boolean, a non-finite or a negative value -- gives None rather than a
-    guess, so a caller filtering on this number never filters on a made-up one. Negatives are the
-    case that needs naming: the division below normalises by the sum, so a mixed-sign document can
-    divide by a near-zero or negative total and return a number outside [0, 1] for a distribution
-    whose argmax is not the one it measured, while an all-negative document divides back into
-    range and returns exactly what its positive counterpart returns. Refusing them is what makes
-    the range a property: every number this returns lies in [0, 1].
-    """
-    kind = answer.get("type")
-    probabilities = answer.get("probabilities")
-    if kind not in ("choice", "score") or not isinstance(probabilities, dict) or not probabilities:
+def normalized_probabilities(probabilities: Any, *, ordinal: bool = False) -> Optional[Dict]:
+    """Read a finite distribution and preserve its labels, sorting ordinal levels."""
+    if not isinstance(probabilities, dict) or not probabilities:
         return None
     try:
-        if kind == "score":
-            p = [float(probabilities[key]) for key in sorted(probabilities, key=int)]
-        else:
-            p = [float(value) for value in probabilities.values()]
+        keys = sorted(probabilities, key=int) if ordinal else list(probabilities)
+        p = [float(probabilities[key]) for key in keys]
     except (TypeError, ValueError, OverflowError):
-        # `OverflowError` is the same "does not read as a number": a JSON integer literal too wide
-        # for a double (a 400-digit probability) overflows `float()`, and an infinite score level
-        # overflows `int()`. `apply_calibration_payload` in `calibrate.py` already catches it on
-        # the `version` field for the same reason (JSON's `1e999` is `inf`).
         return None
     if (any(isinstance(v, bool) for v in probabilities.values())
             or not all(math.isfinite(v) and v >= 0.0 for v in p)):
         return None
-    n = len(p)
-    if n == 1:
-        return 1.0
     total = sum(p)
     if not math.isfinite(total):
         # Individually finite weights can still overflow when added. A common scale cancels
@@ -101,7 +72,26 @@ def jev_confidence(answer: Dict[str, Any]) -> Optional[float]:
         scale = max(p)
         p = [v / scale for v in p]
         total = sum(p)
-    p = [v / total for v in p] if total else [1.0 / n] * n
+    p = [v / total for v in p] if total else [1.0 / len(p)] * len(p)
+    return dict(zip(keys, p))
+
+
+def jev_confidence(answer: Dict[str, Any]) -> Optional[float]:
+    """TypeSafe Choice or Score confidence for the answer's distribution.
+
+    A single option has confidence 1. An all-zero distribution is uniform.
+    Noul and malformed distributions do not produce a confidence value here.
+    """
+    kind = answer.get("type")
+    if kind not in ("choice", "score"):
+        return None
+    probabilities = normalized_probabilities(answer.get("probabilities"), ordinal=kind == "score")
+    if probabilities is None:
+        return None
+    p = list(probabilities.values())
+    n = len(p)
+    if n == 1:
+        return 1.0
     if kind == "choice":
         return (max(p) - 1.0 / n) / (1.0 - 1.0 / n)
     mode = max(range(n), key=p.__getitem__)

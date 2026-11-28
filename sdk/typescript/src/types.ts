@@ -8,17 +8,17 @@ export type State = string | readonly JsonValue[] | { readonly [key: string]: Js
 
 export interface ChoiceQuestion {
   readonly type: 'choice';
-  readonly instructions: JsonValue;
+  readonly instructions?: JsonValue;
   readonly criteria: readonly string[] | Readonly<Record<string, JsonValue>>;
 }
 export interface ScoreQuestion {
   readonly type: 'score';
-  readonly instructions: JsonValue;
+  readonly instructions?: JsonValue;
   readonly criteria: readonly JsonValue[];
 }
 export interface NoulQuestion {
   readonly type: 'noul';
-  readonly instructions: JsonValue;
+  readonly instructions?: JsonValue;
   readonly criteria?: Readonly<{ true?: JsonValue; false?: JsonValue }> | null;
 }
 export type Question = ChoiceQuestion | ScoreQuestion | NoulQuestion;
@@ -29,8 +29,13 @@ export interface BoxQuestion {
 }
 export type MultimodalQuestion = Question | BoxQuestion;
 export type MultimodalQuestions = Readonly<Record<string, MultimodalQuestion>>;
+export interface SystemOneBoxQuestion {
+  readonly type: 'box';
+  readonly instructions?: State;
+}
+export type SystemOneImageQuestions = Readonly<Record<string, Question | SystemOneBoxQuestion>>;
 export interface ImageAsset {
-  readonly type: 'image';
+  readonly type?: 'image';
   readonly format: 'png' | 'jpg' | 'jpeg';
   readonly data_base64: string;
 }
@@ -90,6 +95,7 @@ export interface BatchPredictOptions extends PredictOptions {
 
 export interface MultimodalOptions extends RequestOptions {
   state?: State;
+  model?: string;
   maxLen?: number;
   minConfidence?: MinConfidence;
 }
@@ -233,12 +239,12 @@ export interface MultimodalPrediction<Q extends MultimodalQuestions = Multimodal
   model: string;
   answers: { -readonly [K in keyof Q]: MultimodalAnswer<Q[K]> };
   usage: BatchUsage & { forward_passes: number; truncated: boolean };
-  routing?: { model: 'multimodal'; repo: string | null; reason: string; detection: null; workflow: null };
+  routing?: { model: string; repo: string | null; reason: string; detection: null; workflow: null };
 }
-export interface SystemOneImagePrediction<Q extends MultimodalQuestions = MultimodalQuestions> {
+export interface SystemOneImagePrediction<Q extends SystemOneImageQuestions = SystemOneImageQuestions> {
   model: string;
-  answers: { -readonly [K in keyof Q]: Q[K] extends BoxQuestion
-    ? Omit<BoxAnswer, 'confidence'> & { confidence: number | null } : MultimodalAnswer<Q[K]> };
+  answers: { -readonly [K in keyof Q]: Q[K] extends SystemOneBoxQuestion
+    ? Omit<BoxAnswer, 'confidence'> & { confidence: number | null } : Q[K] extends Question ? Answer<Q[K]> : never };
   usage: BatchUsage;
 }
 /** Aggregate token counts. Per-state truncation metadata stays in each result's usage. */

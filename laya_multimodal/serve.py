@@ -23,6 +23,7 @@ env var                    meaning                                        defaul
 ``LAYA_PORT``              bind port                                      8000
 ``LAYA_DEVICE``            torch device for every checkpoint              (auto)
 ``LAYA_MULTIMODAL_MODEL``  native checkpoint directory or Hub ID         (published Qwen)
+``LAYA_SERVE_CONFIG``      JSON model names and checkpoint sources          (unset)
 ``LAYA_PRELOAD``           build the checkpoints at startup, not lazily   1
 ``LAYA_MODELS``            comma list to preload                          (all registered)
 ``LAYA_THREADS``           cap torch intra-op threads (CPU inference).    (torch
@@ -39,7 +40,7 @@ env var                    meaning                                        defaul
 ``LAYA_ROOT_PATH``         public URL prefix behind a reverse proxy        (none)
 ``LAYA_LOG_LEVEL``         uvicorn log level                              info
 ``LAYA_MAX_CONCURRENT``    cap on requests past auth at once; excess      16
-                           gets 503 (see below)
+                           gets 529 on System One, 503 elsewhere
 ``LAYA_EXTRA_MODELS``      JSON object ``{name: source}`` registering     (none)
                            extra checkpoints beside the bundled ones --
                            a Hub repo id, a local checkpoint directory, or
@@ -96,7 +97,7 @@ MAX_BODY_BYTES = 2 * 1024 * 1024
 # of the `LAYA_MAX_CONCURRENT` slots for as long as the socket stays open. There is no deadline at
 # any other layer: uvicorn has no request-body timeout, and `async for chunk in request.stream()`
 # waits as long as the peer does. So without the bound below, `LAYA_MAX_CONCURRENT` stalled uploads
-# (16 by default, a few bytes each) keep BOTH decision routes answering 503 for as long as the
+# (16 by default, a few bytes each) keep decision routes reporting overload for as long as the
 # attacker keeps the sockets open, while `/health` -- which takes no admission slot -- keeps telling
 # the orchestrator the process is healthy, so nothing ever restarts it. Bounding the read turns an
 # indefinitely held slot into a slot held for at most this long, and releases it either way.
@@ -204,13 +205,14 @@ def _strict_jev_enabled(*, batch: bool = False) -> bool:
     return _env_bool("LAYA_JEV_STRICT", not batch)
 
 
-def _project_jev_strict(result: Dict[str, Any], questions: Optional[Dict] = None) -> Dict[str, Any]:
+def _project_jev_strict(result: Dict[str, Any], questions: Optional[Dict] = None, *,
+                        canonical: bool = False) -> Dict[str, Any]:
     """Project System One answers onto the wire contract.
 
     With the original questions, use TypeSafe confidence and preserve structured
     score legends and image references. The legacy batch projection keeps its values.
     """
-    from .decisions.confidence import jev_confidence
+    from .decisions.confidence import jev_confidence, normalized_probabilities
 
     answers: Dict[str, Any] = {}
     for qid, answer in (result.get("answers") or {}).items():
@@ -231,13 +233,23 @@ def _project_jev_strict(result: Dict[str, Any], questions: Optional[Dict] = None
         else:
             answers[qid] = answer
         if questions is not None and kind in ("choice", "score"):
+            projected = answers[qid]
+            if canonical:
+                probabilities = normalized_probabilities(answer["probabilities"], ordinal=kind == "score")
+                if probabilities is None:
+                    raise RuntimeError("invalid model probability distribution")
+                projected["probabilities"] = probabilities
+                if kind == "score":
+                    projected["score"] = math.fsum(int(level) * p for level, p in probabilities.items())
+                elif probabilities.get(projected["choice"]) != max(probabilities.values()):
+                    projected["choice"] = max(probabilities, key=probabilities.__getitem__)
             confidence = jev_confidence(answer)
             if confidence is not None:
-                answers[qid]["confidence"] = round(confidence, 4)
+                projected["confidence"] = round(confidence, 4)
             if kind == "score":
                 criteria = questions.get(qid, {}).get("criteria")
                 if isinstance(criteria, list) and len(criteria) == len(answer["legend"]):
-                    answers[qid]["legend"] = {
+                    projected["legend"] = {
                         str(i): v if isinstance(v, (str, list, dict)) else answer["legend"][str(i)]
                         for i, v in enumerate(criteria)
                     }
@@ -1183,7 +1195,7 @@ def _parse_json_body(raw: bytes) -> Any:
     from fastapi import HTTPException
 
     try:
-        return json.loads(raw)
+        return json.loads(raw.decode("utf-8"))
     except (ValueError, RecursionError):
         raise HTTPException(status_code=400, detail="request body must be valid JSON")
 
@@ -1207,10 +1219,38 @@ def _apply_thread_limit():
     return n
 
 
-def build_router():
+def _serve_models():
+    from .decisions.systemone import MODEL_ALIAS, MODEL_IDS, TYPESAFE_MODEL_ALIAS
+
+    path = os.environ.get("LAYA_SERVE_CONFIG", "").strip()
+    if not path:
+        from .models.revisions import DEFAULT_CHECKPOINT
+
+        source = os.environ.get("LAYA_MULTIMODAL_MODEL", "").strip()
+        if source and source != DEFAULT_CHECKPOINT:
+            return "jev-mm", {}
+        return MODEL_IDS[0], {}
+    try:
+        with open(os.path.expanduser(path), encoding="utf-8") as handle:
+            config = json.load(handle)
+    except (OSError, ValueError) as error:
+        raise SystemExit(f"cannot read LAYA_SERVE_CONFIG: {error}") from None
+    if not isinstance(config, dict) or set(config) != {"default", "models"}:
+        raise SystemExit("LAYA_SERVE_CONFIG requires default and models")
+    default, models = config["default"], config["models"]
+    if (not isinstance(default, str) or not isinstance(models, dict) or default not in models
+            or any(not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", name)
+                   or name in {MODEL_ALIAS, TYPESAFE_MODEL_ALIAS, "multimodal", "default", "auto", "vega"}
+                   or not isinstance(source, str) or not source.strip() for name, source in models.items())):
+        raise SystemExit("LAYA_SERVE_CONFIG requires short model names, checkpoint sources and a registered default")
+    return default, models
+
+
+def build_router(*, profile=None):
     """Build a Router from the environment, preloading unless told otherwise."""
     from .mcp.device import env_device
     from .decisions.routing import MULTIMODAL_MODEL, Router
+    from .decisions.systemone import MODEL_ALIAS, TYPESAFE_MODEL_ALIAS
 
     _apply_thread_limit()
     # `env_device` rather than a raw read: it strips, the way `LAYA_MODELS` two lines
@@ -1220,7 +1260,11 @@ def build_router():
     models_env = os.environ.get("LAYA_MODELS", "").strip()
     preload_names = [m.strip() for m in models_env.split(",") if m.strip()] or None
     options = {"device": device}
-    multimodal_model = os.environ.get("LAYA_MULTIMODAL_MODEL", "").strip()
+    public_default, public_sources = _serve_models() if profile is None else profile
+    if preload_names is not None:
+        preload_names = [MULTIMODAL_MODEL if name in (public_default, MODEL_ALIAS, TYPESAFE_MODEL_ALIAS) else name
+                         for name in preload_names]
+    multimodal_model = public_sources.get(public_default) or os.environ.get("LAYA_MULTIMODAL_MODEL", "").strip()
     if multimodal_model:
         options["multimodal"] = multimodal_model
         if preload_names is None:
@@ -1231,6 +1275,7 @@ def build_router():
     # Resolved before the Router is built: a name `Router` would reject is a configuration error,
     # and `_resolve_port`'s idiom applies -- exit with the message, not a traceback.
     extra_models = _extra_models_option()
+    extra_models.update({name: source for name, source in public_sources.items() if name != public_default})
     try:
         options.update(_default_model_option(extra_models))
     except ValueError as error:
@@ -1251,14 +1296,22 @@ def create_app(router: Optional[Any] = None):
     is built from the environment (and preloaded) at app-creation time."""
     import asyncio
     from concurrent.futures import ThreadPoolExecutor
+    from datetime import date
     from functools import partial
 
     from fastapi import FastAPI, Header, HTTPException, Request
 
     from .mcp.device import agent_device, resolve_device, router_agent
+    from .decisions.routing import MULTIMODAL_MODEL
+    from .decisions.systemone import MODEL_ALIAS, MODEL_IDS, TYPESAFE_MODEL_ALIAS, uses_typesafe_model
 
+    profile = _serve_models()
+    public_default, public_sources = profile
+    public_names = {MULTIMODAL_MODEL: public_default, **{name: name for name in public_sources if name != public_default}}
+    model_routes = {name: route for route, name in public_names.items()}
+    model_routes[MODEL_ALIAS] = MULTIMODAL_MODEL
     if router is None:
-        router = build_router()
+        router = build_router(profile=profile)
     api_key = os.environ.get("LAYA_API_KEY") or None
 
     # Inference is synchronous torch, and a CPU call takes hundreds of milliseconds to
@@ -1379,7 +1432,8 @@ def create_app(router: Optional[Any] = None):
 
     def _check_auth(authorization: Optional[str]) -> None:
         if not _authorized(authorization):
-            raise HTTPException(status_code=401, detail="invalid or missing bearer token")
+            raise HTTPException(status_code=401, detail="invalid or missing bearer token",
+                                headers={"WWW-Authenticate": "Bearer"})
 
     @app.get("/health")
     def health(authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
@@ -1420,8 +1474,32 @@ def create_app(router: Optional[Any] = None):
             **idle,
         }
 
+    alias_release_date = date.today().isoformat()
+
+    @app.get("/v1/models")
+    def models(authorization: Optional[str] = Header(default=None)) -> Dict[str, List[Dict[str, str]]]:
+        _check_auth(authorization)
+        return {"models": [{"name": name, "description": "A deployed multimodal decision model.",
+                            "release_date": alias_release_date} for name in model_routes]}
+
+    def _resolve_request_model(name):
+        if name is None:
+            return None
+        if not isinstance(name, str) or not name.strip():
+            raise HTTPException(status_code=422, detail="model must be a nonempty string")
+        if name == TYPESAFE_MODEL_ALIAS:
+            name = MODEL_ALIAS
+        if name in model_routes:
+            return model_routes[name]
+        if name in MODEL_IDS:
+            raise HTTPException(status_code=422, detail="Model is not deployed. See GET /v1/models.")
+        resolved = _resolve_model(name, getattr(router, "resolve", None))
+        if resolved is None and name.strip().lower() not in ("auto", "jev-1"):
+            raise HTTPException(status_code=422, detail="Unknown model. See GET /v1/models.")
+        return resolved
+
     @asynccontextmanager
-    async def _admit():
+    async def _admit(overloaded_status=503):
         nonlocal admission
         if admission is None:
             admission = asyncio.Semaphore(max_concurrent)
@@ -1430,7 +1508,7 @@ def create_app(router: Optional[Any] = None):
             # buffered bodies stay within the bound above. Retry-After tells
             # well-behaved clients when a slot is likely free: admission turns
             # over at inference speed, so one second is the honest hint.
-            raise HTTPException(status_code=503, detail="server busy, try again later",
+            raise HTTPException(status_code=overloaded_status, detail="server busy, try again later",
                                 headers={"Retry-After": "1"})
         await admission.acquire()
         try:
@@ -1458,7 +1536,7 @@ def create_app(router: Optional[Any] = None):
             explain = body.get("explain", False)
             if not isinstance(explain, bool):
                 raise HTTPException(status_code=422, detail="explain must be a boolean")
-            model = _resolve_model(body.get("model"), getattr(router, "resolve", None))
+            model = _resolve_request_model(body.get("model"))
             route_kwargs = {}
             if body.get("task") is not None:
                 route_kwargs["task"] = body["task"]
@@ -1510,74 +1588,104 @@ def create_app(router: Optional[Any] = None):
 
     @app.post("/v1/systemone")
     async def systemone(request: Request, authorization: Optional[str] = Header(default=None)):
+        from .decisions.systemone import SystemOneRequestError, SystemOneValidationError
+
         _check_auth(authorization)
-        async with _admit():
-            return await _systemone_inner(request)
+        try:
+            async with _admit(529):
+                return await _systemone_inner(request)
+        except SystemOneValidationError as error:
+            raise HTTPException(status_code=422, detail=error.detail) from None
+        except SystemOneRequestError as error:
+            raise HTTPException(status_code=error.status, detail=str(error)) from None
+        except HTTPException as error:
+            if getattr(request.state, "typesafe", False) and error.status_code == 422 and isinstance(error.detail, str):
+                detail = SystemOneValidationError(["body"], error.detail).detail
+                raise HTTPException(status_code=422, detail=detail, headers=error.headers) from None
+            raise
 
     async def _systemone_inner(request: Request):
         nonlocal gate
+        from .decisions.image_assets import image_form_parts, prepare_image_request
         from .decisions.systemone import (
-            IMAGE_HEADER, MAX_IMAGE_REQUEST_BYTES, ImageRequestError, image_form_parts, prepare_image_request,
+            IMAGE_HEADER, LONG_CONTEXT_HEADER, MAX_REQUEST_BYTES, ContextLengthError,
+            SystemOneRequestError, SystemOneValidationError, decode_systemone_body, run_systemone,
+            validate_systemone_request,
         )
+        from .decisions.routing import canonical_name
+        from .decisions.questions import serialize_state
 
         _mark_request()
         content_type = request.headers.get("content-type", "")
         multipart = content_type.partition(";")[0].strip().lower() == "multipart/form-data"
-        images_enabled = request.headers.get(IMAGE_HEADER, "").strip().lower() == "true"
-        files = {}
-        if multipart or images_enabled:
-            raw = await _read_body_capped(request, body_read_timeout,
-                                          max_bytes=MAX_IMAGE_REQUEST_BYTES if images_enabled else None)
-            if multipart:
-                try:
-                    raw, files = image_form_parts(content_type, raw)
-                except ImageRequestError as error:
-                    raise HTTPException(status_code=error.status, detail=str(error)) from None
-            body = _parse_json_body(raw)
-        else:
-            body = await _read_json_body(request, body_read_timeout)
-        if not isinstance(body, dict) or "questions" not in body:
+        for header in (IMAGE_HEADER, LONG_CONTEXT_HEADER):
+            if header in request.headers and request.headers[header] != "true":
+                raise SystemOneValidationError(["header", header.lower()], "Expected 'true'", "literal_error")
+        images_enabled = IMAGE_HEADER in request.headers
+        long_context = LONG_CONTEXT_HEADER in request.headers
+        encoding = ",".join(request.headers.getlist("content-encoding"))
+        raw = await _read_body_capped(request, body_read_timeout, max_bytes=MAX_REQUEST_BYTES)
+        wire_size = len(raw)
+        if encoding:
+            raw = await asyncio.to_thread(decode_systemone_body, raw, encoding, MAX_REQUEST_BYTES)
+        decoded_size = len(raw)
+        raw, files = image_form_parts(content_type, raw) if multipart else (raw, {})
+        body = _parse_json_body(raw)
+        model_hint = body.get("model") if isinstance(body, dict) else None
+        named_model = isinstance(model_hint, str) and model_hint in model_routes
+        compatible = images_enabled or long_context or multipart or named_model or uses_typesafe_model(model_hint)
+        # Legacy Laya request controls and unnamed requests retain the original wire limits.
+        if not compatible and max(wire_size, decoded_size) > MAX_BODY_BYTES:
+            raise HTTPException(status_code=413, detail="request body too large")
+        request.state.typesafe = compatible
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="request body must be an object with a 'questions' field")
+        if compatible:
+            if _has_lone_surrogate(body):
+                raise HTTPException(status_code=400, detail=_LONE_SURROGATE_DETAIL)
+            inference_questions = validate_systemone_request(body)
+        elif "questions" not in body:
             raise HTTPException(status_code=400, detail="request body must be an object with a 'questions' field")
         state = body.get("state")
         questions = body["questions"]
-        model_hint = body.get("model") or body.get("task")
-        native_options = getattr(router, "_multimodal_spec", None) is not None and (
-            bool(body.get("assets")) or isinstance(model_hint, str) and model_hint.strip().lower() == "multimodal"
-        )
-        _check_request_limits(state, questions, MAX_TOURNAMENT_CHOICE_OPTIONS if tournament_group or native_options
-                              else MAX_CHOICE_OPTIONS)
+        if not compatible:
+            model_hint = model_hint or body.get("task")
+            native_options = getattr(router, "_multimodal_spec", None) is not None and (
+                bool(body.get("assets")) or isinstance(model_hint, str) and model_hint.strip().lower() == "multimodal"
+            )
+            _check_request_limits(state, questions, MAX_TOURNAMENT_CHOICE_OPTIONS if tournament_group or native_options
+                                  else MAX_CHOICE_OPTIONS)
+            inference_questions = questions
+            if _has_lone_surrogate(body):
+                raise HTTPException(status_code=400, detail=_LONE_SURROGATE_DETAIL)
         _refuse_body_refusals(body)
-        # After the size checks, so an oversized body is refused before anything walks it, and
-        # `MAX_STATE_CHARS`/`MAX_QUESTIONS` bound what the walk can reach. A `\udXXX` escape with
-        # no pair is legal JSON that cannot be UTF-8 encoded, so the tokenizer raised `TypeError`
-        # from inside `build_sequence` and the client's own mistake came back as a 500
-        # "inference failed". A *paired* surrogate is an ordinary astral character (an emoji) by
-        # the time `json.loads` is done, so only lone ones are rejected here.
-        if _has_lone_surrogate(body):
-            raise HTTPException(status_code=400, detail=_LONE_SURROGATE_DETAIL)
-        # `getattr` rather than `router.resolve`: test doubles injected through
-        # `create_app(router=...)` predate the registry-aware resolver, and a fake
-        # that cannot resolve names falls back to the built-in table, which is the
-        # registry such a fake is asserting anyway.
-        model = _resolve_model(body.get("model"), getattr(router, "resolve", None))
+        model_name = body.get("model")
+        try:
+            model = _resolve_request_model(model_name)
+        except HTTPException as error:
+            if compatible:
+                raise SystemOneValidationError(["body", "model"], error.detail) from None
+            raise
+        if compatible and model is None:
+            raise SystemOneValidationError(["body", "model"], "Unknown model. See GET /v1/models.")
         assets = body.get("assets", {})
         if not isinstance(assets, dict):
             raise HTTPException(status_code=400, detail="'assets' must be an object")
-        has_box = any(isinstance(q, dict) and q.get("type") == "box" for q in questions.values())
+        has_box = any(isinstance(q, dict) and q.get("type") == "box" for q in inference_questions.values())
         image_request = bool(assets or files or has_box)
         if image_request:
-            from .decisions.routing import MULTIMODAL_MODEL, canonical_name
-
             if not images_enabled:
                 raise HTTPException(status_code=400, detail="set " + IMAGE_HEADER + ": true for assets or box questions")
             if not assets:
                 raise HTTPException(status_code=400, detail="image and box requests need an assets object")
-            if (model not in (None, MULTIMODAL_MODEL)
-                    or body.get("task") and canonical_name(body["task"]) != MULTIMODAL_MODEL):
+            model = model or MULTIMODAL_MODEL
+            if model not in public_names or body.get("task") and canonical_name(body["task"]) != model:
                 raise HTTPException(status_code=422, detail="the selected model cannot read image assets")
             if getattr(router, "_multimodal_spec", None) is None:
                 raise HTTPException(status_code=503, detail="configure LAYA_MULTIMODAL_MODEL to enable image assets")
-            model = MULTIMODAL_MODEL
+        elif compatible:
+            # Reserved local keys such as "image" are data inside an official JSON state.
+            state = serialize_state(state) or '""'
         else:
             _require_inline_media(state)
         max_budget_cap = _resolve_max_token_budget()
@@ -1587,6 +1695,8 @@ def create_app(router: Optional[Any] = None):
         # "inherit what the Router was built with", so passing None would override a deployment's
         # own `Router(lang_guess=...)` or abstention threshold with the server's default.
         predict_kwargs = {}
+        if max_len is None and long_context and os.environ.get("LAYA_MAX_TOKEN_BUDGET"):
+            max_len = min(max_budget_cap, 262144)
         if max_len is not None:
             predict_kwargs["max_len"] = max_len
         if head_max_len is not None:
@@ -1608,24 +1718,27 @@ def create_app(router: Optional[Any] = None):
         try:
             async with gate:
                 loop = asyncio.get_running_loop()
-                inference_questions = questions
                 if image_request:
-                    prepare = partial(prepare_image_request, state, questions, assets, files,
+                    prepare = partial(prepare_image_request, state, inference_questions, assets, files,
                                       images_enabled=images_enabled)
                     state, inference_questions = await loop.run_in_executor(pool, prepare)
                 t0 = time.perf_counter()
-                if tournament_group and not image_request:
+                if tournament_group and not image_request and not compatible:
                     run = partial(_predict_with_tournament, router, state, inference_questions, tournament_group,
                                   model=model, **predict_kwargs)
                 else:
                     run = partial(router.predict, state, inference_questions, model=model, **predict_kwargs)
+                if compatible:
+                    run = partial(run_systemone, run, long_context)
                 result = await loop.run_in_executor(pool, _run_inference, run)
                 infer_ms = (time.perf_counter() - t0) * 1000.0
                 # Log while `usage` still carries the truncation report. `_project_jev_strict`
                 # drops it, and a strict client then has no other signal (#1425).
                 _warn_state_truncated(result, route="/v1/systemone", model=model, questions=questions)
-                if image_request or _strict_jev_enabled():
-                    result = _project_jev_strict(result, questions)
+                if compatible or image_request or _strict_jev_enabled():
+                    result = _project_jev_strict(result, questions, canonical=compatible)
+                    if compatible and model in public_names:
+                        result["model"] = public_names[model]
                 else:
                     result = _add_jev_confidence(result)
                 from fastapi.responses import JSONResponse
@@ -1636,10 +1749,15 @@ def create_app(router: Optional[Any] = None):
                         "X-Inference-Time-Ms": f"{infer_ms:.2f}"
                     }
                 )
-        except HTTPException:
+        except (HTTPException, SystemOneRequestError, SystemOneValidationError):
             raise
-        except ImageRequestError as error:
-            raise HTTPException(status_code=error.status, detail=str(error)) from None
+        except ContextLengthError as error:
+            if not compatible:
+                raise HTTPException(status_code=422, detail=str(error)) from None
+            raise HTTPException(status_code=400, detail={
+                "type": "max_tokens_exceeded", "message": str(error), "limit": error.limit,
+                "tokens": error.tokens, "scope": error.scope,
+            }) from None
         except ValueError as e:
             # Question validation errors name the question and what to fix: safe for clients.
             raise HTTPException(status_code=422, detail=str(e))
@@ -1664,7 +1782,7 @@ def create_app(router: Optional[Any] = None):
             body = await _read_json_body(request, body_read_timeout)
             if not isinstance(body, dict) or not isinstance(body.get("questions"), dict):
                 raise HTTPException(status_code=400, detail="request needs a questions object")
-            allowed = {"state", "questions", "image", "audio", "video", "max_len", "min_confidence"}
+            allowed = {"model", "state", "questions", "image", "audio", "video", "max_len", "min_confidence"}
             if set(body) - allowed:
                 raise HTTPException(status_code=422, detail="unsupported multimodal controls: %s" % ", ".join(sorted(set(body) - allowed)))
             _check_request_limits(body.get("state") or "", body["questions"])
@@ -1687,6 +1805,10 @@ def create_app(router: Optional[Any] = None):
                 raise HTTPException(status_code=422, detail="supply exactly one image, audio or video; video retains its soundtrack")
             if getattr(router, "_multimodal_spec", None) is None:
                 raise HTTPException(status_code=503, detail="configure LAYA_MULTIMODAL_MODEL to enable native multimodal decisions")
+            model_name = body.get("model")
+            model = MULTIMODAL_MODEL if model_name is None else _resolve_request_model(model_name)
+            if model not in public_names:
+                raise HTTPException(status_code=422, detail="select a native model from GET /v1/models")
             kwargs = dict(media)
             budget = _validate_budget_param(body, "max_len", _resolve_max_token_budget())
             if budget is not None:
@@ -1699,10 +1821,10 @@ def create_app(router: Optional[Any] = None):
             try:
                 async with gate:
                     run = partial(router.predict, body.get("state"), body["questions"],
-                                  model="multimodal", **kwargs)
+                                  model=model, **kwargs)
                     result = await asyncio.get_running_loop().run_in_executor(pool, _run_inference, run)
                     from fastapi.responses import JSONResponse
-                    return JSONResponse(content=result)
+                    return JSONResponse(content={**result, "model": public_names[model]})
             except (ValueError, TypeError) as error:
                 raise HTTPException(status_code=422, detail=str(error)) from None
             except Exception:
@@ -1745,7 +1867,7 @@ def create_app(router: Optional[Any] = None):
             raise HTTPException(status_code=400, detail=_LONE_SURROGATE_DETAIL)
         # Same resolver fallback as `_systemone_inner`: a test double without a
         # registry-aware `resolve` keeps the built-in table it was written against.
-        model = _resolve_model(body.get("model"), getattr(router, "resolve", None))
+        model = _resolve_request_model(body.get("model"))
         for state in states:
             _require_inline_media(state)
         max_budget_cap = _resolve_max_token_budget()

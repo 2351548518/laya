@@ -24,15 +24,26 @@ class MultimodalTests(unittest.TestCase):
         result.pop("routing")
         result["usage"] = {"input_tokens": 96, "output_tokens": 0}
         result["answers"]["target"]["confidence"] = None
-        assets = {"photo": {"type": "image", "format": "png", "data_base64": "aW1hZ2U="}}
+        assets = {"photo": {"format": "png", "data_base64": "aW1hZ2U="}}
         with Server(result) as server:
             client = LayaClient(base_url=server.url)
-            self.assertEqual(client.predict_image_assets("photo", BOX_QUESTIONS, assets), result)
-            method, path, headers, wire = server.requests[0]
-            self.assertEqual((method, path), ("POST", "/v1/systemone"))
-            self.assertEqual({key.lower(): val for key, val in headers.items()}["typesafe-danger-zone-images"], "true")
-            self.assertEqual(json.loads(wire), {"state": "photo", "model": "multimodal",
-                                                "questions": BOX_QUESTIONS, "assets": assets})
+            for target in (BOX_QUESTIONS["target"], {"type": "box"},
+                           {"type": "box", "instructions": {"locate": ["the red cup"]}}):
+                questions = {"target": target}
+                self.assertEqual(client.predict_image_assets("photo", questions, assets), result)
+                method, path, headers, wire = server.requests[-1]
+                self.assertEqual((method, path), ("POST", "/v1/systemone"))
+                self.assertEqual({key.lower(): val for key, val in headers.items()}["typesafe-danger-zone-images"], "true")
+                self.assertEqual(json.loads(wire), {"state": "photo", "model": "jev-mm-latest",
+                                                    "questions": questions, "assets": assets})
+
+    def test_systemone_text_supports_missing_instructions_with_a_model(self):
+        questions = {name: {key: value for key, value in q.items() if key != "instructions"}
+                     for name, q in QUESTIONS.items()}
+        with Server(PREDICTION) as server:
+            client = LayaClient(base_url=server.url)
+            self.assertEqual(client.predict("ticket", questions, model="jev-mm-latest"), PREDICTION)
+            self.assertEqual(json.loads(server.requests[-1][-1])["questions"], questions)
 
     def test_sends_readable_box_and_exact_media_bytes(self):
         with Server(BOX_RESULT) as server:
@@ -53,9 +64,9 @@ class MultimodalTests(unittest.TestCase):
         with Server(expected) as server:
             client = LayaClient(base_url=server.url)
             for kind in ("audio", "video"):
-                self.assertEqual(client.predict_multimodal(QUESTIONS, **{kind: b"media"}), expected)
+                self.assertEqual(client.predict_multimodal(QUESTIONS, model="jev-mm-gemma-e2b", **{kind: b"media"}), expected)
                 body = json.loads(server.requests[-1][-1])
-                self.assertEqual(body, {"questions": QUESTIONS, kind: {"base64": "bWVkaWE="}})
+                self.assertEqual(body, {"questions": QUESTIONS, "model": "jev-mm-gemma-e2b", kind: {"base64": "bWVkaWE="}})
 
     def test_rejects_invalid_inputs_before_transport(self):
         with Server(BOX_RESULT) as server:

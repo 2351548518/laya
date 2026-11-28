@@ -4,13 +4,13 @@ import {
 } from './errors.js';
 import type { BatchPrediction, BatchPredictOptions, Health, ImageAsset, MultimodalMedia, MultimodalOptions,
   MultimodalPrediction, MultimodalQuestions, Prediction, PredictOptions, Questions, RequestOptions, RouteOptions,
-  RouteSnapshot, State, SystemOneImagePrediction } from './types.js';
+  RouteSnapshot, State, SystemOneImagePrediction, SystemOneImageQuestions } from './types.js';
 import { isMinConfidenceKey } from './buckets.js';
 import { isRecord, validateJson, validateQuestions, validateTimeout } from './validation.js';
 import { validateBatchPrediction, validateHealth, validatePrediction, validateRouteSnapshot } from './response.js';
 
 const ROUTE_OPTIONS = new Set(['model', 'task', 'lang', 'langGuess', 'explain', 'signal', 'timeoutMs']);
-const MULTIMODAL_OPTIONS = new Set(['state', 'maxLen', 'minConfidence', 'signal', 'timeoutMs']);
+const MULTIMODAL_OPTIONS = new Set(['state', 'model', 'maxLen', 'minConfidence', 'signal', 'timeoutMs']);
 
 /** One threshold in `[0, 1]`: booleans are not thresholds even though they read as 0/1. */
 function isThreshold(value: unknown): value is number {
@@ -73,25 +73,26 @@ export class Laya {
   }
 
   async predict<const Q extends Questions>(state: State, questions: Q, options: PredictOptions = {}): Promise<Prediction<Q>> {
-    validateQuestions(questions);
+    validateQuestions(questions, options?.model !== undefined || this.model !== undefined ? 'systemone' : 'local');
     const result = await this.request<Prediction<Q>>('/v1/systemone', this.body(state, questions, options), options);
     validatePrediction(result, questions);
     return result;
   }
 
   /** Evaluate named PNG/JPEG references through the System One JSON endpoint. */
-  async predictImageAssets<const Q extends MultimodalQuestions>(state: Exclude<State, null>, questions: Q,
+  async predictImageAssets<const Q extends SystemOneImageQuestions>(state: Exclude<State, null>, questions: Q,
       assets: Readonly<Record<string, ImageAsset>>, options: RequestOptions & { model?: string } = {}):
       Promise<SystemOneImagePrediction<Q>> {
-    validateQuestions(questions, true);
+    validateQuestions(questions, 'assets');
     this.validateState(state);
     if (state === null || !isRecord(assets) || !Object.keys(assets).length ||
         Object.entries(assets).some(([name, asset]) => !name.trim() || !isRecord(asset) ||
-          Object.keys(asset).length !== 3 || asset.type !== 'image' ||
+          Object.keys(asset).some(key => !['type', 'format', 'data_base64'].includes(key)) ||
+          asset.type !== undefined && asset.type !== 'image' ||
           !['png', 'jpg', 'jpeg'].includes(asset.format) || typeof asset.data_base64 !== 'string' || !asset.data_base64)) {
       throw new LayaValidationError('assets must be named PNG/JPEG images with data_base64');
     }
-    const body = { state, ...this.routingBody(questions, { model: options.model ?? 'multimodal' }), assets };
+    const body = { state, ...this.routingBody(questions, { model: options.model ?? 'jev-mm-latest' }), assets };
     validateJson(body);
     const result = await this.request<SystemOneImagePrediction<Q>>('/v1/systemone', JSON.stringify(body), options, true);
     validatePrediction(result, questions, false, true);
@@ -101,7 +102,7 @@ export class Laya {
   /** Send file bytes to the server's configured native multimodal checkpoint. */
   async predictMultimodal<const Q extends MultimodalQuestions>(media: MultimodalMedia, questions: Q,
       options: MultimodalOptions = {}): Promise<MultimodalPrediction<Q>> {
-    validateQuestions(questions, true);
+    validateQuestions(questions, 'media');
     if (!isRecord(media)) {
       throw new LayaValidationError('provide exactly one of image, audio or video');
     }
@@ -115,14 +116,18 @@ export class Laya {
         Object.keys(options).some(key => !MULTIMODAL_OPTIONS.has(key))) {
       throw new LayaValidationError('invalid multimodal options');
     }
-    const { state, maxLen, minConfidence } = options;
+    const { state, model, maxLen, minConfidence } = options;
     if (state !== undefined) this.validateState(state);
+    if (model !== undefined && (typeof model !== 'string' || !model.trim())) {
+      throw new LayaValidationError('model must be a nonempty string');
+    }
     if (maxLen !== undefined && (!Number.isInteger(maxLen) || maxLen < 1)) {
       throw new LayaValidationError('maxLen must be a positive integer');
     }
     if (minConfidence !== undefined) validateMinConfidence(minConfidence);
     const body = { questions,
       ...(state !== undefined ? { state } : {}),
+      ...(model !== undefined ? { model } : {}),
       ...(maxLen !== undefined ? { max_len: maxLen } : {}),
       ...(minConfidence !== undefined ? { min_confidence: minConfidence } : {}),
     };
@@ -234,7 +239,7 @@ export class Laya {
     return body;
   }
 
-  private routingBody(questions: MultimodalQuestions, options: RouteOptions) {
+  private routingBody(questions: SystemOneImageQuestions, options: RouteOptions) {
     if (options.task !== undefined && (typeof options.task !== 'string' || !options.task.trim())) {
       throw new LayaValidationError('task must be a nonempty string');
     }

@@ -14,15 +14,19 @@ const prediction = {
 test('System One image assets use the image header and accept nullable box confidence', async () => {
   const result = { model: 'native-qwen', usage: { input_tokens: 96, output_tokens: 0 },
     answers: { target: { ...prediction.answers.target, confidence: null } } };
-  const assets = { photo: { type: 'image', format: 'png', data_base64: 'aW1hZ2U=' } };
+  const assets = { photo: { format: 'png', data_base64: 'aW1hZ2U=' } };
   const state = ['photo', 'Locate the cup.'];
-  const client = new Laya({ fetch: async (url, init) => {
-    assert.match(url, /\/v1\/systemone$/);
-    assert.equal(init.headers.get('typesafe-danger-zone-images'), 'true');
-    assert.deepEqual(JSON.parse(init.body), { model: 'multimodal', state, questions, assets });
-    return Response.json(result);
-  } });
-  assert.deepEqual(await client.predictImageAssets(state, questions, assets), result);
+  for (const target of [questions.target, { type: 'box' },
+    { type: 'box', instructions: { locate: ['the red cup'] } }]) {
+    const imageQuestions = { target };
+    const client = new Laya({ fetch: async (url, init) => {
+      assert.match(url, /\/v1\/systemone$/);
+      assert.equal(init.headers.get('typesafe-danger-zone-images'), 'true');
+      assert.deepEqual(JSON.parse(init.body), { model: 'jev-mm-latest', state, questions: imageQuestions, assets });
+      return Response.json(result);
+    } });
+    assert.deepEqual(await client.predictImageAssets(state, imageQuestions, assets), result);
+  }
 });
 
 test('native image request preserves subarray bytes and returns normalized box', async () => {
@@ -45,13 +49,15 @@ test('native image request preserves subarray bytes and returns normalized box',
 test('native audio and video keep decision questions and normal errors', async () => {
   for (const kind of ['audio', 'video']) {
     const q = { answer: { type: 'noul', instructions: 'Is the event present?' } };
-    const result = { model: 'native', answers: { answer: { type: 'noul', noul: 0.8 } }, usage: prediction.usage };
+    const result = { model: 'jev-mm-gemma-e2b', answers: { answer: { type: 'noul', noul: 0.8 } },
+      usage: prediction.usage, routing: { ...prediction.routing, model: 'jev-mm-gemma-e2b' } };
     const laya = new Laya({ fetch: async (url, init) => {
       assert.match(url, /\/v1\/multimodal$/);
-      assert.deepEqual(JSON.parse(init.body), { questions: q, [kind]: { base64: 'AAH/' } });
+      assert.deepEqual(JSON.parse(init.body), { questions: q, model: 'jev-mm-gemma-e2b', [kind]: { base64: 'AAH/' } });
       return Response.json(result);
     } });
-    assert.deepEqual(await laya.predictMultimodal({ [kind]: Uint8Array.of(0, 1, 255) }, q), result);
+    assert.deepEqual(await laya.predictMultimodal({ [kind]: Uint8Array.of(0, 1, 255) }, q,
+      { model: 'jev-mm-gemma-e2b' }), result);
   }
   const unavailable = new Laya({ fetch: async () => Response.json({ detail: 'configure native model' }, { status: 503 }) });
   await assert.rejects(unavailable.predictMultimodal({ image: Uint8Array.of(1) }, questions), LayaAPIError);
@@ -75,7 +81,7 @@ test('native request validates media, box questions and response geometry', asyn
     await assert.rejects(laya.predictMultimodal(media, questions), LayaValidationError);
   }
   await assert.rejects(laya.predictMultimodal({ image }, { target: { ...questions.target, criteria: [] } }), LayaValidationError);
-  await assert.rejects(laya.predictMultimodal({ image }, questions, { model: 'english' }), LayaValidationError);
+  await assert.rejects(laya.predictMultimodal({ image }, questions, { model: ' ' }), LayaValidationError);
   await assert.rejects(laya.predict('', questions), LayaValidationError);
   const wrong = structuredClone(prediction);
   wrong.answers.target.box.right = 0;

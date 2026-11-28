@@ -60,8 +60,11 @@ class BoxAnswer(_ConfidenceAnswer):
     box: Box
 
 
-class ImageAsset(TypedDict):
+class _ImageAssetType(TypedDict, total=False):
     type: Literal["image"]
+
+
+class ImageAsset(_ImageAssetType):
     format: Literal["png", "jpg", "jpeg"]
     data_base64: str
 

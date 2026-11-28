@@ -82,6 +82,9 @@ SDK 会把媒体字节编码成 base64。浏览器 `File` 可用 `new Uint8Array
 
 ## System One 图像资产
 
+两个 SDK 的图像资产方法都接受结构化 Box 指令，也可以省略指令。文本题需要省略指令时，
+Python 指定 `model="jev-mm-latest"`，TypeScript 传入 `{ model: 'jev-mm-latest' }`。
+
 在状态、题目指令或选项说明中引用命名图片时，使用 Python 的 `predict_image_assets` 或
 TypeScript 的 `predictImageAssets`。两者都会附上 `TypeSafe-Danger-Zone-Images: true`，
 并返回按题目 ID 索引的答案与 token 计数。PNG 或 JPEG 的每条边需在 280 到 1,568 像素之间。

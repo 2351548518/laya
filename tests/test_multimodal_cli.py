@@ -308,7 +308,7 @@ def test_request_shaped_dataset_preserves_media_labels_and_option_order(tmp_path
 
 
 @pytest.mark.parametrize(("assets", "files", "error"), [
-    ({"scene": {"type": "audio", "part": "file"}}, {"file": "scene.jpg"}, "declare type image"),
+    ({"scene": {"type": "audio", "part": "file"}}, {"file": "scene.jpg"}, "assets must be images"),
     ({"scene": {"type": "image", "part": "file"}, "view": {"type": "image", "part": "file"}},
      {"file": "scene.jpg"}, "distinct file part"),
     ({"scene": {"type": "image", "part": "file"}}, {"file": "scene.jpg", "orphan": "other.jpg"},
@@ -322,6 +322,31 @@ def test_request_shaped_dataset_checks_file_parts(tmp_path, assets, files, error
            "media_files": files, "expected": {"x": True}}
     with pytest.raises(ValueError, match=error):
         normalize_record(row, tmp_path, verify_media=False)
+
+
+def test_training_loads_structured_systemone_records(tmp_path):
+    from laya_multimodal.data import record_media, record_modality
+    from laya_multimodal.train import load_grounding_rows
+
+    state = {"image": "product name", "audio": None, "video": {"duration": 10}}
+    score = {"id": "score", "request": {"model": "jev-mm-latest", "state": state,
+             "questions": {"rating": {"type": "score", "criteria": [None, {"level": "high"}]}}},
+             "expected": {"rating": 1}}
+    (tmp_path / "photo.png").touch()
+    box = {"id": "box", "request": {"model": "jev-mm-latest", "state": {"image": "scene"},
+           "assets": {"scene": {"part": "file"}},
+           "questions": {"target": {"type": "box", "instructions": {"find": "the red cup"}}}},
+           "media_files": {"file": "photo.png"},
+           "expected": {"target": {"type": "box", "box": dict(left=.1, top=.2, right=.5, bottom=.6)}}}
+    source = tmp_path / "train.jsonl"
+    source.write_text("\n".join(map(json.dumps, (score, box))) + "\n", encoding="utf-8")
+    score_row, box_row = load_grounding_rows(source)
+    assert record_modality(score_row) == "text" and json.loads(score_row["state"]) == state
+    assert score_row["questions"]["rating"]["instructions"]
+    assert score_row["questions"]["rating"]["criteria"] == ["", {"level": "high"}]
+    assert record_modality(box_row) == "image"
+    assert list(record_media(box_row)) == [str(tmp_path / "photo.png")]
+    assert json.loads(box_row["questions"]["target"]["instructions"]) == {"find": "the red cup"}
 
 
 def test_native_swanlab_reporter_logs_metrics_and_isolates_sdk_failure(tmp_path, monkeypatch, caplog):

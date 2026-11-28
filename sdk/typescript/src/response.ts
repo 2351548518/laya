@@ -1,5 +1,5 @@
 import { LayaResponseError } from './errors.js';
-import type { MultimodalQuestions, Questions } from './types.js';
+import type { Questions, SystemOneImageQuestions } from './types.js';
 import { isRecord } from './validation.js';
 
 function expect(condition: unknown, field: string): asserts condition {
@@ -112,7 +112,7 @@ export function validateBatchPrediction(value: unknown, questions: Questions, co
   }
 }
 
-export function validatePrediction(value: unknown, questions: MultimodalQuestions,
+export function validatePrediction(value: unknown, questions: SystemOneImageQuestions,
     multimodal = false, imageAssets = false): void {
   expect(isRecord(value) && typeof value.model === 'string' && isRecord(value.answers), 'prediction');
   validateUsage(value.usage);
@@ -122,7 +122,7 @@ export function validatePrediction(value: unknown, questions: MultimodalQuestion
       typeof usage.truncated === 'boolean', 'multimodal usage');
     if (value.routing !== undefined) {
       validateRouteSnapshot(value.routing, false);
-      expect(isRecord(value.routing) && value.routing.model === 'multimodal' &&
+      expect(isRecord(value.routing) &&
         value.routing.detection === null && value.routing.workflow === null, 'multimodal routing');
     }
   } else if (value.routing !== undefined) {

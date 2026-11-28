@@ -24,12 +24,12 @@ def timeout_value(value: Any) -> float:
 
 
 def json_value(value: Any, ancestors=None) -> None:
-    if value is None or type(value) in (bool, int):
+    if value is None or type(value) is bool:
         return
     if isinstance(value, str):
         value.encode("utf-8")  # Reject unpaired surrogates before sending.
         return
-    if type(value) is float and math.isfinite(value):
+    if finite(value):
         return
     if not isinstance(value, (list, dict)):
         raise LayaValidationError("request must contain only finite JSON values")
@@ -52,20 +52,28 @@ def json_value(value: Any, ancestors=None) -> None:
         ancestors.remove(id(value))
 
 
-def questions_value(value: Any, *, multimodal=False) -> None:
+def questions_value(value: Any, *, mode="local") -> None:
     if not isinstance(value, dict) or not value:
         raise LayaValidationError("questions must be a nonempty object")
+    standard = mode in ("systemone", "assets")
     for question in value.values():
-        if isinstance(question, dict) and multimodal and question.get("type") == "box":
+        kind = question.get("type") if isinstance(question, dict) else None
+        if kind == "box" and mode in ("assets", "media"):
             instruction = question.get("instructions")
-            if (set(question) != {"type", "instructions"} or
-                    not isinstance(instruction, str) or not instruction.strip()):
-                raise LayaValidationError("box questions require only type and nonempty text instructions")
+            if set(question) - {"type", "instructions"}:
+                raise LayaValidationError("box questions accept only type and instructions")
+            if mode == "assets":
+                if instruction is not None and not isinstance(instruction, (str, dict, list)):
+                    raise LayaValidationError("box instructions must be a string, object, array or null")
+            elif not isinstance(instruction, str) or not instruction.strip():
+                raise LayaValidationError("native media box questions require nonempty text instructions")
             continue
-        if not isinstance(question, dict) or question.get("type") not in ("choice", "score", "noul"):
+        if kind not in ("choice", "score", "noul"):
             raise LayaValidationError("each question must have type choice, score or noul")
-        if "instructions" not in question:
+        if not standard and "instructions" not in question:
             raise LayaValidationError("each question requires instructions")
+        if kind in ("choice", "score") and "criteria" not in question:
+            raise LayaValidationError(kind + " questions require criteria")
 
 
 def expect(condition: bool, field: str) -> None:

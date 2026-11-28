@@ -16,7 +16,9 @@ from laya_multimodal.models.multimodal import MultimodalAgent
 from laya_multimodal.data import (
     BOX_EDGES, MEDIA_CONTROLS, MEDIA_FIELDS, can_shuffle_choice, decision_target, normalize_record,
 )
-from laya_multimodal.decisions.systemone import MAX_CHOICE_OPTIONS, MAX_SCORE_LEVELS
+from laya_multimodal.decisions.systemone import (
+    SystemOneRequestError, SystemOneValidationError, validate_systemone_question,
+)
 from laya_multimodal.train import _validate_grounding_row
 
 try:
@@ -41,17 +43,13 @@ def _structured(value):
 
 
 def systemone_question(question):
-    if set(question) - {"type", "instructions", "criteria"}:
+    if not isinstance(question, dict) or set(question) - {"type", "instructions", "criteria"}:
         return False
-    if question.get("instructions") is not None and not _structured(question["instructions"]):
+    try:
+        validate_systemone_question(question, ["question"])
+    except (SystemOneRequestError, SystemOneValidationError):
         return False
-    criteria = question.get("criteria")
-    if question["type"] == "choice":
-        return (isinstance(criteria, dict) and 1 <= len(criteria) <= MAX_CHOICE_OPTIONS
-                and all(_structured(value) or value is None for value in criteria.values()))
-    if question["type"] == "score":
-        return len(criteria) <= MAX_SCORE_LEVELS and all(_structured(value) for value in criteria)
-    return not criteria or all(_structured(value) or value is None for value in criteria.values())
+    return True
 
 
 def _hard_label(question, target):

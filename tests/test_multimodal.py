@@ -466,7 +466,7 @@ def test_systemone_image_and_box_wire_contract(monkeypatch, multipart):
     asset = {"type": "image", "part": "photo"} if multipart else {
         "type": "image", "format": "png", "data_base64": base64.b64encode(payload).decode(),
     }
-    body = {"model": "jev-latest", "state": {"photo": "image-ref"}, "assets": {"image-ref": asset},
+    body = {"model": "jev-mm-latest", "state": {"photo": "image-ref"}, "assets": {"image-ref": asset},
             "questions": {"target": {"type": "box", "instructions": {"find": "the white region"}},
                           "level": {"type": "score", "instructions": "Rate brightness",
                                     "criteria": [{"val": "dark"}, {"val": "as bright as image-ref"}]}}}
@@ -487,12 +487,192 @@ def test_systemone_image_and_box_wire_contract(monkeypatch, multipart):
     assert len(agent.processor.calls[1]["images"]) == 2
 
 
+def test_image_assets_require_matching_format_and_one_content_source():
+    import base64
+    import io
+    from PIL import Image
+    from laya_multimodal.decisions.image_assets import prepare_image_request
+    from laya_multimodal.decisions.systemone import SystemOneRequestError
+
+    stream = io.BytesIO()
+    Image.new("RGB", (280, 280)).save(stream, format="PNG")
+    data = base64.b64encode(stream.getvalue()).decode()
+    with pytest.raises(SystemOneRequestError, match="format does not match"):
+        prepare_image_request("scene", {"x": Q["present"]}, {"scene": {"format": "jpg", "data_base64": data}},
+                              {}, images_enabled=True)
+    with pytest.raises(SystemOneRequestError, match="either a file part or inline"):
+        prepare_image_request("scene", {"x": Q["present"]}, {"scene": {"part": "photo", "data_base64": data}},
+                              {"photo": stream.getvalue()}, images_enabled=True)
+
+
+def test_typesafe_box_uses_the_named_search_image_and_keeps_visual_examples(monkeypatch):
+    import base64
+    import io
+    from PIL import Image
+    TestClient = pytest.importorskip("fastapi.testclient").TestClient
+    from laya_multimodal.serve import create_app
+
+    def asset(level):
+        stream = io.BytesIO()
+        Image.new("L", (280, 280), level).save(stream, format="PNG")
+        return {"type": "image", "format": "png", "data_base64": base64.b64encode(stream.getvalue()).decode()}
+
+    monkeypatch.delenv("LAYA_API_KEY", raising=False)
+    agent = tiny_agent()
+    agent.grounding_trained = True
+    agent._grounding_outputs = lambda inputs: {
+        "boxes": torch.tensor([[[0.25, 0.25, 0.75, 0.75]]]),
+        "quality_logits": torch.zeros(1, 1),
+    }
+    questions = {
+        "second": {"type": "box", "instructions": [{"find": "the item in `state.frames[1]` like example-ref"}]},
+        "first": {"type": "box", "instructions": "the item in `frames[0].photo`"},
+        "decision": {"type": "noul", "criteria": {"true": "there are two images"}},
+    }
+    body = {"model": "jev-mm-latest", "state": {"frames": [{"photo": "first-ref"}, {"photo": "second-ref"}]},
+            "assets": {"first-ref": asset(20), "second-ref": asset(200), "example-ref": asset(100)},
+            "questions": questions}
+    headers = {"TypeSafe-Danger-Zone-Images": "true"}
+    with TestClient(create_app(Router(multimodal=agent, vega=False))) as client:
+        response = client.post("/v1/systemone", json=body, headers=headers)
+        assert response.status_code == 200, response.text
+        answers = response.json()["answers"]
+        assert answers["second"]["box"] == answers["first"]["box"]
+        assert set(answers["decision"]) == {"type", "noul"}
+        assert [[image.getpixel((0, 0))[0] for image in call["images"]] for call in agent.processor.calls] == [
+            [200, 100], [20], [20, 200],
+        ]
+
+        questions["second"]["instructions"] = "the item like example-ref"
+        ambiguous = client.post("/v1/systemone", json=body, headers=headers)
+        assert ambiguous.status_code == 400
+        assert "backticked state path" in ambiguous.json()["detail"]
+        assert len(agent.processor.calls) == 3
+
+
+def test_typesafe_optional_instructions_and_single_entry_questions(monkeypatch):
+    TestClient = pytest.importorskip("fastapi.testclient").TestClient
+    from laya_multimodal.serve import create_app
+
+    monkeypatch.delenv("LAYA_API_KEY", raising=False)
+    body = {"model": "jev-mm-latest", "state": {"image": "text field in a record"},
+            "questions": {
+                "pick": {"type": "choice", "criteria": {"one": None}},
+                "rating": {"type": "score", "instructions": None, "criteria": [{"level": "only"}]},
+                "nullable": {"type": "score", "criteria": [None, {"level": "high"}]},
+                "exists": {"type": "noul", "instructions": None, "criteria": {"true": ["the record has an image key"]}},
+            }}
+    with TestClient(create_app(Router(multimodal=tiny_agent(), vega=False))) as client:
+        response = client.post("/v1/systemone", json=body)
+    assert response.status_code == 200, response.text
+    answers = response.json()["answers"]
+    assert answers["pick"] == {"type": "choice", "choice": "one", "probabilities": {"one": 1.0}, "confidence": 1.0}
+    assert answers["rating"] == {"type": "score", "score": 0.0, "probabilities": {"0": 1.0},
+                                 "confidence": 1.0, "legend": {"0": {"level": "only"}}}
+    assert answers["nullable"]["legend"] == {"0": "", "1": {"level": "high"}}
+    assert answers["nullable"]["score"] == answers["nullable"]["probabilities"]["1"]
+    assert body["questions"]["nullable"]["criteria"][0] is None
+    assert set(answers["exists"]) == {"type", "noul"}
+
+
+def test_typesafe_long_context_respects_the_deployment_budget_and_resets_after_failure(monkeypatch):
+    TestClient = pytest.importorskip("fastapi.testclient").TestClient
+    from laya_multimodal.decisions import systemone
+    from laya_multimodal.serve import create_app
+
+    monkeypatch.delenv("LAYA_API_KEY", raising=False)
+    monkeypatch.setenv("LAYA_MAX_TOKEN_BUDGET", "2")
+    agent = tiny_agent()
+    agent.max_len = 1
+    body = {"model": "jev-mm-latest", "state": "text", "questions": {"x": Q["present"]}}
+    header = "TypeSafe-Danger-Zone-Long-Context"
+    with TestClient(create_app(Router(multimodal=agent, vega=False))) as client:
+        normal = client.post("/v1/systemone", json=body)
+        assert normal.status_code == 400
+        detail = normal.json()["detail"]
+        assert (detail["type"], detail["tokens"], detail["limit"], detail["scope"]) == (
+            "max_tokens_exceeded", 2, 1, "per_question_context",
+        )
+        enabled = client.post("/v1/systemone", json=body, headers={header: "true"})
+        assert enabled.status_code == 200
+        assert client.post("/v1/systemone", json=body, headers={header: "false"}).json()["detail"][0]["loc"] == [
+            "header", header.lower(),
+        ]
+        assert client.post("/v1/systemone", json=body).json()["detail"]["limit"] == 1
+        agent.max_len = 2
+        budget = systemone._ContextBudget
+        monkeypatch.setattr(systemone, "_ContextBudget", lambda per_question, per_request: budget(per_question, 3))
+        two = {**body, "questions": {"x": Q["present"], "y": Q["present"]}}
+        exceeded = client.post("/v1/systemone", json=two)
+        assert exceeded.status_code == 400
+        assert exceeded.json()["detail"]["scope"] == "per_request_context"
+        assert client.post("/v1/systemone", json=body).status_code == 200
+
+
+@pytest.mark.parametrize(("default_model", "audio_model", "video_model"), [
+    ("jev-mm-qwen-4b", "jev-mm-gemma-e2b", "jev-mm-gemma-e2b"),
+    ("jev-mm-gemma-e2b", "jev-mm-latest", "jev-latest"),
+])
+def test_model_aliases_follow_the_deployment_default(monkeypatch, tmp_path, default_model, audio_model, video_model):
+    import base64
+    import io
+    from PIL import Image
+    import soundfile
+    TestClient = pytest.importorskip("fastapi.testclient").TestClient
+    from laya_multimodal.models import base
+    from laya_multimodal.serve import create_app
+
+    monkeypatch.delenv("LAYA_API_KEY", raising=False)
+    monkeypatch.setenv("LAYA_MULTIMODAL_MODEL", "/checkpoints/obsolete-default")
+    monkeypatch.setenv("LAYA_PRELOAD", "0")
+    config_file = tmp_path / "serve.json"
+    profile = json.loads((Path(__file__).resolve().parents[1] / "configs/serve.json").read_text())
+    assert profile["default"] == "jev-mm-qwen-4b"
+    assert set(profile["models"]) == {"jev-mm-qwen-4b", "jev-mm-gemma-e2b"}
+    profile["default"] = default_model
+    profile["models"] = {"jev-mm-qwen-4b": "/checkpoints/qwen-test", "jev-mm-gemma-e2b": "/checkpoints/gemma-test"}
+    config_file.write_text(json.dumps(profile))
+    monkeypatch.setenv("LAYA_SERVE_CONFIG", str(config_file))
+    qwen, gemma = tiny_agent(), tiny_agent()
+    qwen.model_type = "qwen3_5"
+    checkpoints = {"/checkpoints/qwen-test": qwen, "/checkpoints/gemma-test": gemma}
+    monkeypatch.setattr(base, "load", lambda source, **kwargs: checkpoints[source])
+    waveform = np.full(1600, 0.5, dtype=np.float32)
+    audio = io.BytesIO()
+    soundfile.write(audio, waveform, 16000, format="WAV")
+    frame = Image.new("RGB", (4, 4), "white")
+    monkeypatch.setattr(gemma, "_read_video", lambda *args, **kwargs: (
+        {"duration_s": 1.0, "has_audio": True}, [frame], [0.5], waveform,
+    ))
+    questions = {"x": Q["present"]}
+    with TestClient(create_app()) as client:
+        models = client.get("/v1/models").json()["models"]
+        other_model, = profile["models"].keys() - {default_model}
+        assert [item["name"] for item in models] == [default_model, other_model, "jev-mm-latest"]
+        for alias in ("jev-mm-latest", "jev-latest"):
+            text = client.post("/v1/systemone", json={"model": alias, "state": "Hello", "questions": questions})
+            assert text.status_code == 200, text.text
+            assert text.json()["model"] == default_model
+        assert len(checkpoints[profile["models"][default_model]].processor.calls) == 2
+        for kind, payload, model in (("audio", audio.getvalue(), audio_model), ("video", b"video fixture", video_model)):
+            response = client.post("/v1/multimodal", json={"model": model,
+                "state": "Describe this media", "questions": questions,
+                kind: {"base64": base64.b64encode(payload).decode()}})
+            assert response.status_code == 200, response.text
+            result = response.json()
+            assert result["model"] == "jev-mm-gemma-e2b"
+            assert result["modality"] == kind
+            assert 0 <= result["answers"]["x"]["noul"] <= 1
+    assert gemma.processor.calls[-2]["audio"]
+    assert gemma.processor.calls[-1]["images"] and gemma.processor.calls[-1]["audio"]
+
+
 def test_systemone_reference_expansion_places_each_candidate_after_its_own_image():
     import base64
     import io
     import re
     from PIL import Image
-    from laya_multimodal.decisions.systemone import prepare_image_request
+    from laya_multimodal.decisions.image_assets import prepare_image_request
 
     class ExpandingProcessor(TinyProcessor):
         image_token = "<img>"

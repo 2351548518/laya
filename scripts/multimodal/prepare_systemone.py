@@ -14,7 +14,8 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from laya_multimodal.models.base import Agent
 from laya_multimodal.evaluation.evaluator import file_fingerprint
-from laya_multimodal.decisions.systemone import MAX_CHOICE_OPTIONS, MAX_IMAGE_BYTES, MAX_IMAGE_REQUEST_BYTES, MAX_IMAGE_SIDE, MIN_IMAGE_SIDE
+from laya_multimodal.decisions.image_assets import MAX_IMAGE_BYTES, MAX_IMAGE_SIDE, MIN_IMAGE_SIDE
+from laya_multimodal.decisions.systemone import MAX_CHOICE_OPTIONS, MAX_REQUEST_BYTES, MODEL_ALIAS
 from laya_multimodal.data import target_from_expected
 from scripts.multimodal.prepare_dataset import systemone_question
 
@@ -110,7 +111,7 @@ def systemone_record(row, suite, source_dir, media_dir, model):
         media_files[asset_id] = media.path
         asset_ids.append(asset_id)
         prepared.append(media)
-    if sum(3 * media.size[0] * media.size[1] for media in prepared) > MAX_IMAGE_REQUEST_BYTES:
+    if sum(3 * media.size[0] * media.size[1] for media in prepared) > MAX_REQUEST_BYTES:
         raise ValueError("expanded images exceed the local request limit")
     request["state"] = [*asset_ids, state.get("text", "")]
     request["assets"] = assets
@@ -205,7 +206,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True, help="frozen benchmark directory")
     parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--model", default="multimodal")
+    parser.add_argument("--model", default=MODEL_ALIAS)
     args = parser.parse_args()
     source, output = args.source.resolve(), args.out.resolve()
     if output.exists():

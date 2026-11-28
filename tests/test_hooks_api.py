@@ -1619,6 +1619,35 @@ check("Jev choice confidence", round(jev_confidence({"type": "choice", "probabil
 check("Jev score confidence", round(jev_confidence({"type": "score", "probabilities": {"0": 0.1, "1": 0.8, "2": 0.1}}), 4), 0.7)
 check("Jev noul confidence absent", jev_confidence({"type": "noul", "noul": 0.9}), None)
 
+from laya_multimodal.decisions.systemone import MODEL_ALIAS, MODEL_IDS, validate_systemone_request  # noqa: E402
+
+check("Public multimodal model IDs", MODEL_IDS, ("jev-mm-qwen-4b", "jev-mm-gemma-e2b"))
+check("Public default model alias", MODEL_ALIAS, "jev-mm-latest")
+_wire_questions = validate_systemone_request({
+    "model": MODEL_ALIAS, "state": {"ticket": "Example"},
+    "questions": {
+        "rating": {"type": "score", "criteria": [None, {"label": "high"}]},
+        "action": {"type": "choice", "criteria": ["wait", "continue"], "option_order": [1, 0]},
+        "stop": {"type": "noul", "labels": {"false": "continue", "true": "stop"}},
+    },
+})
+check_true("System One allows omitted instructions", bool(_wire_questions["rating"]["instructions"]))
+check("System One keeps the null Score level's index",
+      _wire_questions["rating"]["criteria"], ["", {"label": "high"}])
+check("System One adapts SDK Choice labels in order",
+      list(_wire_questions["action"]["criteria"].items()), [("wait", None), ("continue", None)])
+check("System One preserves local option order", _wire_questions["action"]["option_order"], [1, 0])
+check("System One preserves local Noul labels", _wire_questions["stop"]["labels"], {"false": "continue", "true": "stop"})
+
+if find_spec("fastapi") is not None:
+    from laya_multimodal.serve import create_app
+
+    with patch.dict(os.environ, {"LAYA_SERVE_CONFIG": "", "LAYA_API_KEY": ""}):
+        _http_paths = create_app(Router(vega=False)).openapi()["paths"]
+    check_true("model discovery is a GET endpoint", "get" in _http_paths.get("/v1/models", {}))
+    check_true("System One and native media keep separate POST endpoints",
+               all("post" in _http_paths.get(path, {}) for path in ("/v1/systemone", "/v1/multimodal")))
+
 print("\n%d passed, %d failed" % (len(PASS), len(FAIL)))
 for f in FAIL:
     print("  FAIL", f)

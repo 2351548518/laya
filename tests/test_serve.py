@@ -240,6 +240,133 @@ def test_jev_strict_single_response_is_on_by_default(monkeypatch):
     assert body["usage"] == {"input_tokens": 83, "output_tokens": 0}
 
 
+def test_typesafe_model_discovery_requires_bearer_and_lists_the_deployment_alias(monkeypatch):
+    from datetime import date
+
+    client, fake = _client(monkeypatch, api_key="local-test-key")
+    assert client.get("/v1/models").status_code == 401
+    headers = {"Authorization": "Bearer local-test-key"}
+    response = client.get("/v1/models", headers=headers)
+    assert response.status_code == 200
+    published, alias = response.json()["models"]
+    assert fake.calls == []
+    assert [published["name"], alias["name"]] == ["jev-mm-qwen-4b", "jev-mm-latest"]
+    for metadata in (published, alias):
+        assert set(metadata) == {"name", "description", "release_date"}
+        assert date.fromisoformat(metadata["release_date"])
+    for name in (published["name"], alias["name"], "jev-latest"):
+        prediction = client.post("/v1/systemone", json={**REQ, "model": name}, headers=headers)
+        assert prediction.status_code == 200
+        assert prediction.json()["model"] == "jev-mm-qwen-4b"
+        assert fake.calls[-1]["model"] == "multimodal"
+
+
+@pytest.mark.parametrize("model", ["jev-1.14.0", "jev-1.13.0", "jev-preview", "jev-typo"])
+def test_unavailable_typesafe_model_is_a_field_error(monkeypatch, model):
+    client, fake = _client(monkeypatch)
+    response = client.post("/v1/systemone", json={**REQ, "model": model})
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["body", "model"]
+    assert fake.calls == []
+
+
+@pytest.mark.parametrize(("change", "loc"), [
+    ({"questions": {}}, ["body", "questions"]),
+    ({"state": None}, ["body", "state"]),
+    ({"questions": {"x": {"type": "score", "criteria": ["calm", 1]}}},
+     ["body", "questions", "x", "criteria", 1]),
+    ({"questions": {"x": {"type": "score", "criteria": ["level"] * 11}}},
+     ["body", "questions", "x", "criteria"]),
+    ({"questions": {"x": {"type": "noul", "criteria": {"yes": "incorrect key"}}}},
+     ["body", "questions", "x", "criteria"]),
+])
+def test_typesafe_semantic_validation_locates_the_field(monkeypatch, change, loc):
+    client, fake = _client(monkeypatch)
+    response = client.post("/v1/systemone", json={**REQ, "model": "jev-mm-latest", **change})
+    assert response.status_code == 422
+    error, = response.json()["detail"]
+    assert error["loc"] == loc and error["msg"] and error["type"]
+    assert fake.calls == []
+
+
+def test_typesafe_probabilities_and_score_describe_the_same_distribution(monkeypatch):
+    class RoundedRouter(StrictFullRouter):
+        def predict(self, state, questions, model=None):
+            result = super().predict(state, questions, model)
+            result["answers"] = {
+                "queue": {**FULL_ANSWERS["queue"], "probabilities": {k: .3333 for k in ("billing", "tech", "other")}},
+                "urgency": {**FULL_ANSWERS["urgency"], "probabilities": {str(k): .3333 for k in range(3)}},
+            }
+            return result
+
+    monkeypatch.delenv("LAYA_API_KEY", raising=False)
+    router = RoundedRouter()
+    questions = {
+        "queue": {"type": "choice", "criteria": {"billing": None, "tech": {}, "other": ["general"]}},
+        "urgency": {"type": "score", "criteria": ["calm", {"label": "firm"}, ["angry"]]},
+    }
+    client = TestClient(create_app(router))
+    result = client.post("/v1/systemone", json={"model": "jev-mm-latest", "state": "Ticket", "questions": questions})
+    assert result.status_code == 200, result.text
+    choice, score = (result.json()["answers"][key] for key in ("queue", "urgency"))
+    assert sum(choice["probabilities"].values()) == pytest.approx(1)
+    assert choice["choice"] == "billing" and choice["confidence"] == 0
+    assert sum(score["probabilities"].values()) == pytest.approx(1)
+    assert score["score"] == pytest.approx(1)
+    assert score["legend"] == {"0": "calm", "1": {"label": "firm"}, "2": ["angry"]}
+
+
+@pytest.mark.parametrize("malformed_state", [
+    "NaN", "Infinity", "1e400", "9" * 400, "[" * 65 + '""' + "]" * 65,
+])
+def test_typesafe_json_rules_reject_nonfinite_and_deep_state(monkeypatch, malformed_state):
+    client, fake = _client(monkeypatch)
+    body = json.dumps({**REQ, "model": "jev-mm-latest", "state": "SENTINEL"})
+    response = client.post("/v1/systemone", content=body.replace('"SENTINEL"', malformed_state),
+                           headers={"Content-Type": "application/json"})
+    assert response.status_code == 400
+    assert fake.calls == []
+
+
+@pytest.mark.parametrize("content_encoding", ["gzip", "x-gzip", "zstd", "zstd-unknown-size"])
+def test_typesafe_compression_and_malformed_stream(monkeypatch, content_encoding):
+    import gzip
+
+    client, fake = _client(monkeypatch)
+    raw = json.dumps({**REQ, "model": "jev-mm-latest"}).encode()
+    if content_encoding.startswith("zstd"):
+        import zstandard
+
+        compress = zstandard.ZstdCompressor(write_content_size=content_encoding == "zstd").compress
+        content_encoding = "zstd"
+    else:
+        compress = gzip.compress
+    encoded = compress(raw)
+    headers = {"Content-Type": "application/json", "Content-Encoding": content_encoding}
+    assert client.post("/v1/systemone", content=encoded, headers=headers).status_code == 200
+    assert client.post("/v1/systemone", content=encoded[:-1], headers=headers).status_code == 400
+    assert client.post("/v1/systemone", content=encoded, headers=[
+        ("Content-Encoding", content_encoding), ("Content-Encoding", "gzip"),
+    ]).status_code == 415
+    assert len(fake.calls) == 1
+
+
+def test_typesafe_compressed_and_decoded_sizes_share_the_same_cap(monkeypatch):
+    import gzip
+
+    from laya_multimodal.decisions import systemone
+
+    monkeypatch.setattr(systemone, "MAX_REQUEST_BYTES", 512)
+    client, fake = _client(monkeypatch)
+    raw = json.dumps({**REQ, "model": "jev-mm-latest", "state": "a" * 513}).encode()
+    compressed = gzip.compress(raw)
+    assert len(compressed) < 512
+    response = client.post("/v1/systemone", content=compressed, headers={"Content-Encoding": "gzip"})
+    assert response.status_code == 413
+    assert client.post("/v1/systemone", content=raw).status_code == 413
+    assert fake.calls == []
+
+
 def test_jev_strict_rejects_falsy_spellings(monkeypatch):
     client, _ = _strict_client(monkeypatch, "0")
     body = client.post("/v1/systemone", json=REQ).json()
@@ -566,6 +693,24 @@ def test_large_choice_is_refused_without_a_tournament(monkeypatch):
     assert r.status_code == 413
     assert "128 > 100" in r.json()["detail"]
     assert fake.calls == []
+
+
+def test_typesafe_255_choice_options_are_evaluated_together(monkeypatch):
+    client, fake = _tournament_client(monkeypatch, "16")
+    body = {"model": "jev-mm-latest", **_large_req(255, instructions=None)}
+    response = client.post("/v1/systemone", json=body)
+    assert response.status_code == 200
+    assert set(response.json()) == {"model", "answers", "usage"}
+    assert len(fake.calls) == 1 and len(fake.calls[0]["queue"]["criteria"]) == 255
+    assert fake.calls[0]["queue"]["instructions"]
+    answer = response.json()["answers"]["queue"]
+    assert set(answer["probabilities"]) == set(body["questions"]["queue"]["criteria"])
+    assert all(value > 0 for value in answer["probabilities"].values())
+
+    too_many = client.post("/v1/systemone", json={"model": "jev-mm-latest", **_large_req(256)})
+    assert too_many.status_code == 422
+    assert too_many.json()["detail"][0]["loc"] == ["body", "questions", "queue", "criteria"]
+    assert len(fake.calls) == 1
 
 
 def test_tournament_refuses_unhashable_choice_labels_as_a_422(monkeypatch):
@@ -1174,10 +1319,8 @@ def test_resolve_model_follows_the_router_registry(monkeypatch):
 def test_path_or_unpublished_hub_id_is_refused_on_both_endpoints(monkeypatch):
     """A path or Hub id this server cannot load must not be answered by another checkpoint.
 
-    ``jev-1`` and ``convaiinnovations/laya`` stay "let the router choose", and so does a
-    plain unknown name: only a path or an unpublished repo id is a wrong answer (#919).
-    Both ``/v1/systemone`` and ``/v1/systemone/batch`` resolve ``model`` through the same
-    helper, so a miss has to be a 422 on each, before any inference.
+    The legacy ``jev-1`` hint still allows routing. Unknown explicit names, paths, and
+    repository IDs are rejected by both HTTP endpoints before inference.
     """
     from fastapi import HTTPException
 
@@ -1221,14 +1364,14 @@ def test_path_or_unpublished_hub_id_is_refused_on_both_endpoints(monkeypatch):
         assert repr(raw) in batch.json()["detail"]
     assert fake.calls == [], fake.calls
 
-    for kept in ("jev-1", "not-a-checkpoint"):
-        single = client.post("/v1/systemone", json={**REQ, "model": kept})
-        assert single.status_code == 200, (kept, single.text)
-        assert fake.calls[-1]["model"] is None, (kept, fake.calls[-1])
-        batch = client.post("/v1/systemone/batch", json={
-            "states": ["one"], "questions": questions, "model": kept})
-        assert batch.status_code == 200, (kept, batch.text)
-        assert fake.calls[-1]["model"] is None, (kept, fake.calls[-1])
+    unknown = client.post("/v1/systemone", json={**REQ, "model": "not-a-checkpoint"})
+    assert unknown.status_code == 422 and fake.calls == []
+    single = client.post("/v1/systemone", json=REQ)
+    assert single.status_code == 200, single.text
+    assert fake.calls[-1]["model"] is None
+    batch = client.post("/v1/systemone/batch", json={"states": ["one"], "questions": questions, "model": "jev-1"})
+    assert batch.status_code == 200, batch.text
+    assert fake.calls[-1]["model"] is None
 
 
 def test_thread_limit(monkeypatch):
@@ -1733,9 +1876,9 @@ class GatedRouter(FakeRouter):
         return super().predict(state, questions, model=model)
 
 
-def test_admission_bound_refuses_with_503_when_full(monkeypatch):
+def test_systemone_admission_bound_refuses_with_529_when_full(monkeypatch):
     """With one admission slot and inference blocked, a second concurrent
-    request gets 503 instead of queueing another body in memory."""
+    request gets TypeSafe's overload status and a retry hint."""
     import asyncio
 
     import httpx
@@ -1768,7 +1911,7 @@ def test_admission_bound_refuses_with_503_when_full(monkeypatch):
 
     asyncio.run(drive())
 
-    assert seen["second"] == 503, seen
+    assert seen["second"] == 529, seen
     assert seen["retry_after"] == "1", seen
     assert seen["first"] == 200, seen
 
@@ -4668,9 +4811,9 @@ def test_http_route_admission_covers_routing_and_is_reusable(monkeypatch):
                 pending = asyncio.create_task(client.post("/v1/route", json=_ROUTE_REQ))
                 try:
                     assert await asyncio.to_thread(fake.entered.wait, 2)
-                    for path, body in (("/v1/route", _ROUTE_REQ), ("/v1/systemone", REQ)):
+                    for path, body, status in (("/v1/route", _ROUTE_REQ, 503), ("/v1/systemone", REQ, 529)):
                         refused = await client.post(path, json=body)
-                        assert refused.status_code == 503
+                        assert refused.status_code == status
                         assert refused.headers["retry-after"] == "1"
                     fake.release.set()
                     assert (await pending).status_code == 200
@@ -4715,18 +4858,18 @@ def test_http_route_and_prediction_share_worker_without_blocking_health(monkeypa
     # report avoids importing torch while a deliberately blocked route awaits release.
     fake._agents = {"multimodal": SimpleNamespace(device="cpu")}
     app = create_app(fake)
-    read_body = serve._read_json_body
+    read_body = serve._read_body_capped
 
     async def exercise():
         body_read = asyncio.Event()
 
-        async def observed_body(request, timeout):
-            result = await read_body(request, timeout)
+        async def observed_body(request, timeout, **kwargs):
+            result = await read_body(request, timeout, **kwargs)
             if request.url.path == "/v1/systemone":
                 body_read.set()
             return result
 
-        monkeypatch.setattr(serve, "_read_json_body", observed_body)
+        monkeypatch.setattr(serve, "_read_body_capped", observed_body)
         async with app.router.lifespan_context(app):
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
                 routing = asyncio.create_task(client.post("/v1/route", json=_ROUTE_REQ))
