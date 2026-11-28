@@ -13,6 +13,7 @@ import math
 import os
 from pathlib import Path
 import random
+import threading
 import time
 
 import torch
@@ -185,6 +186,7 @@ class _IndexedGroundingRows:
             version, self.sha256, offsets = index
             self.offsets.frombytes(offsets)
         self.stream = self.path.open('rb')
+        self._read_lock = threading.Lock()
         self.version = version
         if self._version(os.fstat(self.stream.fileno())) != self.version:
             self.stream.close()
@@ -232,12 +234,18 @@ class _IndexedGroundingRows:
         return len(self.offsets) - 1
 
     def __getitem__(self, index):
-        if index < 0: index += len(self)
-        if not 0 <= index < len(self): raise IndexError(index)
+        if index < 0:
+            index += len(self)
+        if not 0 <= index < len(self):
+            raise IndexError(index)
         start, end = self.offsets[index], self.offsets[index + 1]
-        line = os.pread(self.stream.fileno(), end - start, start).partition(b"\n")[0]
-        return normalize_record(json.loads(line),
-                                self.path.parent, verify_media=False)
+        if hasattr(os, "pread"):
+            block = os.pread(self.stream.fileno(), end - start, start)
+        else:
+            with self._read_lock:
+                self.stream.seek(start)
+                block = self.stream.read(end - start)
+        return normalize_record(json.loads(block.partition(b"\n")[0]), self.path.parent, verify_media=False)
 
     def __iter__(self):
         self.check_unchanged()

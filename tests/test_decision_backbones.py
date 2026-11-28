@@ -1,5 +1,6 @@
 """Backbone-specific adapters, native video, and shared optimizer policy."""
 import json
+import os
 import re
 
 import pytest
@@ -155,13 +156,16 @@ def test_joint_optimizer_applies_head_and_projector_rates_without_duplicates():
         assert group['weight_decay'] == (0. if parameter.ndim < 2 else .01)
 
 
-def test_indexed_training_preserves_unicode_labels_random_access_and_validation(tmp_path):
+@pytest.mark.parametrize("portable", [False, True])
+def test_indexed_training_preserves_unicode_labels_random_access_and_validation(tmp_path, monkeypatch, portable):
     from laya_multimodal.train import _IndexedGroundingRows, load_grounding_rows
+    if portable:
+        monkeypatch.delattr(os, "pread", raising=False)
     path = tmp_path / 'train.jsonl'
     rows = [{'id': str(i), 'group': str(i), 'state': '决策\u2028测试' + str(i),
         'questions': {'q': {'type': 'noul', 'instructions': '可以继续吗？'}}, 'expected': {'q': i % 2}}
         for i in range(5)]
-    path.write_text('\n'.join(json.dumps(row, ensure_ascii=False) for row in rows))
+    path.write_text('\n'.join(json.dumps(row, ensure_ascii=False) for row in rows), encoding='utf-8')
     groups = []
     indexed = _IndexedGroundingRows(path, lambda row: groups.append(row['group']))
     assert len(indexed) == 5 and list(indexed) == load_grounding_rows(path) == rows
