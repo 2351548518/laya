@@ -282,7 +282,7 @@ and a confidence from the checkpoint's localization quality readout.
 ```bash
 curl -fsS http://127.0.0.1:8000/v1/systemone \
   -H 'TypeSafe-Danger-Zone-Images: true' \
-  -F 'request={"model":"multimodal","state":{"photo":"scene-ref"},"assets":{"scene-ref":{"type":"image","part":"scene"}},"questions":{"target":{"type":"box","instructions":"Locate the red mug."}}};type=application/json' \
+  -F 'request={"model":"jev-mm-latest","state":{"photo":"scene-ref"},"assets":{"scene-ref":{"type":"image","part":"scene"}},"questions":{"target":{"type":"box","instructions":"Locate the red mug."}}};type=application/json' \
   -F 'scene=@scene.jpg;type=image/jpeg'
 ```
 
@@ -297,12 +297,12 @@ request. [SDK examples](multimodal-clients.md#system-one-image-assets)
 
 ### Response
 
-The default single-request response has `model`, `answers` and `usage`. Here is an
-example using the bundled billing request and a native Qwen checkpoint.
+The single-request response has `model`, `answers` and `usage`. This example
+uses the bundled billing request with `model` set to `jev-mm-latest` on the Qwen deployment.
 
 ```json
 {
-  "model": "Qwen/Qwen3.5-4B",
+  "model": "jev-mm-qwen-4b",
   "answers": {
     "department": {
       "type": "choice",
@@ -344,8 +344,9 @@ example using the bundled billing request and a native Qwen checkpoint.
 Each answer has the same ID as its question. A `choice` reports the selected option and
 its distribution. A `score` reports the expected level index and a legend. A `noul`
 reports the probability of yes. A `box` reports normalized coordinates and localization
-confidence. Option probabilities are rounded to four decimals. Allow rounding tolerance
-when checking their sum. [Probability precision](questions-and-answers.md#probability-precision)
+confidence. Single System One requests using a public model name return renormalized Choice
+and Score probabilities, which can have more than four decimal places. The native and extended
+responses round each probability to four decimal places. [Probability precision](questions-and-answers.md#probability-precision)
 
 `input_tokens` counts the prepared prompts across the executed questions. Native decisions
 report `output_tokens` as zero. In extended responses, `usage.forward_passes` counts the calls to the backbone,
@@ -479,7 +480,9 @@ as long as it keeps the socket open.
 
 `POST /v1/systemone/batch` accepts an array of `states` and one shared `questions` object.
 It returns `results` in the input order and sums the token counts in `total_usage`.
-Use `POST /v1/multimodal` for an inline audio or video file. Pass `model` to select a public
-alias such as `jev-mm-gemma-e2b` for audio. Named PNG and JPEG assets for
-text or single-box decisions use `POST /v1/systemone`.
+Use `POST /v1/multimodal` for an inline image, audio or video file. Supply optional text or JSON
+context in `state`, alongside the file. The 2 MiB body limit includes the base64 data.
+Pass `model` to select a deployed model such as
+`jev-mm-gemma-e2b` for audio. Named PNG and JPEG assets for text or single-box decisions use
+`POST /v1/systemone`.
 [Python, TypeScript and curl examples](multimodal-clients.md)

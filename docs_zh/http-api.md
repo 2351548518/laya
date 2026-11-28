@@ -213,7 +213,7 @@ curl -s localhost:8000/v1/systemone -H 'content-type: application/json' -d '{
 ```bash
 curl -fsS http://127.0.0.1:8000/v1/systemone \
   -H 'TypeSafe-Danger-Zone-Images: true' \
-  -F 'request={"model":"multimodal","state":{"photo":"scene-ref"},"assets":{"scene-ref":{"type":"image","part":"scene"}},"questions":{"target":{"type":"box","instructions":"Locate the red mug."}}};type=application/json' \
+  -F 'request={"model":"jev-mm-latest","state":{"photo":"scene-ref"},"assets":{"scene-ref":{"type":"image","part":"scene"}},"questions":{"target":{"type":"box","instructions":"Locate the red mug."}}};type=application/json' \
   -F 'scene=@scene.jpg;type=image/jpeg'
 ```
 
@@ -226,11 +226,12 @@ JSON 上传用 `format` 和 `data_base64` 取代 `part`。multipart 的第一个
 
 ### 响应
 
-单条请求默认返回 `model`、`answers` 和 `usage`。下面是 Qwen 检查点的文本示例。
+单条请求返回 `model`、`answers` 和 `usage`。下面是在 Qwen 部署中使用 `jev-mm-latest`
+处理账单文本的示例。
 
 ```json
 {
-  "model": "Qwen/Qwen3.5-4B",
+  "model": "jev-mm-qwen-4b",
   "answers": {
     "department": {
       "type": "choice",
@@ -270,7 +271,8 @@ JSON 上传用 `format` 和 `data_base64` 取代 `part`。multipart 的第一个
 ```
 
 答案使用原题目 ID。`choice` 给出选项和分布，`score` 给出期望档位和含义映射，
-`noul` 是肯定概率，`box` 给出归一化框与定位质量。选项概率四舍五入至四位小数。
+`noul` 是肯定概率，`box` 给出归一化框与定位质量。单条 System One 请求指定公开模型名称时，
+`choice` 和 `score` 的概率会重新归一化，小数位数可能超过四位。原生和扩展响应逐项四舍五入至四位小数。
 `input_tokens` 汇总实际准备的提示长度，`output_tokens` 为 0。扩展响应还有
 `usage.forward_passes` 和回答该请求的 `routing`。 [概率精度](questions-and-answers.md#probability-precision)
 
@@ -374,6 +376,7 @@ TypeSafe 的协议上限为每题 32,768 token、每次请求 65,536 token。本
 
 `POST /v1/systemone/batch` 接收 `states` 数组和共用的 `questions`，按输入顺序给出
 `results`，并在 `total_usage` 汇总 token。`POST /v1/multimodal` 接收一个媒体文件，
-以 `{"base64": "..."}` 放在 `image`、`audio` 或 `video` 字段。通过 `model` 选择
-处理该文件的已部署模型，例如用 `jev-mm-gemma-e2b` 处理音频。命名 PNG 和 JPEG
+以 `{"base64": "..."}` 放在 `image`、`audio` 或 `video` 字段，可在 `state` 附加文本或 JSON 上下文。
+2 MiB 的请求体上限包含 base64 数据。
+通过 `model` 选择已部署模型，例如用 `jev-mm-gemma-e2b` 处理音频。命名 PNG 和 JPEG
 图片资产使用 `POST /v1/systemone`。 [Python、TypeScript 与 curl 示例](multimodal-clients.md)

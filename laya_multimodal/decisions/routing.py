@@ -1007,8 +1007,8 @@ class Router(HookRegistry):
     ) -> RouteDecision:
         """Decide which checkpoint to use, then let `on_route` hooks observe or replace it.
 
-        `media` is "image", "audio" or "video" when the caller is passing one of those instead of
-        a text state; see `predict`. `allow_vega=False` keeps the decision on the native checkpoint.
+        `media` identifies an image, audio or video argument passed to `predict`, with optional
+        text context. Set `allow_vega=False` to skip automatic Vega routing for text.
 
         `ctx.decision` is the `RouteDecision`; a hook may replace it (for example to pin a
         checkpoint) and the replacement is what gets returned and used. `hooks` are per-call
@@ -1083,11 +1083,11 @@ class Router(HookRegistry):
         audio: Any = None,
         video: Any = None,
     ) -> Dict[str, Any]:
-        """Route, then answer every question in one forward pass on the chosen checkpoint.
+        """Route the input and answer its questions on the selected checkpoint.
 
-        `image`, `audio` or `video` in place of `state` route to the vega lane, which is the only
-        checkpoint that can read them; so does a state past `vega_over_tokens` and a question the
-        vega agent has a fitted head for. Everything else routes exactly as before.
+        The native checkpoint accepts optional text with one of `image`, `audio` or `video`.
+        Each native question uses its own prompt. Text requests can route to an attached Vega
+        reader when they exceed `vega_over_tokens` or match a fitted Vega question.
 
         The result is the usual `system_one` payload plus a `routing` key recording the decision.
         Router-level `on_predict_start` / `on_predict_end` hooks wrap the whole route+infer call

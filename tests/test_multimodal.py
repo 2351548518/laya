@@ -459,6 +459,10 @@ def test_inline_media_http_endpoint_rejects_paths_and_shares_auth(monkeypatch):
         response = client.post("/v1/multimodal", json=body, headers={"Authorization": "Bearer test-key"})
         assert response.status_code == 200, response.text
         assert response.json()["routing"]["model"] == "multimodal"
+        structured = {**body, "state": {"image": "photo description", "video": None}}
+        response = client.post("/v1/multimodal", json=structured, headers={"Authorization": "Bearer test-key"})
+        assert response.status_code == 200, response.text
+        assert '"image": "photo description"' in agent.processor.messages[0]["content"][-1]["text"]
         body["image"] = {"path": "/etc/passwd"}
         assert client.post("/v1/multimodal", json=body, headers={"Authorization": "Bearer test-key"}).status_code == 422
 

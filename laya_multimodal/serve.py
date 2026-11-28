@@ -1777,6 +1777,9 @@ def create_app(router: Optional[Any] = None):
     async def multimodal(request: Request, authorization: Optional[str] = Header(default=None)):
         nonlocal gate
         import base64
+
+        from .decisions.questions import serialize_state
+
         _check_auth(authorization)
         async with _admit():
             body = await _read_json_body(request, body_read_timeout)
@@ -1785,9 +1788,13 @@ def create_app(router: Optional[Any] = None):
             allowed = {"model", "state", "questions", "image", "audio", "video", "max_len", "min_confidence"}
             if set(body) - allowed:
                 raise HTTPException(status_code=422, detail="unsupported multimodal controls: %s" % ", ".join(sorted(set(body) - allowed)))
-            _check_request_limits(body.get("state") or "", body["questions"])
+            state = body.get("state")
+            _check_request_limits(state or "", body["questions"])
             if _has_lone_surrogate(body):
                 raise HTTPException(status_code=400, detail=_LONE_SURROGATE_DETAIL)
+            if isinstance(state, dict) and any(key in state for key in MEDIA_REFUSALS):
+                # Media arrive in the separate file field. These keys are JSON context here.
+                state = serialize_state(state)
             media = {}
             for kind in ("image", "audio", "video"):
                 if body.get(kind) is None:
@@ -1820,8 +1827,7 @@ def create_app(router: Optional[Any] = None):
                 gate = asyncio.Lock()
             try:
                 async with gate:
-                    run = partial(router.predict, body.get("state"), body["questions"],
-                                  model=model, **kwargs)
+                    run = partial(router.predict, state, body["questions"], model=model, **kwargs)
                     result = await asyncio.get_running_loop().run_in_executor(pool, _run_inference, run)
                     from fastapi.responses import JSONResponse
                     return JSONResponse(content={**result, "model": public_names[model]})
