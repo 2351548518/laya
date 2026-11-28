@@ -769,6 +769,41 @@ def test_joint_training_updates_weights_and_evaluates_development(tmp_path, mode
     assert "initial" in saved and "last" in saved
 
 
+def test_joint_training_excludes_decision_development_groups_from_replay(tmp_path):
+    from laya_multimodal.models.grounding import GroundingHead
+    from laya_multimodal.train import GroundingTrainConfig, finetune_grounding
+
+    agent = tiny_agent()
+    agent.model.grounding_head = GroundingHead(8, 16, 1, "single-v1")
+    agent.grounding_trained = agent.detection_trained = False
+    agent.save = lambda path: None
+    original_prepare = agent._prepare
+    updated_states = []
+
+    def prepare(request, question, **kwargs):
+        if torch.is_grad_enabled():
+            updated_states.append(request["text"])
+        return original_prepare(request, question, **kwargs)
+
+    agent._prepare = prepare
+    decision = {"questions": {"x": Q["present"]}, "expected": {"x": True}}
+    selection = {**decision, "state": "development decision", "group": "case-1", "source": "fixtures"}
+    rows = {
+        "train": [{**decision, "state": "train 1"}, {**decision, "state": "train 2"}],
+        "dev": [{**decision, "state": "development context"}],
+        "decision_dev": [selection],
+        "replay": [{**selection, "state": "same development group"},
+                   {**selection, "state": "other source", "source": "other fixtures"}],
+    }
+    for name, records in rows.items():
+        (tmp_path / (name + ".jsonl")).write_text("\n".join(map(json.dumps, records)) + "\n", encoding="utf-8")
+    config = GroundingTrainConfig(global_batch_size=2, train_readout_in_warmup=True, replay_fraction=.5, eval_every=0)
+    finetune_grounding(tmp_path / "train.jsonl", tmp_path / "dev.jsonl", tmp_path / "run", agent=agent,
+                       config=config, decision_dev_data=tmp_path / "decision_dev.jsonl", replay_data=tmp_path / "replay.jsonl")
+    assert len(updated_states) == 2
+    assert updated_states[-1] == "other source"
+
+
 def test_evaluation_respects_padded_token_budget_without_truncating():
     agent = tiny_agent()
     lengths = {"short": 2, "medium": 4, "long": 9, "tail": 3}

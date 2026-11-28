@@ -57,7 +57,7 @@ uses the model's observed IoU against the target.
 | Setting | Effect |
 | --- | --- |
 | `global_batch_size` | Records per optimizer step across all ranks. The starter value is 64. |
-| `micro_batch`, `max_micro_tokens` | Limit compatible samples and padded tokens per microbatch. Starter values are 4 and 16,384. |
+| `micro_batch`, `max_micro_tokens` | Limit sample count and padded tokens when grouping compatible examples. Starter values are 4 and 16,384. |
 | `max_len` | Context limit for a single processed request. |
 | `length_bucketing`, `balance_ranks` | Group similar lengths and spread admitted work across ranks. |
 | `video_cache_dir`, `video_cache_size`, `prefetch_video` | Control disk cache, in-memory clips per rank and CPU decode overlap. |
@@ -65,6 +65,8 @@ uses the model's observed IoU against the target.
 | `fused_adamw`, `--qwen-training-delta` | Reduce temporary optimizer or Qwen gradient allocations when supported. |
 | `shuffle_options` | Permute order-safe choices and realign targets to the original keys. |
 | `distributed_decision_eval` | Shard decision evaluation across the training ranks and restore the original order before reporting. |
+
+A processed example above `max_micro_tokens` runs on its own within the `max_len` context limit.
 
 For Qwen LoRA, the visual encoder stays frozen. The default recipe trains language adapters,
 the visual merger and both readouts. Gradient checkpointing, group learning rates and cosine
@@ -88,5 +90,6 @@ steps, losses, gradient norms, learning rates and later development metrics.
 [SwanLab](project-readme/multimodal.md#swanlab)
 
 For Python calls use `GroundingTrainConfig` and `finetune_grounding` in `laya_multimodal.train`.
+Replay uses the same group keys as the training split and excludes rows that overlap either development split.
 Both the command and the Python API use this trainer. Run held-out evaluation and calibration
 on its saved checkpoints. [Training API](reference/train.md)

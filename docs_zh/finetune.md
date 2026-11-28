@@ -56,7 +56,7 @@ laya-multimodal train --model "$warmup_checkpoint" --data "$data" \
 | 设置 | 作用 |
 | --- | --- |
 | `global_batch_size` | 所有 rank 每次优化更新的总样本数，入门配方为 64。 |
-| `micro_batch`、`max_micro_tokens` | 限制每个微批的兼容样本数和补齐 token 数，入门配置为 4 和 16,384。 |
+| `micro_batch`、`max_micro_tokens` | 组合兼容样本时限制样本数和补齐 token 数，入门配置为 4 和 16,384。 |
 | `max_len` | 单条处理后请求的上下文上限。 |
 | `length_bucketing`、`balance_ranks` | 将长度相近的请求分组，平衡每个 rank 的已准入负载。 |
 | `video_cache_dir`、`video_cache_size`、`prefetch_video` | 控制磁盘缓存、每个 rank 的内存缓存和 CPU 解码预取。 |
@@ -64,6 +64,8 @@ laya-multimodal train --model "$warmup_checkpoint" --data "$data" \
 | `fused_adamw`、`--qwen-training-delta` | 支持时减少优化器或 Qwen 梯度的临时内存。 |
 | `shuffle_options` | 重排允许换序的选择题，将目标对齐原候选键。 |
 | `distributed_decision_eval` | 将决策评测分给训练 rank，汇总指标前恢复原顺序。 |
+
+单条样本处理后超过 `max_micro_tokens` 时会独立成批，单条上下文上限由 `max_len` 控制。
 
 Qwen LoRA 配方冻结视觉编码器，更新语言适配器、视觉 merger 和两个读出头。可在配方中配置
 梯度检查点、分组学习率以及预热后的余弦衰减。
@@ -85,4 +87,5 @@ Qwen LoRA 配方冻结视觉编码器，更新语言适配器、视觉 merger �
 损失、梯度范数、学习率和开发指标。 [SwanLab](project-readme/multimodal.md#swanlab)
 
 Python 调用使用 `laya_multimodal.train` 中的 `GroundingTrainConfig` 和 `finetune_grounding`。
+回放使用与训练相同的分组键，排除与任一开发集分组重叠的记录。
 命令行和 Python API 使用同一训练器。使用保存的检查点进行独立评测和校准。 [训练 API](reference/train.md)

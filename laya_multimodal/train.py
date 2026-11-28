@@ -652,6 +652,12 @@ def _checkpoint_identity(agent, model, cfg, ctx, total, train_records, train_dig
                      "replay": file_fingerprint(str(replay)) if replay else None}}
 
 
+def _decision_group(row):
+    group = row.get("group")
+    source = None if str(group).startswith(("toolace:", "coco:")) else row.get("source", row.get("dataset"))
+    return source, group
+
+
 def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2B-it", replay_data=None,
                        decision_dev_data=None, config=None, device=None, agent=None, row_validator=None,
                        resume_from=None, reporter=None):
@@ -675,10 +681,8 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
     for row in decision_dev:
         if row_validator is not None:
             row_validator("decision_dev", row)
-        group = row.get("group")
-        if group is not None:
-            source = None if str(group).startswith(("toolace:", "coco:")) else row.get("source", row.get("dataset"))
-            decision_groups.add((source, group))
+        if row.get("group") is not None:
+            decision_groups.add(_decision_group(row))
 
     def check_single_box(row):
         if cfg.slots == 1 and row.get("grounding", {}).get("task") == "multiple":
@@ -691,8 +695,7 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
         group = row.get("group")
         if group in dev_groups:
             raise ValueError("grounding train/dev image groups overlap")
-        source = None if str(group).startswith(("toolace:", "coco:")) else row.get("source", row.get("dataset"))
-        if (source, group) in decision_groups:
+        if _decision_group(row) in decision_groups:
             raise ValueError("grounding train/decision development groups overlap: " + str(group))
 
     for row in dev:
@@ -741,8 +744,8 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
     ctx.synchronize_parameters(params)
     replay = []
     if replay_data:
-        replay = load_rows(replay_data)
-        replay = [r for r in replay if r.get("group") not in dev_groups]
+        replay = [row for row in load_rows(replay_data)
+                  if row.get("group") not in dev_groups and _decision_group(row) not in decision_groups]
         if agent.model_type not in {"gemma4", "qwen2_5_omni", "qwen2_5_omni_thinker", "gemma3n"}:
             replay = [r for r in replay if not (isinstance(r["state"], dict) and r["state"].get("audio") is not None)]
     rng = random.Random(cfg.seed)
