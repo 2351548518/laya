@@ -41,6 +41,8 @@ A positive grounding row pairs one box question with one normalized `xyxy` targe
 
 Keep images and source groups separate across training, development, calibration and test data.
 Use absolute image paths or paths relative to the JSONL file.
+For request-shaped records with several named images, put the search image's state path in
+backticks in the Box instructions, as in `state.frames[1].photo`.
 Each box needs finite, ordered coordinates within the image. For `task: "single"`, select a
 distinct referred object for each question. An empty `boxes` list gives the quality head a target
 of zero and skips the coordinate losses.

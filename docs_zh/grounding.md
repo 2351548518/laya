@@ -39,7 +39,8 @@ print(target["box"], target["confidence"])
 ```
 
 媒体路径可用绝对路径。相对路径从该 JSONL 文件的目录解析。按图片及来源分组划分训练、开发、
-校准和测试。坐标需有限，位于图像内，并满足左小于右、上小于下。`task: "single"` 每题选择一个
+校准和测试。含多张命名图片的 `request` 记录，可在 Box 指令中用反引号指定搜索图路径，如
+`state.frames[1].photo`。坐标需有限，位于图像内，并满足左小于右、上小于下。`task: "single"` 每题选择一个
 被指代的物体。空 `boxes` 以 0 监督质量头，并跳过坐标损失。
 
 `finetune_grounding` 可将定位行与 `choice`、`noul`、`score` 混合训练。框损失包含坐标 L1、

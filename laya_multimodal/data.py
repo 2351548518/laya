@@ -384,7 +384,7 @@ def record_input(agent, row, qid, question):
         return agent._input(row["state"]), question
     # Bind the complete request so a question can use only a subset of request assets.
     questions = {**row["questions"], qid: question}
-    request, questions = bind_image_references(row["state"], questions, images)
+    request, questions = bind_image_references(row["state"], questions, images, resolve_boxes=len(images) > 1)
     return request, questions[qid]
 
 

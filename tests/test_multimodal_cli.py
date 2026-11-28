@@ -349,6 +349,28 @@ def test_training_loads_structured_systemone_records(tmp_path):
     assert json.loads(box_row["questions"]["target"]["instructions"]) == {"find": "the red cup"}
 
 
+def test_local_box_record_selects_the_named_search_image(tmp_path):
+    from PIL import Image
+    from laya_multimodal.data import normalize_record, record_input
+    from test_multimodal import tiny_agent
+
+    for name, color in (("first", "black"), ("second", "white")):
+        Image.new("RGB", (8, 8), color).save(tmp_path / (name + ".png"))
+    row = normalize_record({
+        "request": {
+            "state": {"first": "ref-first", "second": "ref-second"},
+            "assets": {"ref-first": {"part": "first"}, "ref-second": {"part": "second"}},
+            "questions": {"target": {"type": "box", "instructions": "Find the object in `state.second`"}},
+        },
+        "media_files": {"first": "first.png", "second": "second.png"},
+    }, tmp_path)
+    agent = tiny_agent()
+    request, question = record_input(agent, row, "target", row["questions"]["target"])
+    _, _, metadata = agent._prepare(request, question)
+    assert metadata["images"] == 1
+    assert agent.processor.calls[-1]["images"][0].getpixel((0, 0)) == (255, 255, 255)
+
+
 def test_native_swanlab_reporter_logs_metrics_and_isolates_sdk_failure(tmp_path, monkeypatch, caplog):
     from types import SimpleNamespace
     from laya_multimodal.training.reporting import SwanLabReporter

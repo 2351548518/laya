@@ -423,6 +423,25 @@ def test_metrics_accept_all_equally_valid_options():
     assert metrics(records)["overall"]["accuracy"] == 1.0
 
 
+def test_native_evaluation_uses_each_questions_actual_modality(tmp_path):
+    from PIL import Image
+    from laya_multimodal.data import normalize_record
+
+    Image.new("RGB", (8, 8), "white").save(tmp_path / "photo.png")
+    row = normalize_record({
+        "request": {
+            "state": "The package arrived today.",
+            "assets": {"ref-photo": {"part": "photo"}},
+            "questions": {"photo": {"type": "noul", "instructions": "Is ref-photo bright?"},
+                          "delivery": {"type": "noul", "instructions": "Has the package arrived?"}},
+        },
+        "media_files": {"photo": "photo.png"},
+        "expected": {"photo": True, "delivery": True},
+    }, tmp_path)
+    records = collect_records(tiny_agent(), [row])
+    assert [(record["qid"], record["modality"]) for record in records] == [("photo", "image"), ("delivery", "text")]
+
+
 def test_inline_media_http_endpoint_rejects_paths_and_shares_auth(monkeypatch):
     import base64
     import io

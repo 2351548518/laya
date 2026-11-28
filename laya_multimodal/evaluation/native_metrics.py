@@ -89,7 +89,7 @@ def collect_records(agent, rows, micro_batch=4, *, max_micro_tokens=None):
         ordered = sorted(enumerate(items), key=lambda item: record_modality(item[1][0]))
     for index, (row, qid, qdef, target) in ordered:
         request, question = record_input(agent, row, qid, qdef)
-        inputs, q, _media = agent._prepare(request, question)
+        inputs, q, media = agent._prepare(request, question)
         length = inputs["input_ids"].shape[-1]
         padded = max(length, longest) * (len(prepared) + 1)
         if prepared and (len(prepared) >= micro_batch or inputs.keys() != prepared[0].keys()
@@ -101,6 +101,8 @@ def collect_records(agent, rows, micro_batch=4, *, max_micro_tokens=None):
         prepared.append(inputs)
         longest = max(longest, length)
         modality = record_modality(row)
+        if row.get("_image_assets") and media.get("images") == 0:
+            modality = "text"
         metadata.append((index, row, qid, q, target, modality))
     if prepared:
         collect_batch()
