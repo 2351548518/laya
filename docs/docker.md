@@ -1,6 +1,6 @@
 # Deploy native decisions with Docker
 
-**English** · [简体中文](zh-CN/docker.md)
+**English** · [简体中文](../docs_zh/docker.md)
 
 The same image runs one-shot decisions and serves the System One HTTP API. It includes the
 Qwen3.5 and Gemma 4 runtime, FFmpeg and the media dependencies.

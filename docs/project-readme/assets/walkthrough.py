@@ -9,12 +9,12 @@ import sys
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from laya_multimodal.common import QTYPES
-from laya_multimodal.grounding import GroundingHead, grounding_loss, validate_boxes
-from laya_multimodal.multimodal import MultimodalAgent
-from laya_multimodal.multimodal_data import normalize_record, record_modality
-from laya_multimodal.multimodal_objectives import decision_loss
-from laya_multimodal.multimodal_readout import CandidateScorer
+from laya_multimodal.decisions.questions import QTYPES
+from laya_multimodal.models.grounding import GroundingHead, grounding_loss, validate_boxes
+from laya_multimodal.models.multimodal import MultimodalAgent
+from laya_multimodal.data import normalize_record, record_modality
+from laya_multimodal.training.objectives import decision_loss
+from laya_multimodal.models.readout import CandidateScorer
 from laya_multimodal.train import decision_target
 
 

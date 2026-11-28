@@ -45,7 +45,7 @@ export type ModelAlias = ModelName | 'default';
  *  spelling (`"choice:2"`, `"choice:3-5"`, `"score:6-10"`, `"noul:2"`, ...) plus an optional
  *  `"default"` for buckets the map does not name. One threshold does not transfer across option
  *  counts, so each bucket is gated at the level its own calibration earns; fit one with
- *  `laya_multimodal.calibrate.fit_abstention_thresholds`. Every value is a threshold in `[0, 1]`. Only keys
+ *  `laya_multimodal.decisions.calibration.fit_abstention_thresholds`. Every value is a threshold in `[0, 1]`. Only keys
  *  core can produce type-check, so a map like `{ "choice:2-5": 0.9 }` is refused here as well as
  *  by the client's runtime validation (#1002). */
 export type MinConfidenceMap = { [K in MinConfidenceKey]?: number };

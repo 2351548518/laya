@@ -320,7 +320,7 @@ def parse_langs(values: Optional[Sequence[str]]) -> List[str]:
 
 def routes(states: Sequence[str]) -> Dict[str, int]:
     """Which checkpoint `Router` would pick for each state, counted. Routing only, no weights."""
-    from laya_multimodal.router import Router
+    from laya_multimodal.decisions.routing import Router
 
     router = Router()
     counts: Dict[str, int] = {}
@@ -407,7 +407,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
 
     import laya_multimodal
-    from laya_multimodal.revisions import default_checkpoint
+    from laya_multimodal.models.revisions import default_checkpoint
 
     source = args.model or default_checkpoint()
     started = time.time()

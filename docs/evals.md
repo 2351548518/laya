@@ -1,11 +1,11 @@
 # Text decision evaluation
 
-**English** · [简体中文](zh-CN/evals.md)
+**English** · [简体中文](../docs_zh/evals.md)
 
 For native multimodal accuracy and single-box geometry, use the local checkpoint evaluator.
 [Native benchmarks](benchmarks.md)
 
-`laya_multimodal.evals` turns a labelled dataset into a repeatable score, and a baseline into a
+`laya_multimodal.evaluation.evaluator` turns a labelled dataset into a repeatable score, and a baseline into a
 pass/fail gate, so a quality change is a reviewable diff instead of a hand-check.
 
 The metric math and the dataset parser are pure Python plus numpy and never import torch, so
@@ -96,7 +96,7 @@ To run a local student after validating the teacher records:
 ```python
 import json
 import laya_multimodal
-from laya_multimodal.evals import evaluate_agreement
+from laya_multimodal.evaluation.evaluator import evaluate_agreement
 
 with open("reference.json", encoding="utf-8") as handle:
     reference = json.load(handle)
@@ -144,7 +144,7 @@ sample demonstrates the workflow, not deployment readiness.
 
 ## Attributing shortlist errors
 
-For a labelled high-cardinality choice set, `laya_multimodal.evals_shortlist.evaluate_shortlist`
+For a labelled high-cardinality choice set, `laya_multimodal.evaluation.choice.evaluate_shortlist`
 uses the existing `predict_shortlist` path and the regular evaluation harness. It
 answers two separate questions: did retrieval keep the gold label, and did Laya
 choose it when it was present? This is an opt-in Python API for choice labels;
@@ -152,9 +152,9 @@ ordinary `laya-multimodal eval run` reports are unchanged.
 
 ```python
 import laya_multimodal
-from laya_multimodal.evals import Dataset
-from laya_multimodal.evals_shortlist import evaluate_shortlist
-from laya_multimodal.shortlist import embed_fn_from_agent
+from laya_multimodal.evaluation.evaluator import Dataset
+from laya_multimodal.evaluation.choice import evaluate_shortlist
+from laya_multimodal.decisions.shortlist import embed_fn_from_agent
 
 agent = laya_multimodal.load()  # use the native checkpoint input embeddings
 dataset_path = "intents.jsonl"
@@ -188,14 +188,14 @@ same kind of diagnosis repeatable on a caller's own labelled set.
 
 ## Attributing tournament errors
 
-For a labelled many-option choice set, `laya_multimodal.evals_tournament.evaluate_tournament`
+For a labelled many-option choice set, `laya_multimodal.evaluation.choice.evaluate_tournament`
 runs the existing `predict_tournament` path and keeps its finalist metadata in the
 regular evaluation report:
 
 ```python
 import laya_multimodal
-from laya_multimodal.evals import Dataset
-from laya_multimodal.evals_tournament import evaluate_tournament
+from laya_multimodal.evaluation.evaluator import Dataset
+from laya_multimodal.evaluation.choice import evaluate_tournament
 
 agent = laya_multimodal.load()
 dataset_path = "intents.jsonl"
@@ -264,7 +264,7 @@ Each metric is computed per answer where it applies and aggregated over the data
 | `noul_accuracy` | `noul` | fraction whose boolean (probability >= 0.5) matches |
 | `score_mae` | `score` | mean absolute error |
 | `score_within_<tol>` | `score` | fraction within the absolute tolerance supplied by `--score-within` |
-| `ece` | any answer with a confidence and a known label | expected calibration error, 15 bins, computed on the column `laya_multimodal.evals._answer_confidence` reads -- `answer["answer_confidence"]` where the answer carries it, and a fallback where it does not; see [which confidence a metric reads](#which-confidence-a-metric-reads) |
+| `ece` | any answer with a confidence and a known label | expected calibration error, 15 bins, computed on the column `laya_multimodal.evaluation.evaluator._answer_confidence` reads -- `answer["answer_confidence"]` where the answer carries it, and a fallback where it does not; see [which confidence a metric reads](#which-confidence-a-metric-reads) |
 | `brier` | any answer with a confidence and a known label | Brier score of confidence as P(correct), `mean((confidence - correct)**2)`; lower is better |
 | `aurc` | any answer with a confidence and a known label | area under the risk--coverage curve: one risk value per distinct confidence level, each weighted by the answers that level spans; lower is better, and rewards a confidence that *ranks* right from wrong rather than just being calibrated |
 | `selective_accuracy@50`, `selective_accuracy@80` | any answer with a confidence and a known label | accuracy over the answers a confidence threshold at the 50% / 80% coverage point accepts -- what abstaining on the least-confident tail buys. A threshold cannot split a group of equal confidences, so this can cover more than the named fraction; see [coverage cuts](#coverage-cuts-and-ties) |
@@ -282,7 +282,7 @@ therefore publishes no `ece` however confident its answers are, and `--max-ece` 
 ## Which confidence a metric reads
 
 Every row above that takes a confidence (`ece`, `brier`, `aurc`, both `selective_accuracy@*`,
-`mean_confidence`) gets its column from `laya_multimodal.evals._answer_confidence`, which prefers
+`mean_confidence`) gets its column from `laya_multimodal.evaluation.evaluator._answer_confidence`, which prefers
 `answer["answer_confidence"]` -- the probability of the answer being reported, the quantity temperature
 scaling fits. Predictions are over-confident when their confidence exceeds observed accuracy.
 Use ECE and the coverage metrics to check confidence on a held-out split.
@@ -369,7 +369,7 @@ keys, so every accuracy, calibration and coverage number -- `ece`, `brier`, `aur
 `config.timing.min_confidence` and `config.timing.min_confidence_sent`, and any caller who acts
 on the flag downstream of the harness.
 
-The accepted range is core's `laya_multimodal.confidence.check_min_confidence` -- `[0.0, 1.0]`, finite, not
+The accepted range is core's `laya_multimodal.decisions.confidence.check_min_confidence` -- `[0.0, 1.0]`, finite, not
 a bool -- rather than a copy here, so a value the gate itself would reject fails as a usage error
 (exit 2) before any checkpoint loads. `0.0` is a legal ask: it is the control arm for an
 abstention sweep and the threshold at which `flag_low_confidence` marks no answer, so a check that
@@ -453,7 +453,7 @@ Changing a question or its options can change the prompt, so rerun the baseline 
 Timing measurements can vary across identical runs.
 
 `REPORT_SCHEMA`, `questions_fingerprint(dataset)` and `file_fingerprint(path)` are public, so a
-caller driving `laya_multimodal.evals.evaluate` directly gets the same identity a CLI run does.
+caller driving `laya_multimodal.evaluation.evaluator.evaluate` directly gets the same identity a CLI run does.
 
 ## Baseline and CI gate
 
@@ -463,7 +463,7 @@ caller driving `laya_multimodal.evals.evaluate` directly gets the same identity 
   is one every finite drift fits inside, so it is refused rather than read as no gate for that
   metric.
 - `laya-multimodal eval run ... --baseline baseline.json --tolerance ...` exits non-zero on drift, so it
-  drops into CI unchanged. `laya_multimodal.evals.EvalReport.compare` and `assert_regression` expose the
+  drops into CI unchanged. `laya_multimodal.evaluation.evaluator.EvalReport.compare` and `assert_regression` expose the
   same logic for tests.
 
 `EvalReport.comparable_to` compares `schema`, `dataset_sha256` and `questions_sha256`.

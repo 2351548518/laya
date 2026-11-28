@@ -134,7 +134,7 @@ def resolve_device(force: str | None = None) -> str:
         if torch.cuda.is_available():
             return "cuda"
         # Keeps this branch in step with the availability chain inside
-        # `laya_multimodal/multimodal.py::MultimodalAgent.__init__`: cuda -> mps -> xpu -> cpu. The two ``hasattr`` guards
+        # `laya_multimodal/models/multimodal.py::MultimodalAgent.__init__`: cuda -> mps -> xpu -> cpu. The two ``hasattr`` guards
         # are the core's, because ``torch.backends.mps`` and ``torch.xpu`` appeared in different torch
         # versions; the label must not depend on which one is installed. A machine that answers
         # ``mps`` here and has no CUDA is the common case on Apple silicon, and reporting ``cpu``
@@ -215,7 +215,7 @@ def router_agent(router: Any, name: str) -> Any | None:
     # same way); try the core normaliser for aliased inputs, without heavy
     # imports at module level.
     try:
-        from laya_multimodal.router import normalise_name
+        from laya_multimodal.decisions.routing import normalise_name
 
         key = normalise_name(name)
     except Exception:

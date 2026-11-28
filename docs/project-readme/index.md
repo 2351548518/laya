@@ -1,6 +1,6 @@
 # laya-multimodal v6 tutorial
 
-**English** · [简体中文](../zh-CN/project-readme/index.md)
+**English** · [简体中文](../../docs_zh/project-readme/index.md)
 
 Follow a request from its input and target to the model's answer and an optimizer update.
 This walkthrough uses the v6 Qwen3.5-4B recipe with 1.5 million training rows. It covers text,
@@ -36,10 +36,12 @@ The diagram links open larger SVG or PNG versions. Run commands from the directo
 
 ```bash
 python -m pip install -r requirements-docs.txt
-zensical serve --dev-addr 127.0.0.1:8001
+python scripts/docs_site.py serve --dev-addr 127.0.0.1:8001
 ```
 
 [Open the tutorial in your browser](http://127.0.0.1:8001/project-readme/)
+
+Restart the preview to load edits from `docs/` and `docs_zh/`.
 
 ## Workspace paths
 

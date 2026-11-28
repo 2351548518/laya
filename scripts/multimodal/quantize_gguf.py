@@ -9,7 +9,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from laya_multimodal.evals import file_fingerprint
+from laya_multimodal.evaluation.evaluator import file_fingerprint
 from scripts.multimodal.export_gguf import inspect_gguf
 
 

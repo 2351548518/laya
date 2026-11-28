@@ -92,7 +92,7 @@ def available_languages() -> List[str]:
 def score_cases(agent, cases) -> List[Any]:
     """Read native decision logits in the order of each question's options."""
     import torch
-    from laya_multimodal.common import render_options, unpermute_probs
+    from laya_multimodal.decisions.questions import render_options, unpermute_probs
 
     agent.model.eval()
     rows = []
@@ -115,7 +115,7 @@ def softmax_t(z, temperature: float = 1.0):
 
 def temperature_for(agent, qtype: int, k: int) -> float:
     """Use the loaded checkpoint's text calibration for this option count."""
-    from laya_multimodal.common import temp_bucket
+    from laya_multimodal.decisions.calibration import temp_bucket
 
     calibration = getattr(agent, "modality_calibration", {}).get("text", {})
     buckets = calibration.get("temperature_by_options", agent.temperature_by_options)
@@ -127,7 +127,7 @@ def ece(confidence, correct, bins: int = ECE_BINS) -> float:
     """Expected calibration error over equal-width confidence bins.
 
     The first bin is closed at the bottom (`>= lo`), so `confidence == 0.0` is counted.
-    That is the boundary #39 settled in `laya_multimodal.common.ece_score`,
+    That is the boundary #39 settled in `laya_multimodal.decisions.calibration.ece_score`,
     `research/scripts/bench_local.py` and `research/scripts/build_benchmark_nb.py`. This
     harness kept the pre-#39 test until the divergence was found, which made it the only
     one of the four implementations that binned differently.
@@ -181,7 +181,7 @@ def summarise(confidences, corrects, golds, preds) -> Dict[str, float]:
 def run_language(agent, lang: str, per_lang: int, n_opts: int, seed: int = SEED) -> Dict[str, Any]:
     """Evaluate one language and return its report plus per-case records."""
     import numpy as np
-    from laya_multimodal.common import QTYPES
+    from laya_multimodal.decisions.questions import QTYPES
 
     rows = load_language(lang)
     cases, gold, option_keys = build_suite(
@@ -250,7 +250,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
 
     import laya_multimodal
-    from laya_multimodal.revisions import default_checkpoint
+    from laya_multimodal.models.revisions import default_checkpoint
 
     source = args.model or default_checkpoint()
     started = time.time()

@@ -411,7 +411,7 @@ def laya_shortlist_tool(
     min_confidence: float | None = None,
 ) -> str:
     """Shortlist many-option choice questions, then answer."""
-    # k's default mirrors laya_multimodal.shortlist.DEFAULT_SHORTLIST_K; it is a literal
+    # k's default mirrors laya_multimodal.decisions.shortlist.DEFAULT_SHORTLIST_K; it is a literal
     # here so the MCP schema carries the default without importing numpy at
     # server start. tests/test_mcp.py reads it out of the runtime and fails if
     # this drifts from it.
@@ -486,7 +486,7 @@ _PRESET_INFO = get_available_presets()
 # Built from tools.get_available_presets() rather than typed out, because the names in a
 # tools/list description are what a client sends back: a hand-written list here could advertise a
 # preset the tool rejects, or miss one it accepts. The field each preset reads is the field its own
-# instructions name, so this line cannot go stale against laya_multimodal/presets.py either.
+# instructions name, so this line cannot go stale against laya_multimodal/decisions/presets.py either.
 _PRESET_DOC = (
     "Run a built-in workflow: %s. "
     "Use when the task matches one of those presets instead of hand-writing questions. "

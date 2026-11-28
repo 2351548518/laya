@@ -1,6 +1,6 @@
 # LlamaIndex Integration
 
-**English** · [简体中文](zh-CN/llamaindex.md)
+**English** · [简体中文](../docs_zh/llamaindex.md)
 
 Use locally hosted native decisions with LlamaIndex query engines.
 

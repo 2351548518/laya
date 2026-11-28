@@ -47,7 +47,7 @@ export function validateRoute(value: unknown): void {
   // Checked when the server sends it, like the optional fields of `health` and of `usage`: one
   // field the route report added (#384) must not fail every prediction on a deployment that
   // predates it. When it is there it is `null` or the segment text, as every branch of
-  // `laya_multimodal.lang.analyse()` reports it.
+  // `laya_multimodal.decisions.language.analyse()` reports it.
   if (detection.mixed_segment !== undefined) {
     expect(detection.mixed_segment === null || typeof detection.mixed_segment === 'string',
       'detection mixed segment');

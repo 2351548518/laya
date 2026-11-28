@@ -1,6 +1,6 @@
 # Prediction Hooks
 
-**English** · [简体中文](../zh-CN/hooks/index.md)
+**English** · [简体中文](../../docs_zh/hooks/index.md)
 
 Hooks let you observe or shape every decision Laya makes, without forking it.
 
@@ -65,7 +65,7 @@ without threading it through every call, register it once with
 [process-wide defaults](api.md#process-wide-defaults):
 
 ```python
-from laya_multimodal import hooks
+from laya_multimodal.decisions import hooks
 
 hooks.set_default_hooks(hooks=[Tracer()])
 ```
@@ -135,7 +135,7 @@ automatically. `Agent` hooks fire whenever the Router runs an attached or built 
 
 - No hooks configured means no behavioural change. The unset path is regression-tested.
 - All hook parameters are keyword arguments with defaults, so existing calls keep working.
-- `laya_multimodal/hooks.py` is pure Python: `import laya_multimodal` does not pull in torch because of it.
+- `laya_multimodal/decisions/hooks.py` is pure Python: `import laya_multimodal` does not pull in torch because of it.
 - Hooks are synchronous by default. An `async def` event can be wrapped in
   [`AsyncHook`](api.md#async-hooks), or passed as a plain async callable, and it runs to
   completion for you.
@@ -148,4 +148,4 @@ automatically. `Agent` hooks fire whenever the Router runs an attached or built 
 - [`examples/hooks/`](https://github.com/2351548518/laya/tree/main/examples/hooks): runnable audit, redact, cache and metrics hooks.
 - [`tests/test_hooks.py`](https://github.com/2351548518/laya/blob/main/tests/test_hooks.py): the behaviour spec.
 - [`tests/test_hooks_api.py`](https://github.com/2351548518/laya/blob/main/tests/test_hooks_api.py): the API-stability guard.
-- [`laya_multimodal/hooks.py`](https://github.com/2351548518/laya/blob/main/laya_multimodal/hooks.py): the implementation.
+- [`laya_multimodal/decisions/hooks.py`](https://github.com/2351548518/laya/blob/main/laya_multimodal/decisions/hooks.py): the implementation.

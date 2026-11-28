@@ -1,6 +1,6 @@
 # Error handling
 
-**English** · [简体中文](../zh-CN/hooks/errors.md)
+**English** · [简体中文](../../docs_zh/hooks/errors.md)
 
 Hooks run inside the request they observe, so how their failures are handled matters. This page
 is the exact policy.

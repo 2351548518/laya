@@ -1,6 +1,6 @@
 # Patterns and anti-patterns
 
-**English** · [简体中文](../zh-CN/hooks/patterns.md)
+**English** · [简体中文](../../docs_zh/hooks/patterns.md)
 
 Hooks are a small seam, and it is easy to use them well or badly. This page collects the shapes
 that hold up in production and the ones that bite.
@@ -185,7 +185,7 @@ hook object: the convenience callables cover `on_predict_start` / `on_predict_en
 function in `hooks=` is refused (see [plain callables in `hooks=`](#plain-callables-in-hooks)).
 
 ```python
-from laya_multimodal.router import RouteDecision
+from laya_multimodal.decisions.routing import RouteDecision
 
 class Pin:
     def on_route(self, ctx):
@@ -269,7 +269,8 @@ A tracer or metrics hook that every decision should see can be registered once, 
 passed to each `Agent` and `Router`. Defaults run before the instance and per-call hooks.
 
 ```python
-from laya_multimodal import BaseHook, hooks
+from laya_multimodal import BaseHook
+from laya_multimodal.decisions import hooks
 
 class Metrics(BaseHook):
     def on_predict_end(self, ctx):

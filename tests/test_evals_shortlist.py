@@ -3,8 +3,8 @@ import json
 
 import pytest
 
-from laya_multimodal.evals import Dataset, EvalError, Example, evaluate
-from laya_multimodal.evals_shortlist import SHORTLIST_REPORT_SCHEMA, evaluate_shortlist
+from laya_multimodal.evaluation.evaluator import Dataset, EvalError, Example, evaluate
+from laya_multimodal.evaluation.choice import SHORTLIST_REPORT_SCHEMA, evaluate_shortlist
 
 
 QUESTION = {"intent": {"type": "choice", "instructions": "Which?",
@@ -123,7 +123,7 @@ def test_malformed_shortlist_metadata_fails(monkeypatch):
                 "shortlist": {"intent": {"labels": ["a", "a"], "k": 2, "n": 3,
                                          "passthrough": False, "scores": [1.0, 1.0]}}}
 
-    monkeypatch.setattr("laya_multimodal.evals_shortlist.predict_shortlist", malformed)
+    monkeypatch.setattr("laya_multimodal.evaluation.choice.predict_shortlist", malformed)
     with pytest.raises(EvalError, match="inconsistent shortlist metadata"):
         run(ChoiceAgent({"one": "a"}), Dataset([sample("one", "a", "ok")]), TableEmbed())
 
@@ -136,7 +136,7 @@ def test_dataset_bytes_are_recorded_when_path_is_supplied(tmp_path):
     report = evaluate_shortlist(ChoiceAgent({"one": "a"}), dataset, TableEmbed(), k=2,
                                 checkpoint_id="checkpoint@123", embedder_id="embedder@456",
                                 dataset_path=str(path))
-    from laya_multimodal.evals import file_fingerprint
+    from laya_multimodal.evaluation.evaluator import file_fingerprint
 
     assert report.config["dataset_sha256"] == file_fingerprint(str(path))
     assert report.config["questions_sha256"]

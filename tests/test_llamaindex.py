@@ -517,19 +517,19 @@ for _body, _label in (({"model": "laya-multilingual"}, "answers absent"),
 # arguments since #530 / #532; this surface forwarded only `model`, so a RAG pipeline choosing
 # between more tools than the default head budget fits could not widen its own window. The rule
 # now lives in one module the three integrations import, and the lists below are read out of it
-# rather than written out again here -- a control added to `._controls` without reaching this file
+# rather than written out again here -- a control added to `request_options` without reaching this file
 # fails here. Three classes, three `_execute_decision` call sites, so every surface is driven.
 import inspect
-from laya_multimodal.agent import Agent
-from laya_multimodal.integrations import _controls
+from laya_multimodal.models.base import Agent
+from laya_multimodal.integrations.shared import request_options
 from laya_multimodal.integrations import crewai as crewai_module
 from laya_multimodal.integrations import langchain as langchain_module
 from laya_multimodal.integrations import llamaindex as llamaindex_module
-from laya_multimodal.router import Router
+from laya_multimodal.decisions.routing import Router
 
-CONTROLS = (tuple(_controls.PREDICT_CONTROLS) + tuple(_controls.DECISION_CONTROLS)
-            + tuple(_controls.HOOK_CONTROLS))
-ROUTER_HINTS = tuple(_controls.ROUTER_ONLY_CONTROLS)
+CONTROLS = (tuple(request_options.PREDICT_CONTROLS) + tuple(request_options.DECISION_CONTROLS)
+            + tuple(request_options.HOOK_CONTROLS))
+ROUTER_HINTS = tuple(request_options.ROUTER_ONLY_CONTROLS)
 
 
 def _params(fn):
@@ -537,13 +537,13 @@ def _params(fn):
 
 
 check("controls/budget tuple names budget_kwargs",
-      set(_params(_controls.budget_kwargs)), set(_controls.PREDICT_CONTROLS))
+      set(_params(request_options.budget_kwargs)), set(request_options.PREDICT_CONTROLS))
 check("controls/decision tuple names decision_kwargs",
-      set(_params(_controls.decision_kwargs)), set(_controls.DECISION_CONTROLS))
+      set(_params(request_options.decision_kwargs)), set(request_options.DECISION_CONTROLS))
 check("controls/hook tuple names hook_kwargs",
-      set(_params(_controls.hook_kwargs)), set(_controls.HOOK_CONTROLS))
+      set(_params(request_options.hook_kwargs)), set(request_options.HOOK_CONTROLS))
 check("controls/routing tuple names router_kwargs",
-      set(_params(_controls.router_kwargs)), set(_controls.ROUTER_ONLY_CONTROLS))
+      set(_params(request_options.router_kwargs)), set(request_options.ROUTER_ONLY_CONTROLS))
 
 # Everything called a control here is an argument a real runner accepts, or a selector would fail
 # with a TypeError deep inside core instead of at the call site.
@@ -659,20 +659,20 @@ for _label, _cls, _extra, _run in SURFACES:
     check("controls/%s remote body carries both budgets" % _label,
           {k: v for k, v in remote_body(_cls, _extra, _run, max_len=1024,
                                         head_max_len=384).items()
-           if k in _controls.PREDICT_CONTROLS},
+           if k in request_options.PREDICT_CONTROLS},
           {"max_len": 1024, "head_max_len": 384})
     check("controls/%s remote body omits unset budgets" % _label,
-          [k for k in remote_body(_cls, _extra, _run) if k in _controls.PREDICT_CONTROLS], [])
+          [k for k in remote_body(_cls, _extra, _run) if k in request_options.PREDICT_CONTROLS], [])
     check("controls/%s remote body keeps a zero" % _label,
           remote_body(_cls, _extra, _run, head_max_len=0).get("head_max_len"), 0)
     # `lang` / `min_confidence` are laya-multimodal-serve `BODY_CONTROLS`, so the same override reaches the
     # remote node -- and an unset one stays out of the body rather than shadowing the deployment.
     check("controls/%s remote body carries the decision controls" % _label,
           {k: v for k, v in remote_body(_cls, _extra, _run, lang="es", min_confidence=0.3).items()
-           if k in _controls.DECISION_CONTROLS},
+           if k in request_options.DECISION_CONTROLS},
           {"lang": "es", "min_confidence": 0.3})
     check("controls/%s remote body omits unset decision controls" % _label,
-          [k for k in remote_body(_cls, _extra, _run) if k in _controls.DECISION_CONTROLS], [])
+          [k for k in remote_body(_cls, _extra, _run) if k in request_options.DECISION_CONTROLS], [])
     check("controls/%s remote body keeps min_confidence=0.0" % _label,
           remote_body(_cls, _extra, _run, min_confidence=0.0).get("min_confidence"), 0.0)
     # A hook is a Python callable that runs inside `predict`; a serve node cannot receive one.
@@ -700,7 +700,7 @@ check_true("controls/forwards the caller's objects",
 
 # --------------------------------------------------------------- Confidence source
 # Every gate in this module reads the same number: the calibrated `answer_confidence`
-# core gates on, never the entropy `confidence` (see `laya_multimodal.confidence`). The two are on
+# core gates on, never the entropy `confidence` (see `laya_multimodal.decisions.confidence`). The two are on
 # different scales, so they must not be interchangeable here.
 
 

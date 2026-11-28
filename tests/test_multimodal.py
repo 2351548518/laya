@@ -16,11 +16,10 @@ pytest.importorskip("PIL", reason="native media tests need the multimodal extra"
 pytest.importorskip("scipy", reason="audio resampling tests need the multimodal extra")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from laya_multimodal.multimodal import MultimodalAgent, install_decision_head, read_audio  # noqa: E402
-from laya_multimodal.multimodal_train import (  # noqa: E402
-    MultimodalTrainConfig, check_splits, collate_multimodal_inputs, collect_records, finetune_multimodal, load_rows,
-)
-from laya_multimodal.router import Router  # noqa: E402
+from laya_multimodal.models.multimodal import MultimodalAgent, install_decision_head, read_audio  # noqa: E402
+from laya_multimodal.data import check_splits, collate_multimodal_inputs, load_rows  # noqa: E402
+from laya_multimodal.evaluation.native_metrics import collect_records  # noqa: E402
+from laya_multimodal.decisions.routing import Router  # noqa: E402
 
 Q = {"category": {"type": "choice", "instructions": "Choose the category", "criteria": ["dark", "bright"]},
      "present": {"type": "noul", "instructions": "Is the event present?"},
@@ -158,7 +157,7 @@ def test_audio_validation_resampling_and_capability():
 
 
 def test_video_preserves_order_and_audio_together(tmp_path, monkeypatch):
-    import laya_multimodal.video as video
+    import laya_multimodal.models.video as video
     from PIL import Image
     path = tmp_path / "clip.avi"
     path.write_bytes(b"test")
@@ -181,7 +180,7 @@ def test_video_preserves_order_and_audio_together(tmp_path, monkeypatch):
 
 
 def test_serial_evaluation_reuses_video_decodes_and_preserves_predictions(tmp_path, monkeypatch):
-    import laya_multimodal.video as video
+    import laya_multimodal.models.video as video
     from PIL import Image
 
     first, second = tmp_path / "first.mp4", tmp_path / "second.mp4"
@@ -259,7 +258,7 @@ def test_hooks_skip_and_error_lifecycle():
 def test_frame_decode_keeps_seek_precision_and_missing_frame_policy(tmp_path, monkeypatch):
     import io
     from PIL import Image
-    import laya_multimodal.video as video
+    import laya_multimodal.models.video as video
 
     image = io.BytesIO()
     Image.new("RGB", (2, 2), (11, 39, 201)).save(image, format="PNG")
@@ -283,7 +282,7 @@ def test_frame_decode_keeps_seek_precision_and_missing_frame_policy(tmp_path, mo
 
 
 def test_video_overrides_and_persistent_cache_preserve_native_evidence(tmp_path, monkeypatch):
-    import laya_multimodal.video as video
+    import laya_multimodal.models.video as video
     from PIL import Image
     path = tmp_path / "clip.avi"
     path.write_bytes(b"video")
@@ -310,10 +309,10 @@ def test_video_overrides_and_persistent_cache_preserve_native_evidence(tmp_path,
 
 @pytest.mark.parametrize('error_number', [errno.ENOSPC, errno.EDQUOT])
 def test_full_video_cache_preserves_decoded_evidence(tmp_path, monkeypatch, error_number):
-    import laya_multimodal.video as video
+    import laya_multimodal.models.video as video
     from PIL import Image
     from types import SimpleNamespace
-    import laya_multimodal.multimodal as multimodal
+    import laya_multimodal.models.multimodal as multimodal
     path = tmp_path / 'clip.avi'; path.write_bytes(b'video')
     frames = [Image.new('RGB', (8, 8), 'red')] * 4
     monkeypatch.setattr(video, 'probe', lambda p: dict(duration_s=4., has_audio=False))
@@ -330,8 +329,8 @@ def test_full_video_cache_preserves_decoded_evidence(tmp_path, monkeypatch, erro
 
 
 def test_low_video_cache_space_skips_persistence_before_writing(tmp_path, monkeypatch):
-    import laya_multimodal.video as video
-    import laya_multimodal.multimodal as multimodal
+    import laya_multimodal.models.video as video
+    import laya_multimodal.models.multimodal as multimodal
     from PIL import Image
     from types import SimpleNamespace
     path = tmp_path / 'clip.avi'; path.write_bytes(b'video')
@@ -344,17 +343,17 @@ def test_low_video_cache_space_skips_persistence_before_writing(tmp_path, monkey
 
 
 def test_ordinal_calibration_guard_rejects_worse_calibration_and_keeps_groups_together(monkeypatch):
-    import laya_multimodal.multimodal_train as training
+    from laya_multimodal.models import modality_calibration
     seen = []
     def fit(values):
         seen.append(len(values))
         return {"temperature": [1., 2., 1.], "temperature_by_options": {"score:3-5": 2.}}
-    monkeypatch.setattr(training, "fit_temperature_map", fit)
+    monkeypatch.setattr(modality_calibration, "fit_temperature_map", fit)
     records = [{"qtype": 1, "k": 3, "modality": "image", "group": "group%d" % i,
                 "logits": np.array([2., 0., -1.]), "target": np.array([1., 0., 0.])}
                for i in range(100)]
     agent = tiny_agent()
-    calibration = training.calibrate_multimodal(agent, records, ordinal_guard=True)
+    calibration = modality_calibration.calibrate_multimodal(agent, records, ordinal_guard=True)
     guard = calibration["by_modality"]["image"]["ordinal_guard"]
     assert guard["fit_n"] + guard["check_n"] == 100
     assert min(guard["fit_n"], guard["check_n"]) >= 10
@@ -364,7 +363,7 @@ def test_ordinal_calibration_guard_rejects_worse_calibration_and_keeps_groups_to
     # Distinct files by one uploader remain a single unit in calibration's fit/check split.
     for record in records:
         record["calibration_group"] = "freesound_uploader:one_author"
-    calibration = training.calibrate_multimodal(agent, records, ordinal_guard=True)
+    calibration = modality_calibration.calibrate_multimodal(agent, records, ordinal_guard=True)
     guard = calibration["by_modality"]["image"]["ordinal_guard"]
     assert min(guard["fit_n"], guard["check_n"]) == 0 and not guard["accepted"]
 
@@ -418,7 +417,7 @@ def test_empty_context_is_distinguished_by_the_decision_question():
 
 
 def test_metrics_accept_all_equally_valid_options():
-    from laya_multimodal.multimodal_train import metrics
+    from laya_multimodal.evaluation.native_metrics import metrics
     records = [{"qtype": 0, "k": 3, "modality": "text", "logits": np.array([0., 4., -1.]),
                 "target": np.array([0.5, 0.5, 0.])}]
     assert metrics(records)["overall"]["accuracy"] == 1.0
@@ -493,7 +492,7 @@ def test_systemone_reference_expansion_places_each_candidate_after_its_own_image
     import io
     import re
     from PIL import Image
-    from laya_multimodal.systemone import prepare_image_request
+    from laya_multimodal.decisions.systemone import prepare_image_request
 
     class ExpandingProcessor(TinyProcessor):
         image_token = "<img>"
@@ -537,7 +536,7 @@ def test_systemone_reference_expansion_places_each_candidate_after_its_own_image
 
 @pytest.mark.parametrize("selection", [{}, {"model": "multimodal"}, {"task": "MuLTiMoDaL"}])
 def test_http_text_endpoints_require_inline_bytes_for_native_media(monkeypatch, selection):
-    from laya_multimodal.router import Router
+    from laya_multimodal.decisions.routing import Router
     from laya_multimodal.serve import create_app
 
     TestClient = pytest.importorskip("fastapi.testclient").TestClient
@@ -555,64 +554,39 @@ def test_http_text_endpoints_require_inline_bytes_for_native_media(monkeypatch, 
 
 
 @pytest.mark.parametrize("mode", ["head", "full"])
-def test_training_performs_real_gradient_updates_and_holds_test_out(tmp_path, mode):
+def test_joint_training_updates_weights_and_evaluates_development(tmp_path, mode):
+    from laya_multimodal.models.grounding import GroundingHead
+    from laya_multimodal.train import GroundingTrainConfig, finetune_grounding
+
     agent = tiny_agent()
+    agent.model_type = "qwen3_5"
+    agent.model.grounding_head = GroundingHead(8, 16, 1, "single-v1")
+    agent.grounding_trained = agent.detection_trained = False
+    agent.model.gradient_checkpointing_enable = lambda **kwargs: None
     original = agent.model.get_output_embeddings().weight.detach().clone()
-    row = {"id": "train", "state": "training text", "questions": {"x": Q["category"]}, "expected": {"x": "bright"}}
+    question = {"x": Q["category"]}
     train = tmp_path / "train.jsonl"
-    train.write_text(json.dumps(row) + "\n")
-    test = tmp_path / "test.jsonl"
-    row["state"], row["id"] = "independent test text", "test"
-    test.write_text(json.dumps(row) + "\n")
+    train.write_text(json.dumps({"state": "training text", "questions": question, "expected": {"x": "bright"}}) + "\n")
+    dev = tmp_path / "dev.jsonl"
+    dev.write_text(json.dumps({"state": "held-out presence", "questions": {"x": Q["present"]},
+                               "expected": {"x": True}}) + "\n")
+    decision_dev = tmp_path / "decision_dev.jsonl"
+    decision_dev.write_text(json.dumps({"state": "held-out decision", "questions": question,
+                                        "expected": {"x": "dark"}}) + "\n")
     saved = []
-    agent.save = lambda path, mode: saved.append((str(path), mode))
-    report = finetune_multimodal(train, tmp_path / "out", test_data=test, agent=agent,
-                                config=MultimodalTrainConfig(mode=mode, epochs=2, learning_rate=0.01,
-                                                             grad_accum=4, gradient_checkpointing=False))
+    agent.save = lambda path: saved.append(path.name)
+
+    output = tmp_path / "out"
+    config = GroundingTrainConfig(mode=mode, epochs=2, learning_rate=.01, head_learning_rate=.01,
+                                  train_readout_in_warmup=True)
+    finetune_grounding(train, dev, output, decision_dev_data=decision_dev, agent=agent, config=config)
+    report = json.loads((output / "training_report.json").read_text())
+
     assert not torch.equal(original, agent.model.get_output_embeddings().weight)
-    assert report["optimizer_steps"] == 2 and report["held_out"]
-    assert report["test_rows"] == 1 and report["train_rows"] == 1
-    assert report["before"]["overall"]["n"] == report["after"]["overall"]["n"] == 1
-    assert saved[-1][1] == mode
-
-
-@pytest.mark.parametrize("use_kl", [False, True])
-def test_training_builds_optional_targets_only_for_enabled_losses(tmp_path, monkeypatch, use_kl):
-    import laya_multimodal.multimodal_train as training
-
-    question = Q["category"]
-    row = {"state": "training sample", "questions": {"x": question}, "expected": {"x": "bright"},
-           "teacher_targets": {"x": {"probabilities": {"bright": .8, "dark": .2}}}}
-    train = tmp_path / "train.jsonl"
-    train.write_text(json.dumps(row) + "\n")
-    reference = None
-    if use_kl:
-        reference = tmp_path / "reference.json"
-        reference.write_text(json.dumps([{"example_hash": training.example_hash(row, "x", question),
-                                         "k": 2, "logits": [.7, .3]}]))
-    else:
-        def unused_hash(*args):
-            pytest.fail("SFT without a reference cache should skip hashing training decisions")
-        monkeypatch.setattr(training, "example_hash", unused_hash)
-
-    original = training.decision_loss
-    observed = []
-
-    def check_loss(*args, **kwargs):
-        for name in ("teacher", "teacher_mask", "reference", "reference_mask"):
-            assert (kwargs[name] is not None) == use_kl
-        loss, parts = original(*args, **kwargs)
-        observed.append(parts)
-        return loss, parts
-
-    monkeypatch.setattr(training, "decision_loss", check_loss)
-    agent = tiny_agent()
-    agent.save = lambda *args, **kwargs: None
-    weight = .2 if use_kl else 0.
-    config = MultimodalTrainConfig(mode="head", gradient_checkpointing=False, distill_weight=weight, kl_weight=weight)
-    report = finetune_multimodal(train, tmp_path / "out", reference_data=reference, agent=agent, config=config)
-    assert report["teacher_target_decisions"] == 1 and len(observed) == 1
-    assert all((name in observed[0]) == use_kl for name in ("distillation_kl", "reference_kl"))
+    assert report["steps"] == 2 and report["train_records"] == 1
+    assert report["forward_passes"] == {"geometry": 0, "decisions": 2}
+    assert report["before"]["decisions"]["overall"]["n"] == report["after"]["decisions"]["overall"]["n"] == 1
+    assert "initial" in saved and "last" in saved
 
 
 def test_evaluation_respects_padded_token_budget_without_truncating():
@@ -650,37 +624,44 @@ def test_real_backbone_image_audio_and_reload(tmp_path):
     assert before["answers"] == after["answers"]
 
 
-def test_development_selection_restores_best_weights_before_final_save(tmp_path, monkeypatch):
-    import laya_multimodal.multimodal_train as training
-    from safetensors.torch import save_file
+def test_joint_training_preserves_best_development_checkpoint(tmp_path, monkeypatch):
+    from laya_multimodal import train
+    from laya_multimodal.models.grounding import GroundingHead
+
     agent = tiny_agent()
-    train, selection = tmp_path / "train.jsonl", tmp_path / "selection.jsonl"
+    agent.model.grounding_head = GroundingHead(8, 16, 1, "single-v1")
+    agent.grounding_trained = agent.detection_trained = False
+    train_rows, development = tmp_path / "train.jsonl", tmp_path / "dev.jsonl"
     sample = {"state": "train", "questions": {"x": Q["category"]}, "expected": {"x": "bright"}}
-    train.write_text(json.dumps(sample) + "\n")
+    train_rows.write_text(json.dumps(sample) + "\n")
     sample["state"] = "independent development context"
-    selection.write_text(json.dumps(sample) + "\n")
-    saved = {}
-    def save(path, mode):
-        path = Path(path)
-        path.mkdir(parents=True, exist_ok=True)
-        values = {k: v.detach().clone() for k, v in agent.model.lm_head.state_dict().items()}
-        saved[path.name] = values
-        save_file(values, str(path / "decision_head.safetensors"))
-    agent.save = save
-    calls = []
+    development.write_text(json.dumps(sample) + "\n")
+    saved, calls = {}, []
+
+    def save(path):
+        saved[path.name] = agent.model.lm_head.weight.detach().clone()
+
     def collect(agent, rows, micro_batch, *, max_micro_tokens):
         calls.append(max_micro_tokens)
         return []
-    monkeypatch.setattr(training, "collect_records", collect)
-    monkeypatch.setattr(training, "metrics", lambda records: {
-        "by_modality": {"text": {"accuracy": 1. if len(calls) == 1 else .5}}, "overall": {"nll": 1.}})
-    report = finetune_multimodal(train, tmp_path / "out", selection_data=selection, agent=agent,
-        config=MultimodalTrainConfig(mode="head", epochs=2, learning_rate=.01, gradient_checkpointing=False,
-                                     max_micro_tokens=32))
-    assert report["optimizer_steps"] == 2 and report["selected_step"] == 1
-    assert calls == [32, 32]
-    torch.testing.assert_close(saved["out"]["weight"], saved["checkpoint_best"]["weight"], atol=0, rtol=0)
-    assert not torch.equal(saved["out"]["weight"], saved["checkpoint_latest"]["weight"])
+
+    def development_metrics(records):
+        accuracy = [.5, 1., .75, .75][len(calls) - 1]
+        return {"by_modality": {"text": {"accuracy": accuracy}}, "overall": {"accuracy": accuracy}}
+
+    agent.save = save
+    monkeypatch.setattr(train, "collect_records", collect)
+    monkeypatch.setattr(train, "decision_metrics", development_metrics)
+    config = train.GroundingTrainConfig(mode="head", epochs=2, head_learning_rate=.01, eval_every=1,
+                                        train_readout_in_warmup=True, max_micro_tokens=32,
+                                        selection_metric="decision_macro", include_initial_selection=True)
+    output = tmp_path / "out"
+    train.finetune_grounding(train_rows, development, output, decision_dev_data=development, agent=agent, config=config)
+    report = json.loads((output / "training_report.json").read_text())
+    assert [record["decisions"]["overall"]["accuracy"] for record in report["selection_history"]] == [1., .75]
+    assert calls == [32, 32, 32, 32] and report["checkpoint"] == str(output / "best")
+    assert not torch.equal(saved["initial"], saved["best"])
+    assert not torch.equal(saved["best"], saved["last"])
 
 
 @pytest.mark.parametrize("mode", ["head", "lora", "full", "merged"])
@@ -690,7 +671,8 @@ def test_transformers_checkpoint_roundtrip_and_adapter_continuation(tmp_path, mo
         pytest.skip("Gemma 4 checkpoint tests need the multimodal extra's Transformers version")
     if mode in ("lora", "merged"):
         pytest.importorskip("peft")
-    from laya_multimodal.multimodal_train import configure_training
+    from laya_multimodal.training.objectives import configure_training
+    from laya_multimodal.train import GroundingTrainConfig
     text = transformers.Gemma4TextConfig(vocab_size=256, hidden_size=16, intermediate_size=32,
         num_hidden_layers=2, num_attention_heads=2, num_key_value_heads=1, head_dim=8,
         vocab_size_per_layer_input=256, hidden_size_per_layer_input=4,
@@ -708,8 +690,10 @@ def test_transformers_checkpoint_roundtrip_and_adapter_continuation(tmp_path, mo
     processor.save_pretrained = lambda path: Path(path).mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(transformers.AutoProcessor, "from_pretrained", lambda *args, **kwargs: processor)
     agent = MultimodalAgent(source, device="cpu")
-    parameters = configure_training(agent, MultimodalTrainConfig(mode="lora" if mode == "merged" else mode,
-        gradient_checkpointing=False, train_projectors=mode in ("lora", "merged")))
+    training_config = GroundingTrainConfig(mode="lora" if mode == "merged" else mode,
+        lora_rank=8, lora_alpha=16, lora_targets="qv")
+    parameters = configure_training(agent, training_config, gradient_checkpointing=False,
+                                    train_projectors=mode in ("lora", "merged"))
     if mode == "lora":
         base = agent.model.get_base_model()
         with torch.no_grad():
@@ -742,7 +726,7 @@ def test_transformers_checkpoint_roundtrip_and_adapter_continuation(tmp_path, mo
             actual = restored.model.get_base_model().get_submodule(name).state_dict()
             for key in expected:
                 torch.testing.assert_close(actual[key], expected[key], atol=0, rtol=0)
-        continued = configure_training(restored, MultimodalTrainConfig(mode="lora", gradient_checkpointing=False))
+        continued = configure_training(restored, training_config, gradient_checkpointing=False)
         assert restored.ordinal_calibration == {}
         assert continued and all(p.requires_grad for p in continued)
         restored._logits(inputs, 2).sum().backward()

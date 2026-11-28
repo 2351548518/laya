@@ -31,4 +31,5 @@ nav:
       - crewai.md
       - agno.md
   - reference
+  # The site builder stages the root docs_zh/ directory at zh-CN/.
   - 简体中文: zh-CN

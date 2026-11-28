@@ -10,7 +10,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from laya_multimodal.lang import _SCRIPT_RANGES, analyse, detect_script, script_profile  # noqa: E402
+from laya_multimodal.decisions.language import _SCRIPT_RANGES, analyse, detect_script, script_profile  # noqa: E402
 
 PASS, FAIL = [], []
 

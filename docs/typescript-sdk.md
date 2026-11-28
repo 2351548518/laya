@@ -1,6 +1,6 @@
 # TypeScript SDK design
 
-**English** · [简体中文](zh-CN/typescript-sdk.md)
+**English** · [简体中文](../docs_zh/typescript-sdk.md)
 
 `laya-client` is a dependency-free HTTP client for a self-hosted `laya-multimodal-serve`
 server. The SDK is released independently from the Python runtime.
@@ -11,9 +11,9 @@ server. The SDK is released independently from the Python runtime.
 | --- | --- |
 | `sdk/typescript` | Question/answer types, presets, validation, native fetch, errors and cancellation |
 | `laya_multimodal/serve.py` | Existing HTTP endpoint, Bearer authentication, health and request limits |
-| `laya_multimodal/router.py` | Checkpoint selection, loading and inference routing |
-| `laya_multimodal/multimodal.py` | Native input preparation, PyTorch inference and typed answers |
-| `laya_multimodal/presets.py` | Source for the five generated TypeScript question presets |
+| `laya_multimodal/decisions/routing.py` | Checkpoint selection, loading and inference routing |
+| `laya_multimodal/models/multimodal.py` | Native input preparation, PyTorch inference and typed answers |
+| `laya_multimodal/decisions/presets.py` | Source for the five generated TypeScript question presets |
 
 ```mermaid
 flowchart LR

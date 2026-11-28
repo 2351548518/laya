@@ -17,11 +17,9 @@ from scripts.multimodal.train import validate_visual_training
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_core_training_and_cli_have_no_research_dependencies():
+def test_runtime_and_commands_have_no_research_dependencies():
     paths = list((ROOT / 'scripts/multimodal').glob('*.py'))
-    paths += [ROOT / 'laya_multimodal' / name for name in ['multimodal.py', 'multimodal_train.py',
-        'grounding.py', 'train.py', 'train_cli.py', 'multimodal_distributed.py', 'multimodal_objectives.py',
-        'multimodal_readout.py', 'multimodal_calibration.py']]
+    paths += list((ROOT / 'laya_multimodal').rglob('*.py'))
     for path in paths:
         for node in ast.walk(ast.parse(path.read_text())):
             modules = [node.module or ''] if isinstance(node, ast.ImportFrom) else [
@@ -29,31 +27,39 @@ def test_core_training_and_cli_have_no_research_dependencies():
             assert not any(name.startswith(('research', '_local')) for name in modules), str(path)
 
 
-@pytest.mark.parametrize('script', ['train.py', 'calibrate.py', 'evaluate.py'])
-def test_cli_help_needs_no_local_datasets_or_weights(script):
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/multimodal' / script), '--help'],
+@pytest.mark.parametrize('command', [
+    ('-m', 'laya_multimodal.train'),
+    *[(str(ROOT / 'scripts/multimodal' / script),) for script in ('train.py', 'calibrate.py', 'evaluate.py')],
+])
+def test_cli_help_needs_no_local_datasets_or_weights(command):
+    result = subprocess.run([sys.executable, *command, '--help'],
         cwd=ROOT, capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr
     assert '--model' in result.stdout and '--out' in result.stdout
 
 
 def test_checkout_script_uses_the_packaged_entrypoint():
-    from laya_multimodal import train_cli
-    from scripts.multimodal import train
+    from laya_multimodal import train
+    from scripts.multimodal import train as checkout
 
-    assert train.main is train_cli.main
-    assert validate_visual_training is train_cli.validate_visual_training
+    assert checkout.main is train.main
+    assert validate_visual_training is train.validate_visual_training
 
 
-def test_train_command_dispatches_to_joint_trainer(tmp_path, monkeypatch):
+@pytest.mark.parametrize("merged", [False, True])
+def test_train_command_dispatches_to_joint_trainer(tmp_path, monkeypatch, merged):
     from types import SimpleNamespace
     from unittest.mock import Mock
 
-    from laya_multimodal import cli, train_cli
+    from laya_multimodal import cli, train
 
-    base = tmp_path / "base"
-    base.mkdir()
-    (base / "config.json").write_text('{"model_type": "gemma4"}')
+    model = tmp_path / ("merged" if merged else "base")
+    config_dir = model / "backbone_config" if merged else model
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.json").write_text('{"model_type": "gemma4"}', encoding="utf-8")
+    if merged:
+        saved = {"mode": "full", "backbone": str(tmp_path / "original_no_longer_here")}
+        (model / "multimodal_config.json").write_text(json.dumps(saved), encoding="utf-8")
     config = tmp_path / "config.json"
     config.write_text('{"mode": "head", "train_readout_in_warmup": true}')
     data, out = tmp_path / "data", tmp_path / "head"
@@ -62,13 +68,14 @@ def test_train_command_dispatches_to_joint_trainer(tmp_path, monkeypatch):
         readout="candidate", prompt_version="v2",
     )
     run = Mock()
-    monkeypatch.setattr(train_cli, "MultimodalAgent", Mock(return_value=agent))
-    monkeypatch.setattr(train_cli, "distributed_context",
+    monkeypatch.setattr(train, "MultimodalAgent", Mock(return_value=agent))
+    monkeypatch.setattr(train, "distributed_context",
                         lambda: SimpleNamespace(device="cpu", main=True, world_size=1))
-    monkeypatch.setattr(train_cli, "finetune_grounding", run)
+    monkeypatch.setattr(train, "finetune_grounding", run)
 
-    cli.main(["train", "--model", str(base), "--data", str(data), "--out", str(out),
-              "--config", str(config), "--train-split", "warmup", "--require-original-base"])
+    flags = [] if merged else ["--require-original-base"]
+    cli.main(["train", "--model", str(model), "--data", str(data), "--out", str(out),
+              "--config", str(config), "--train-split", "warmup", *flags])
 
     run.assert_called_once()
     assert run.call_args.args == (data / "warmup.jsonl", data / "dev.jsonl", str(out))
@@ -80,7 +87,8 @@ def test_train_command_dispatches_to_joint_trainer(tmp_path, monkeypatch):
 
 def test_prediction_cli_loads_the_native_lane_for_text_and_media(tmp_path, monkeypatch, capsys):
     from PIL import Image
-    from laya_multimodal import cli, multimodal
+    from laya_multimodal import cli
+    from laya_multimodal.models import multimodal
     from test_multimodal import Q, tiny_agent
 
     checkpoint = tmp_path / "checkpoint"
@@ -263,7 +271,7 @@ def test_calibration_rejects_an_aggregate_gain_hiding_a_modality_regression():
 
 def test_request_shaped_dataset_preserves_media_labels_and_option_order(tmp_path):
     from laya_multimodal.train import load_grounding_rows
-    from laya_multimodal.multimodal_data import can_shuffle_choice, record_input
+    from laya_multimodal.data import can_shuffle_choice, record_input
     from scripts.multimodal.prepare_dataset import main
     from test_multimodal import tiny_agent
 
@@ -307,7 +315,7 @@ def test_request_shaped_dataset_preserves_media_labels_and_option_order(tmp_path
      "matching asset"),
 ])
 def test_request_shaped_dataset_checks_file_parts(tmp_path, assets, files, error):
-    from laya_multimodal.multimodal_data import normalize_record
+    from laya_multimodal.data import normalize_record
 
     row = {"request": {"state": "scene", "assets": assets,
                        "questions": {"x": {"type": "noul", "instructions": "Is the scene clear?"}}},
@@ -316,65 +324,9 @@ def test_request_shaped_dataset_checks_file_parts(tmp_path, assets, files, error
         normalize_record(row, tmp_path, verify_media=False)
 
 
-def test_swanlab_mirror_preserves_existing_steps_and_separates_resumes(tmp_path):
-    from types import SimpleNamespace
-    from scripts.multimodal.monitor_swanlab import mirror
-
-    (tmp_path / "sft").mkdir()
-    (tmp_path / "launch.json").write_text(json.dumps({"schedule": {"sft": 20}}))
-    (tmp_path / "sft-config.json").write_text(json.dumps({"global_batch_size": 64, "video_cache_dir": "/cache"}))
-    dev = {"step": 10, "single_n": 20, "acc_iou50": .5,
-           "decisions": {"overall": {"n": 12, "accuracy": .8, "ece": None},
-                         "by_modality": {"text": {"n": 6, "accuracy": .9}, "image": {"n": 6, "accuracy": .7}}}}
-    evaluation = "GROUNDING DEV " + json.dumps(dev)
-    (tmp_path / "sft.log").write_text("\n".join([
-        "grounding step=1 loss=1.00000 elapsed=20.0s ranks=4",
-        "grounding step=10 loss=0.75000 elapsed=200.0s ranks=4",
-        "grounding step=10 loss=0.76000 elapsed=201.0s ranks=4",
-        evaluation, "GROUNDING DEV {", "Resumed joint training at optimizer step 5",
-        "grounding step=6 loss=0.81000 elapsed=20.0s ranks=4", evaluation,
-    ]) + "\n")
-    runs = []
-
-    def init(**options):
-        points = []
-        runs.append((options, points))
-        return SimpleNamespace(log=lambda data, step: points.append((step, data)), finish=lambda **kwargs: None)
-
-    fake = SimpleNamespace(init=init, Settings=lambda **kwargs: kwargs)
-    mirror(fake, tmp_path, "sft", tmp_path / "swanlog", False, None, mode="online", project="tracking")
-    (options, points), (resumed_options, resumed_points) = runs
-    assert options["mode"] == "online" and options["public"] is False
-    assert "video_cache_dir" not in options["config"]
-    assert [step for step, _ in points] == [1, 10, 10]
-    assert points[1][1]["train/progress_pct"] == 50.
-    assert points[1][1]["train/examples_per_second"] == pytest.approx(3.2)
-    assert points[2][1]["dev/joint/macro_harmonic_accuracy"] == pytest.approx(2 * .8 * .5 / 1.3)
-    assert "dev/decision/ece" not in points[2][1]
-    assert resumed_options["name"].endswith("-resume-5")
-    assert [step for step, _ in resumed_points] == [6, 10]
-    assert "train/seconds_per_step_500" not in resumed_points[0][1]
-
-
-def test_swanlab_follow_waits_for_a_complete_training_line(tmp_path, monkeypatch):
-    from scripts.multimodal import monitor_swanlab
-
-    log = tmp_path / "sft.log"
-    report = tmp_path / "report.json"
-    log.write_bytes(b"grounding step=10 loss=0.7")
-
-    def append(_seconds):
-        with log.open("ab") as stream:
-            stream.write(b"5 elapsed=200.0s ranks=4\n")
-        report.write_text('{"status":"complete"}')
-
-    monkeypatch.setattr(monitor_swanlab.time, "sleep", append)
-    assert list(monitor_swanlab.log_lines(log, True, report)) == ["grounding step=10 loss=0.75 elapsed=200.0s ranks=4"]
-
-
 def test_native_swanlab_reporter_logs_metrics_and_isolates_sdk_failure(tmp_path, monkeypatch, caplog):
     from types import SimpleNamespace
-    from laya_multimodal._swanlab import SwanLabReporter
+    from laya_multimodal.training.reporting import SwanLabReporter
 
     runs = []
 

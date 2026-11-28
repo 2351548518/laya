@@ -1,14 +1,14 @@
 name: Docs
 
-# Builds the documentation site from docs/ and publishes it to GitHub Pages.
+# Builds the documentation site from docs/ and docs_zh/ and publishes it to GitHub Pages.
 # Enable Pages before deploying: Settings -> Pages -> Source: GitHub Actions.
 
 on:
   pull_request:
-    paths: [docs/**, laya_multimodal/**, zensical.toml, requirements-docs.txt, .github/workflows/docs.yml]
+    paths: [docs/**, docs_zh/**, scripts/docs_site.py, laya_multimodal/**, zensical.toml, requirements-docs.txt, .github/workflows/docs.yml]
   push:
     branches: [main]
-    paths: [docs/**, laya_multimodal/**, zensical.toml, requirements-docs.txt, .github/workflows/docs.yml]
+    paths: [docs/**, docs_zh/**, scripts/docs_site.py, laya_multimodal/**, zensical.toml, requirements-docs.txt, .github/workflows/docs.yml]
   workflow_dispatch:
 
 permissions:
@@ -41,7 +41,7 @@ jobs:
       # --clean because a cached build skips unchanged modules and prints no warnings for them.
       - run: |
           set -o pipefail
-          zensical build --strict --clean 2>&1 | tee "$RUNNER_TEMP/docs-build.log"
+          python scripts/docs_site.py build 2>&1 | tee "$RUNNER_TEMP/docs-build.log"
           if grep '^griffe:' "$RUNNER_TEMP/docs-build.log"; then
             echo "::error::Fix the docstring warnings above; the API reference is built from them."
             exit 1

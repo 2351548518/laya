@@ -6,7 +6,7 @@ import pytest
 import torch
 
 from laya_multimodal.train import GroundingTrainConfig
-from laya_multimodal.multimodal_objectives import lora_target_pattern, optimizer_groups
+from laya_multimodal.training.objectives import lora_target_pattern, optimizer_groups
 
 
 def tiny_qwen_config():
@@ -45,9 +45,9 @@ def test_qwen_delta_adapters_receive_gradients_and_exclude_vision():
 def test_native_qwen_candidate_scores_survive_left_padding_and_unequal_options():
     Qwen3_5ForConditionalGeneration = pytest.importorskip(
         "transformers.models.qwen3_5.modeling_qwen3_5").Qwen3_5ForConditionalGeneration
-    from laya_multimodal.multimodal import MultimodalAgent
-    from laya_multimodal.multimodal_readout import CandidateScorer
-    from laya_multimodal.multimodal_train import collate_multimodal_inputs
+    from laya_multimodal.models.multimodal import MultimodalAgent
+    from laya_multimodal.models.readout import CandidateScorer
+    from laya_multimodal.data import collate_multimodal_inputs
     torch.manual_seed(106); torch.set_num_threads(1)
     agent = MultimodalAgent.__new__(MultimodalAgent)
     agent.model = Qwen3_5ForConditionalGeneration(tiny_qwen_config()).eval()
@@ -70,10 +70,11 @@ def test_merged_qwen_keeps_decision_and_box_inference_with_stale_peft_metadata()
         "transformers.models.qwen3_5.modeling_qwen3_5").Qwen3_5ForConditionalGeneration
     peft = pytest.importorskip("peft")
     LoraConfig, get_peft_model = peft.LoraConfig, peft.get_peft_model
-    from laya_multimodal.grounding import GroundingHead
-    from laya_multimodal.multimodal import MultimodalAgent, _is_adapter_model
-    from laya_multimodal.multimodal_readout import CandidateScorer
-    from laya_multimodal.multimodal_train import MultimodalTrainConfig, configure_training
+    from laya_multimodal.models.grounding import GroundingHead
+    from laya_multimodal.models.multimodal import MultimodalAgent, _is_adapter_model
+    from laya_multimodal.models.readout import CandidateScorer
+    from laya_multimodal.training.objectives import configure_training
+    from laya_multimodal.train import GroundingTrainConfig
     torch.manual_seed(108); torch.set_num_threads(1)
     model = Qwen3_5ForConditionalGeneration(tiny_qwen_config()).eval()
     model.decision_scorer = CandidateScorer(32)
@@ -92,7 +93,7 @@ def test_merged_qwen_keeps_decision_and_box_inference_with_stale_peft_metadata()
         torch.testing.assert_close(agent._logits(inputs, 2), expected, rtol=0, atol=0)
         for name, value in boxes.items():
             torch.testing.assert_close(agent._grounding_outputs(inputs)[name], value, rtol=0, atol=0)
-    trainable = configure_training(agent, MultimodalTrainConfig(mode="head"))
+    trainable = configure_training(agent, GroundingTrainConfig(mode="head"))
     expected = list(agent.model.decision_scorer.parameters())
     assert {id(p) for p in trainable} == {id(p) for p in expected}
 
@@ -100,9 +101,9 @@ def test_merged_qwen_keeps_decision_and_box_inference_with_stale_peft_metadata()
 def test_length_bucketing_preserves_global_loss_and_gradients():
     Qwen3_5ForConditionalGeneration = pytest.importorskip(
         "transformers.models.qwen3_5.modeling_qwen3_5").Qwen3_5ForConditionalGeneration
-    from laya_multimodal.agent import Agent
-    from laya_multimodal.multimodal import MultimodalAgent
-    from laya_multimodal.multimodal_readout import CandidateScorer
+    from laya_multimodal.models.base import Agent
+    from laya_multimodal.models.multimodal import MultimodalAgent
+    from laya_multimodal.models.readout import CandidateScorer
     from laya_multimodal.train import _decision_microbatches, _decision_batch_loss
     torch.manual_seed(107); torch.set_num_threads(1)
     agent=MultimodalAgent.__new__(MultimodalAgent)

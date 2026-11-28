@@ -54,20 +54,23 @@ class LayaTaskGuardError(ValueError):
 # The per-call control rules are shared with the other two integrations: they end at the same
 # `predict` call and the same laya-multimodal-serve request body, and three copies of the rule is how two of
 # them came to forward only `model`.
-from ._controls import budget_kwargs as _budget_kwargs, hook_kwargs as _hook_kwargs  # noqa: E402
-from ._controls import decision_kwargs as _decision_kwargs  # noqa: E402
-from ._controls import predict_kwargs as _predict_kwargs, reject_remote_hooks as _reject_remote_hooks  # noqa: E402
-from ._guard import answer_number as _answer_number  # noqa: E402
-from ._guard import answers_map as _answers_map  # noqa: E402
-from ._guard import malformed as _malformed  # noqa: E402
-from ._guard import score_violation_probability as _score_violation_probability  # noqa: E402
-from ..confidence import _gate_confidence  # noqa: E402
-from ._controls import reject_remote_lang_guess as _reject_remote_lang_guess  # noqa: E402
-from ._controls import require_router_controls as _require_router_controls  # noqa: E402
-from ._controls import router_kwargs as _router_kwargs  # noqa: E402
+from .shared.request_options import budget_kwargs as _budget_kwargs, hook_kwargs as _hook_kwargs  # noqa: E402
+from .shared.request_options import decision_kwargs as _decision_kwargs  # noqa: E402
+from .shared.request_options import (
+    predict_kwargs as _predict_kwargs,
+    reject_remote_hooks as _reject_remote_hooks,
+)  # noqa: E402
+from .shared.decision_responses import answer_number as _answer_number  # noqa: E402
+from .shared.decision_responses import answers_map as _answers_map  # noqa: E402
+from .shared.decision_responses import malformed as _malformed  # noqa: E402
+from .shared.decision_responses import score_violation_probability as _score_violation_probability  # noqa: E402
+from ..decisions.confidence import _gate_confidence  # noqa: E402
+from .shared.request_options import reject_remote_lang_guess as _reject_remote_lang_guess  # noqa: E402
+from .shared.request_options import require_router_controls as _require_router_controls  # noqa: E402
+from .shared.request_options import router_kwargs as _router_kwargs  # noqa: E402
 
 # One class for every integration, so `except LayaLowConfidenceError` catches all of them.
-from ._errors import LayaLowConfidenceError  # noqa: E402
+from .shared.errors import LayaLowConfidenceError  # noqa: E402
 
 
 @dataclass
@@ -238,7 +241,7 @@ def _get_default_router():
     if _DEFAULT_ROUTER is None:
         with _DEFAULT_ROUTER_LOCK:
             if _DEFAULT_ROUTER is None:
-                from ..router import Router
+                from ..decisions.routing import Router
                 _DEFAULT_ROUTER = Router()
     return _DEFAULT_ROUTER
 
@@ -264,7 +267,7 @@ def _execute_decision(
 ) -> Dict[str, Any]:
     """One decision on the local runner or a laya-multimodal-serve node, with the per-call controls kept.
 
-    Which controls either path accepts is `._controls`' rule, shared with the LangChain and
+    Which controls either path accepts is `shared.request_options`' rule, shared with the LangChain and
     LlamaIndex wrappers -- they end at the same `predict` call and the same request body.
     """
     hook_kwargs = _hook_kwargs(hooks, on_predict_start, on_predict_end, hooks_raise, hooks_timeout)
@@ -541,7 +544,7 @@ class LayaTaskGuard:
         self.last_decision: Optional[Dict[str, Any]] = None
 
     def _default_questions(self) -> Dict[str, Any]:
-        from ..presets import guard_questions
+        from ..decisions.presets import guard_questions
         return guard_questions()
 
     def screen(self, task: Union[str, CrewTask, Dict[str, Any], Any]) -> Any:

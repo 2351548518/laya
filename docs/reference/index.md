@@ -1,6 +1,6 @@
 # Python API
 
-**English** · [简体中文](../zh-CN/reference/index.md)
+**English** · [简体中文](../../docs_zh/reference/index.md)
 
 These pages describe the public local inference and training APIs.
 

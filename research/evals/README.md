@@ -9,7 +9,7 @@ Datasets, baselines and thresholds for the `laya-multimodal eval` harness and it
 - `thresholds.json`: historical tolerances for the committed
   baselines in `research/results/`.
 - `check_regression.py`: adapts a `research/eval/laya_eval.py` report into
-  `laya_multimodal.evals.EvalReport` and compares it to a committed baseline.
+  `laya_multimodal.evaluation.evaluator.EvalReport` and compares it to a committed baseline.
 
 ## Format
 

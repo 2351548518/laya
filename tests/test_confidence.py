@@ -24,7 +24,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from laya_multimodal.common import answer_confidence, confidence_from_probs, ece_score  # noqa: E402
+from laya_multimodal.decisions.calibration import answer_confidence, confidence_from_probs, ece_score  # noqa: E402
 
 PASS, FAIL = [], []
 
@@ -109,10 +109,10 @@ for probs, k in (([0.1, 0.9], 2), ([0.25] * 4, 4), ([0.7, 0.2, 0.1], 3)):
                close(confidence_from_probs(p, k), float(np.clip(1 - ent / math.log(k), 0.0, 1.0))))
 
 # The `k < 2` floor: `log(1)` and `log(0)` are zero, so the formula above has no scale there and
-# the helper hands back its maximum instead. Nothing checked that. `laya_multimodal.structured` does build a
+# the helper hands back its maximum instead. Nothing checked that. `laya_multimodal.decisions.structured` does build a
 # one-option `choice`, from `{"enum": ["solo"]}` -- only the upper bound (`MAX_OPTIONS`) is
 # enforced -- so for such a field the reported `confidence` is this constant whichever way `p`
-# points. The abstention gate is not that reader: `laya_multimodal.confidence` compares
+# points. The abstention gate is not that reader: `laya_multimodal.decisions.confidence` compares
 # `answer_confidence` first and falls back to `confidence` only when that field is absent.
 check("entropy/k=1 is the maximum, not 0/0", confidence_from_probs(np.array([1.0]), 1), 1.0)
 check("entropy/k=1 ignores the value", confidence_from_probs(np.array([0.0]), 1), 1.0)
@@ -121,7 +121,7 @@ check_true("entropy/k=1 is at or above every threshold value the validator accep
            all(confidence_from_probs(np.array([0.4]), 1) >= t for t in (0.0, 0.5, 1.0)))
 
 # --------------------------------------------------------------- min_confidence validation & abstention (#361)
-from laya_multimodal.confidence import check_min_confidence, flag_low_confidence  # noqa: E402
+from laya_multimodal.decisions.confidence import check_min_confidence, flag_low_confidence  # noqa: E402
 
 # check_min_confidence validates [0.0, 1.0] and rejects non-floats and bools
 for valid in (0.0, 0.5, 1.0, 0, 1, 0.85):
@@ -177,7 +177,7 @@ check("flag/raw choice intact", ans["q_high"]["choice"], "a")
 # the payload it always returned, rather than growing a field every existing caller would then have
 # to read. The two cases are told apart by the presence of `abstention`, which is why the vocabulary
 # has no "not configured" member to read out of the field.
-from laya_multimodal.confidence import (  # noqa: E402
+from laya_multimodal.decisions.confidence import (  # noqa: E402
     GATE_ABSTAINED,
     GATE_PASSED,
     GATE_STATES,
@@ -353,9 +353,9 @@ check_true("stale/unusable conf clears stale low_conf", "low_confidence" not in 
 
 # --------------------------------------------------------------- the operator's three questions
 # End to end through a real call site, weight-free. `decide` forwards to any runner with a
-# `predict`, so this exercises `laya_multimodal/structured.py`'s own gate call site rather than the helper
+# `predict`, so this exercises `laya_multimodal/decisions/structured.py`'s own gate call site rather than the helper
 # in isolation -- the six call sites are where the state used to be skipped entirely.
-from laya_multimodal.structured import decide  # noqa: E402
+from laya_multimodal.decisions.structured import decide  # noqa: E402
 
 _GATE_Q = {"type": "choice", "instructions": "Pick one.",
            "criteria": {"a": "alpha", "b": "beta"}}
@@ -435,7 +435,7 @@ check_true("export/GATE_STATES is in dir()", "GATE_STATES" in dir(laya_multimoda
 # The three values are reached through GATE_STATES rather than exported one by one: iterating the
 # vocabulary is the whole use, and every `laya_multimodal.__all__` name has to earn a documented entry
 # (`tests/test_packaging.py` enforces that).
-import laya_multimodal.confidence as _confidence  # noqa: E402
+import laya_multimodal.decisions.confidence as _confidence  # noqa: E402
 
 check("export/GATE_STATES is the vocabulary a caller iterates", list(GATE_STATES),
       [_confidence.GATE_PASSED, _confidence.GATE_ABSTAINED, _confidence.GATE_UNEVALUATED])

@@ -23,13 +23,13 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional, Sequence, Tuple, Union
 
 # Shared per-call control rules across integrations
-from ._controls import budget_kwargs as _budget_kwargs
-from ._controls import decision_kwargs as _decision_kwargs
-from ._controls import hook_kwargs as _hook_kwargs
-from ._controls import predict_kwargs as _predict_kwargs
-from ._controls import reject_remote_hooks as _reject_remote_hooks
-from ._errors import LayaLowConfidenceError
-from ..confidence import _gate_confidence, check_min_confidence, resolve_min_confidence
+from .shared.request_options import budget_kwargs as _budget_kwargs
+from .shared.request_options import decision_kwargs as _decision_kwargs
+from .shared.request_options import hook_kwargs as _hook_kwargs
+from .shared.request_options import predict_kwargs as _predict_kwargs
+from .shared.request_options import reject_remote_hooks as _reject_remote_hooks
+from .shared.errors import LayaLowConfidenceError
+from ..decisions.confidence import _gate_confidence, check_min_confidence, resolve_min_confidence
 
 
 def _gated_confidence(answer: Dict[str, Any]) -> Optional[float]:
@@ -196,7 +196,7 @@ def _get_default_router():
     if _DEFAULT_ROUTER is None:
         with _DEFAULT_ROUTER_LOCK:
             if _DEFAULT_ROUTER is None:
-                from ..router import Router
+                from ..decisions.routing import Router
                 _DEFAULT_ROUTER = Router()
     return _DEFAULT_ROUTER
 

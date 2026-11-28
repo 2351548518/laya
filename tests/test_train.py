@@ -6,7 +6,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from laya_multimodal.multimodal import MultimodalAgent  # noqa: E402
+from laya_multimodal.models.multimodal import MultimodalAgent  # noqa: E402
 from laya_multimodal.train import decision_target, target_from_expected, target_from_gold  # noqa: E402
 
 
@@ -22,6 +22,7 @@ class TargetTests(unittest.TestCase):
             return target_from_gold(MultimodalAgent._to_internal(question), {"probabilities": probs})
 
         self.assertEqual(target(DEPARTMENT, {"technical": 2.0, "billing": 2.0}), [0.5, 0.5, 0.0])
+        self.assertEqual(target(DEPARTMENT, {"technical": 1e308, "billing": 1e308}), [0.5, 0.5, 0.0])
         self.assertEqual(target(URGENT, {"true": 0.75, "false": 0.25}), [0.25, 0.75])
         self.assertEqual(target(LEVEL, {"1": 1.0}), [0.0, 1.0])
         self.assertEqual(target(DEPARTMENT, {}), [1 / 3] * 3)
@@ -30,7 +31,7 @@ class TargetTests(unittest.TestCase):
                                 {"screen": 1.0}), [0.0, 1.0])
         self.assertEqual(target({"type": "choice", "instructions": "which ?", "criteria": {1: "", 2: ""}},
                                 {"2": 3.0, "1": 1.0}), [0.25, 0.75])
-        for bad in ({"billing": -1.0}, {"billing": float("nan")}, {"billing": "high"}):
+        for bad in ({"billing": -1.0}, {"billing": float("nan")}, {"billing": "high"}, [0.5, 0.5]):
             with self.assertRaises(ValueError):
                 target(DEPARTMENT, bad)
 

@@ -1,6 +1,6 @@
 # Request examples by modality and answer type
 
-**English** · [简体中文](../zh-CN/project-readme/multimodal-current-io-examples.md)
+**English** · [简体中文](../../docs_zh/project-readme/multimodal-current-io-examples.md)
 
 The v6 snapshot supplies three rows for each populated modality and output-type combination,
 30 requests in all. The blocks show the request and its supervision. Example filenames stand

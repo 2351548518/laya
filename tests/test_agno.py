@@ -589,28 +589,28 @@ for _body, _label in (({"model": "laya-multilingual"}, "answers absent"),
 
 # ---------------------------------------------------------------- 6. Per-call decision controls
 #
-# The agno module must accept every control in `._controls` – a control added
+# The agno module must accept every control in `request_options` – a control added
 # there without reaching this file fails these checks. This mirrors section 5
 # of test_crewai.py and keeps the three integration modules in sync.
 import inspect
-from laya_multimodal.agent import Agent
-from laya_multimodal.integrations import _controls
+from laya_multimodal.models.base import Agent
+from laya_multimodal.integrations.shared import request_options
 from laya_multimodal.integrations import agno as agno_module
 from laya_multimodal.integrations import crewai as crewai_module
 from laya_multimodal.integrations import langchain as langchain_module
 from laya_multimodal.integrations import llamaindex as llamaindex_module
-from laya_multimodal.router import Router
+from laya_multimodal.decisions.routing import Router
 
 CONTROLS = (
-    tuple(_controls.PREDICT_CONTROLS)
-    + tuple(_controls.DECISION_CONTROLS)
-    + tuple(_controls.HOOK_CONTROLS)
+    tuple(request_options.PREDICT_CONTROLS)
+    + tuple(request_options.DECISION_CONTROLS)
+    + tuple(request_options.HOOK_CONTROLS)
 )
 
 # `task` and `lang_guess` are kept out of `CONTROLS` on purpose: the checks below assert that
 # every name in it is read by `Agent.system_one` AND `Router.predict`, and these two are read by
 # the Router alone. They still have to reach this wrapper, so the signature checks use the union.
-ROUTER_CONTROLS = tuple(_controls.ROUTER_ONLY_CONTROLS)
+ROUTER_CONTROLS = tuple(request_options.ROUTER_ONLY_CONTROLS)
 EVERY_CONTROL = CONTROLS + ROUTER_CONTROLS
 
 
@@ -620,11 +620,11 @@ def _params(fn):
 
 # The shared tuples name the arguments the shared builders accept, in both directions.
 check("controls/budget tuple names budget_kwargs",
-      set(_params(_controls.budget_kwargs)), set(_controls.PREDICT_CONTROLS))
+      set(_params(request_options.budget_kwargs)), set(request_options.PREDICT_CONTROLS))
 check("controls/decision tuple names decision_kwargs",
-      set(_params(_controls.decision_kwargs)), set(_controls.DECISION_CONTROLS))
+      set(_params(request_options.decision_kwargs)), set(request_options.DECISION_CONTROLS))
 check("controls/hook tuple names hook_kwargs",
-      set(_params(_controls.hook_kwargs)), set(_controls.HOOK_CONTROLS))
+      set(_params(request_options.hook_kwargs)), set(request_options.HOOK_CONTROLS))
 
 # Every control must be accepted by a real runner (not just our wrapper).
 _agent_params = _params(Agent.system_one)
@@ -751,18 +751,18 @@ def remote_body(controls):
 
 check("controls/remote body carries both budgets",
       {k: v for k, v in remote_body({"max_len": 1024, "head_max_len": 384}).items()
-       if k in _controls.PREDICT_CONTROLS},
+       if k in request_options.PREDICT_CONTROLS},
       {"max_len": 1024, "head_max_len": 384})
 check("controls/remote body omits unset budgets",
-      [k for k in remote_body({}) if k in _controls.PREDICT_CONTROLS], [])
+      [k for k in remote_body({}) if k in request_options.PREDICT_CONTROLS], [])
 check("controls/remote body keeps a zero",
       remote_body({"head_max_len": 0}).get("head_max_len"), 0)
 check("controls/remote body carries the decision controls",
       {k: v for k, v in remote_body({"lang": "es", "min_confidence": 0.3}).items()
-       if k in _controls.DECISION_CONTROLS},
+       if k in request_options.DECISION_CONTROLS},
       {"lang": "es", "min_confidence": 0.3})
 check("controls/remote body omits unset decision controls",
-      [k for k in remote_body({}) if k in _controls.DECISION_CONTROLS], [])
+      [k for k in remote_body({}) if k in request_options.DECISION_CONTROLS], [])
 check("controls/remote body keeps min_confidence=0.0",
       remote_body({"min_confidence": 0.0}).get("min_confidence"), 0.0)
 

@@ -1,6 +1,6 @@
 # Run inference, training and evaluation
 
-**English** · [简体中文](../zh-CN/project-readme/multimodal.md)
+**English** · [简体中文](../../docs_zh/project-readme/multimodal.md)
 
 Run these commands from the repository root. If you already have `.venv-mm`, activate it with
 `source .venv-mm/bin/activate`. Video inputs need FFmpeg and ffprobe. Install the `serve` extra
@@ -251,7 +251,7 @@ set -o pipefail
 
 ```bash
 python -m torch.distributed.run --standalone --nproc_per_node=4 \
-  --module laya_multimodal.train_cli --visual-only --require-original-base \
+  --module laya_multimodal.train --visual-only --require-original-base \
   --model "$base" --data "$data" --train-split warmup \
   --config "$recipes/head-config.json" --out "$run/head" 2>&1 | tee "$run/head.log"
 ```
@@ -268,7 +268,7 @@ Four ranks accumulate together over each global window.
 
 ```bash
 python -m torch.distributed.run --standalone --nproc_per_node=4 \
-  --module laya_multimodal.train_cli --visual-only --qwen-training-delta \
+  --module laya_multimodal.train --visual-only --qwen-training-delta \
   --model "$run/head/best" --data "$data" \
   --config "$recipes/sft-config.json" --out "$run/sft" 2>&1 | tee "$run/sft.log"
 ```
@@ -287,14 +287,23 @@ Set `active_run` to the run you want to inspect.
 
 ```bash
 active_run="$PWD/multimodal-runs/qwen4b-v6-fresh"
-rg '^grounding step=' "$active_run/sft.log" | tail -5
+rg '^(grounding|[^ ]+ TRAIN) step=' "$active_run/sft.log" | tail -5
 cat "$active_run/sft/checkpoint_latest.json"
 ```
 
+New joint training logs start with an ISO 8601 timestamp in the machine's local time, with
+an explicit UTC offset. The filter above also reads the archived v6 log.
+
+```text
+2026-11-28T13:46:08+08:00 TRAIN step=5180 loss=0.48978 elapsed=99270.1s ranks=4
+```
+
 - `step` counts completed optimizer updates. The planned denominator for this recipe is 23,438.
-  Estimate a rate across a longer interval so it includes checkpoint saves and development runs.
+  Use the difference between two `elapsed` values to estimate the rate, including checkpoint
+  saves and development runs within that interval.
 - `loss` averages the training objective for the current global window.
-- `GROUNDING DEV` reports development metrics. The SFT recipe evaluates every 500 steps.
+- `DEV` holds development metrics as JSON. `EVAL` shows the decision evaluation progress
+  for the current worker. The SFT recipe evaluates every 500 steps.
 - The optimizer snapshot interval is 250 steps, with additional saves after evaluations
   and at the final step. The recoverable step can trail the most recent log entry.
 
@@ -302,15 +311,18 @@ cat "$active_run/sft/checkpoint_latest.json"
 python - "$active_run/sft.log" <<'PY'
 import json
 from pathlib import Path
+import re
 import sys
 
-prefix = "GROUNDING DEV "
-lines = Path(sys.argv[1]).read_text().splitlines()
-line = next((line for line in reversed(lines) if line.startswith(prefix)), None)
-if line is None:
+text = Path(sys.argv[1]).read_text()
+records = re.findall(r"^(?:GROUNDING DEV|(\d{4}-\S+) DEV) (\{.*\})$", text, re.MULTILINE)
+if not records:
     print("The run has not logged a development evaluation yet.")
 else:
-    metrics = json.loads(line.removeprefix(prefix))
+    timestamp, payload = records[-1]
+    metrics = json.loads(payload)
+    if timestamp:
+        print("Time:", timestamp)
     print("Step:", metrics["step"])
     print("Decision accuracy:", metrics["decisions"]["overall"]["accuracy"])
     print("Box Acc@IoU>=0.5:", metrics["acc_iou50"])
@@ -323,13 +335,13 @@ restores the actual step, model, optimizer, order and RNG states.
 
 ```bash
 python -m torch.distributed.run --standalone --nproc_per_node=4 \
-  --module laya_multimodal.train_cli --visual-only --qwen-training-delta \
+  --module laya_multimodal.train --visual-only --qwen-training-delta \
   --model "$run/head/best" --data "$data" \
   --config "$recipes/sft-config.json" --out "$run/sft" \
   --resume "$run/sft" 2>&1 | tee -a "$run/sft.log"
 ```
 
-Look for `Resumed joint training at optimizer step ...`. Use a selected checkpoint for
+Look for the timestamped `RESUME step=...` record. Use a selected checkpoint for
 prediction or export, and a snapshot for continuation.
 [Checkpoint roles](multimodal-release.md) · [Matched dev results](multimodal-current.md#matched-development)
 
@@ -351,7 +363,7 @@ display name.
 
 ```bash
 python -m torch.distributed.run --standalone --nproc_per_node=4 \
-  --module laya_multimodal.train_cli --visual-only --qwen-training-delta \
+  --module laya_multimodal.train --visual-only --qwen-training-delta \
   --model "$run/head/best" --data "$data" \
   --config "$recipes/sft-config.json" --out "$run/sft" \
   --swanlab online --swanlab-project laya-multimodal-v6 2>&1 | tee "$run/sft.log"
@@ -366,16 +378,6 @@ continues the original step numbering.
 `--swanlab local` writes to the run's `swanlog/` directory. Open the dashboard with
 `swanlab watch "$run/sft/swanlog"`. The offline records can also be synchronized after
 network recovery. [Local dashboard](https://docs.swanlab.cn/en/api/cli-swanlab-watch.html) · [Sync](https://docs.swanlab.cn/en/api/cli-swanlab-sync.html)
-
-### Import existing training logs
-
-For a run that started before its reporter was enabled, import the log. Omit `--follow` for
-one-time import. Use the native reporter when starting a new run.
-
-```bash
-python scripts/multimodal/monitor_swanlab.py "$run" \
-  --stage sft --mode online --project laya-multimodal-v6 --follow
-```
 
 <a name="evaluate"></a>
 

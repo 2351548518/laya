@@ -1,6 +1,6 @@
 # Native media from Python and TypeScript
 
-**English** · [简体中文](zh-CN/multimodal-clients.md)
+**English** · [简体中文](../docs_zh/multimodal-clients.md)
 
 Run `laya-multimodal-serve` with a trained native checkpoint. The Python and TypeScript SDKs send file
 bytes to `POST /v1/multimodal`. Their image asset methods use `POST /v1/systemone`.

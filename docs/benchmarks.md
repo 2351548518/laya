@@ -1,6 +1,6 @@
 # Benchmark native decisions
 
-**English** · [简体中文](zh-CN/benchmarks.md)
+**English** · [简体中文](../docs_zh/benchmarks.md)
 
 Use a frozen labelled split that was held out from training, checkpoint selection and calibration.
 Compare models on identical rows, media budgets and targets. Record the checkpoint revision,

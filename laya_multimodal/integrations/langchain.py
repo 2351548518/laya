@@ -26,20 +26,20 @@ except ImportError:
     RunnableSerializable = object  # type: ignore
     RunnableConfig = Any  # type: ignore
 
-# The per-call control rules live in `._controls` because the CrewAI and LlamaIndex wrappers end
+# The per-call control rules live in `shared.request_options` because the CrewAI and LlamaIndex wrappers end
 # at the same `predict` call and the same laya-multimodal-serve body; keeping the rule in three places is how
 # two of them ended up forwarding only `model`.
-from ..confidence import _gate_confidence
-from ._controls import budget_kwargs as _budget_kwargs, hook_kwargs as _hook_kwargs
-from ._controls import decision_kwargs as _decision_kwargs
-from ._controls import predict_kwargs as _predict_kwargs
-from ._controls import reject_remote_hooks as _reject_remote_hooks
-from ._controls import reject_remote_lang_guess as _reject_remote_lang_guess
-from ._controls import require_router_controls as _require_router_controls, router_kwargs as _router_kwargs
-from ._guard import answer_number as _answer_number
-from ._guard import answers_map as _answers_map
-from ._guard import malformed as _malformed
-from ._guard import score_violation_probability as _score_violation_probability
+from ..decisions.confidence import _gate_confidence
+from .shared.request_options import budget_kwargs as _budget_kwargs, hook_kwargs as _hook_kwargs
+from .shared.request_options import decision_kwargs as _decision_kwargs
+from .shared.request_options import predict_kwargs as _predict_kwargs
+from .shared.request_options import reject_remote_hooks as _reject_remote_hooks
+from .shared.request_options import reject_remote_lang_guess as _reject_remote_lang_guess
+from .shared.request_options import require_router_controls as _require_router_controls, router_kwargs as _router_kwargs
+from .shared.decision_responses import answer_number as _answer_number
+from .shared.decision_responses import answers_map as _answers_map
+from .shared.decision_responses import malformed as _malformed
+from .shared.decision_responses import score_violation_probability as _score_violation_probability
 
 
 class LayaGuardrailError(ValueError):
@@ -249,7 +249,7 @@ def _get_default_router():
     if _DEFAULT_ROUTER is None:
         with _DEFAULT_ROUTER_LOCK:
             if _DEFAULT_ROUTER is None:
-                from ..router import Router
+                from ..decisions.routing import Router
                 _DEFAULT_ROUTER = Router()
     return _DEFAULT_ROUTER
 
@@ -748,7 +748,7 @@ class LayaGuardrail(_BatchedRunnable, RunnableSerializable):
             self.hooks_timeout = hooks_timeout
 
     def _default_questions(self) -> Dict[str, Any]:
-        from ..presets import guard_questions
+        from ..decisions.presets import guard_questions
         return guard_questions()
 
     def _questions(self) -> Dict[str, Any]:
@@ -758,7 +758,7 @@ class LayaGuardrail(_BatchedRunnable, RunnableSerializable):
         """Apply the violation scan and the configured action to one decision."""
         # A remote body is arbitrary JSON, so `answers` and each answer are checked before anything
         # is read out of them -- the same two levels and the same `noul` check `LayaTaskGuard.screen`
-        # and `LayaAgentRouter.screen` already delegate to `_guard`. `result.get("answers", {})` only
+        # and `LayaAgentRouter.screen` already delegate to `shared.decision_responses`. `result.get("answers", {})` only
         # defaults when the key is ABSENT: a body whose answer is a string (`{"jailbreak": "nope"}`)
         # raised AttributeError at `ans.get("type")`, a `noul` of `"high"` or `null` raised TypeError
         # from `>=`, and a `{"type": "noul"}` with no `noul` at all raised KeyError at `ans["noul"]`
@@ -941,7 +941,7 @@ class LayaTriage(_BatchedRunnable, RunnableSerializable):
             self.hooks_timeout = hooks_timeout
 
     def _questions(self) -> Dict[str, Any]:
-        from ..presets import triage_questions
+        from ..decisions.presets import triage_questions
 
         return triage_questions()
 
@@ -1152,7 +1152,7 @@ class LayaEvaluator(_BatchedRunnable, RunnableSerializable):
 
 def _validate_decision_schema(schema: Any) -> None:
     """Plan ``schema`` into Laya questions and keep only the errors it raises."""
-    from ..structured import questions_from_json_schema, questions_from_pydantic
+    from ..decisions.structured import questions_from_json_schema, questions_from_pydantic
 
     if hasattr(schema, "model_json_schema") or hasattr(schema, "schema"):
         questions_from_pydantic(schema)
@@ -1272,7 +1272,7 @@ class LayaDecision(RunnableSerializable):
 
     def invoke(self, input: Any, config: Optional[RunnableConfig] = None) -> Any:
         """Decide ``input`` against the schema and return its values, or a ``DecisionResult``."""
-        from ..structured import decide
+        from ..decisions.structured import decide
 
         text = _extract_text(input, self.state_key)
         hook_kwargs = _hook_kwargs(self.hooks, self.on_predict_start, self.on_predict_end,

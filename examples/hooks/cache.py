@@ -20,7 +20,7 @@ def cache_key(ctx, index):
     """One entry per question the model is actually asked, for one state of the call.
 
     Deliberately not `sort_keys=True`: a choice question's criteria order is positional, so two
-    orders are two questions, and `_question_schema` in `laya_multimodal/router.py` keeps them apart for the
+    orders are two questions, and `_question_schema` in `laya_multimodal/decisions/routing.py` keeps them apart for the
     same reason. Sorting the keys folds them into one entry, and the second caller gets the first
     caller's numbers. `ctx.model` and the token budget belong in the key for the same reason: on
     the Router one hook set serves three checkpoints, and a smaller `max_len` truncates the state.

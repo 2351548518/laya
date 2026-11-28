@@ -3,8 +3,8 @@ import json
 
 import pytest
 
-from laya_multimodal.evals import Dataset, EvalError, Example, evaluate
-from laya_multimodal.evals_tournament import TOURNAMENT_REPORT_SCHEMA, evaluate_tournament
+from laya_multimodal.evaluation.evaluator import Dataset, EvalError, Example, evaluate
+from laya_multimodal.evaluation.choice import TOURNAMENT_REPORT_SCHEMA, evaluate_tournament
 
 
 WIDE = {"intent": {"type": "choice", "instructions": "Which?",
@@ -110,7 +110,7 @@ def test_malformed_tournament_metadata_fails(monkeypatch):
         return {"answers": {"intent": {"type": "choice", "choice": "a"}},
                 "tournament": {"intent": {"labels": ["a", "a"], "n": 6, "rounds": 2}}}
 
-    monkeypatch.setattr("laya_multimodal.evals_tournament.predict_tournament", malformed)
+    monkeypatch.setattr("laya_multimodal.evaluation.choice.predict_tournament", malformed)
     with pytest.raises(EvalError, match="inconsistent tournament metadata"):
         run(Dataset([row("ok", "a")]))
 
@@ -148,7 +148,7 @@ def test_dataset_hash_and_plain_evaluate(tmp_path):
     dataset = Dataset.from_jsonl(str(path))
     report = evaluate_tournament(ChoiceAgent(), dataset, group_size=2,
                                  checkpoint_id="checkpoint@123", dataset_path=str(path))
-    from laya_multimodal.evals import file_fingerprint
+    from laya_multimodal.evaluation.evaluator import file_fingerprint
 
     assert report.config["dataset_sha256"] == file_fingerprint(str(path))
     assert report.config["questions_sha256"]

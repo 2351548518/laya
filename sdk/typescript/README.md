@@ -363,7 +363,7 @@ Integration testing uses real local PyTorch inference with a tiny random test
 checkpoint, compares answers against direct Python calls, and downloads no model
 weights. It verifies transport and runtime compatibility, not pretrained model
 accuracy. Run the repository's pretrained model tests separately when those
-weights are available. Presets are generated from `laya_multimodal/presets.py`; regenerate
+weights are available. Presets are generated from `laya_multimodal/decisions/presets.py`; regenerate
 with `python3 scripts/sync_presets.py` after editing that source.
 
 Batch tests compare the same inference batch shape against `Router.predict_batch`, in both

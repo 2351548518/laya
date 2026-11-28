@@ -1,6 +1,6 @@
 # Optional Vega reader
 
-**English** · [简体中文](zh-CN/vegaml.md)
+**English** · [简体中文](../docs_zh/vegaml.md)
 
 Install `.[vega]` to use the upstream multimodal Vega reader. Construct it explicitly when a
 workflow needs Vega's fitted heads or conformal calibration.

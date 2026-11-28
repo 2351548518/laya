@@ -21,61 +21,63 @@ import os as _os
 # (the torch-backed names are lazy, see `_LAZY_ATTRS`), so this runs first in the normal case.
 _os.environ.setdefault("USE_TF", "0")
 
-from .email import clean_email_body, email_state
-from .hooks import AsyncHook, BaseHook, Hook, OptionStabilityHook, PredictContext, PredictHook
-from .lang import analyse as detect_language
-from .lang import detect_script, is_english
-from .presets import (
+from .decisions import confidence as confidence, email as email, hooks as hooks
+from .decisions import language as lang, presets as presets, routing as router, structured as structured
+from .decisions.email import clean_email_body, email_state
+from .decisions.hooks import AsyncHook, BaseHook, Hook, OptionStabilityHook, PredictContext, PredictHook
+from .decisions.language import analyse as detect_language
+from .decisions.language import detect_script, is_english
+from .decisions.presets import (
     email_questions,
     guard_questions,
     moderation_questions,
     router_questions,
     triage_questions,
 )
-from .router import DEFAULT_MODELS, RouteDecision, Router
-from .structured import DecisionResult, decide, decide_batch
+from .decisions.routing import DEFAULT_MODELS, RouteDecision, Router
+from .decisions.structured import DecisionResult, decide, decide_batch
 
 __version__ = "0.5.3"
 
 # Routing, language detection and email cleaning are pure Python. The torch-backed names are
 # resolved lazily so that `import laya_multimodal` -- and therefore `from laya_multimodal import Router` or
-# `from laya_multimodal.lang import detect_script` -- does not pay torch's import time and memory.
+# `from laya_multimodal.decisions.language import detect_script` -- does not pay torch's import time and memory.
 _LAZY_ATTRS = {
     # stdlib-only module, but keep it lazy so `import laya_multimodal` does not pull in hashlib
-    "PINNED_REVISIONS": (".revisions", "PINNED_REVISIONS"),
-    "Agent": (".multimodal", "MultimodalAgent"),
-    "VegaAgent": (".vega", "VegaAgent"),       # vegaml's engine behind laya's surface
-    "MultimodalAgent": (".multimodal", "MultimodalAgent"),
-    "Learner": (".learn", "Learner"),           # vegaml's continuous learner
-    "Escalator": (".learn", "Escalator"),       # and its teacher for what it is unsure of
-    "vllm_teacher": (".learn", "vllm_teacher"), # a teacher served on your own machines
-    "load": (".agent", "load"),
-    "fit_temperatures": (".calibrate", "fit_temperatures"),
-    "fit_one_temperature": (".calibrate", "fit_one_temperature"),
-    "fit_temperature_map": (".calibrate", "fit_temperature_map"),
-    "fit_abstention_thresholds": (".calibrate", "fit_abstention_thresholds"),
-    "fit_binning_map": (".calibrate", "fit_binning_map"),
-    "apply_binning_map": (".calibrate", "apply_binning_map"),
-    "proper_reward": (".common", "proper_reward"),
-    "td_lambda_targets": (".common", "td_lambda_targets"),
-    "ece_score": (".common", "ece_score"),
-    "answer_confidence": (".common", "answer_confidence"),
-    "confidence_from_probs": (".common", "confidence_from_probs"),
-    "check_min_confidence": (".confidence", "check_min_confidence"),
-    "check_min_confidence_map": (".confidence", "check_min_confidence_map"),
-    "resolve_min_confidence": (".confidence", "resolve_min_confidence"),
-    "flag_low_confidence": (".confidence", "flag_low_confidence"),
-    "apply_confidence_gate": (".confidence", "apply_confidence_gate"),
-    "GATE_STATES": (".confidence", "GATE_STATES"),
-    "jev_confidence": (".confidence", "jev_confidence"),
-    "render_options": (".common", "render_options"),
-    "QTYPES": (".common", "QTYPES"),
-    "QTYPE_NAMES": (".common", "QTYPE_NAMES"),
-    "shortlist_choice": (".shortlist", "shortlist_choice"),
-    "predict_shortlist": (".shortlist", "predict_shortlist"),
-    "predict_tournament": (".shortlist", "predict_tournament"),
-    "embed_fn_from_agent": (".shortlist", "embed_fn_from_agent"),
-    "cached_embed_fn": (".shortlist", "cached_embed_fn"),
+    "PINNED_REVISIONS": (".models.revisions", "PINNED_REVISIONS"),
+    "Agent": (".models.multimodal", "MultimodalAgent"),
+    "VegaAgent": (".models.vega", "VegaAgent"),       # vegaml's engine behind laya's surface
+    "MultimodalAgent": (".models.multimodal", "MultimodalAgent"),
+    "Learner": (".models.vega_learning", "Learner"),           # vegaml's continuous learner
+    "Escalator": (".models.vega_learning", "Escalator"),       # and its teacher for what it is unsure of
+    "vllm_teacher": (".models.vega_learning", "vllm_teacher"), # a teacher served on your own machines
+    "load": (".models.base", "load"),
+    "fit_temperatures": (".decisions.calibration", "fit_temperatures"),
+    "fit_one_temperature": (".decisions.calibration", "fit_one_temperature"),
+    "fit_temperature_map": (".decisions.calibration", "fit_temperature_map"),
+    "fit_abstention_thresholds": (".decisions.calibration", "fit_abstention_thresholds"),
+    "fit_binning_map": (".decisions.calibration", "fit_binning_map"),
+    "apply_binning_map": (".decisions.calibration", "apply_binning_map"),
+    "proper_reward": (".training.objectives", "proper_reward"),
+    "td_lambda_targets": (".training.objectives", "td_lambda_targets"),
+    "ece_score": (".decisions.calibration", "ece_score"),
+    "answer_confidence": (".decisions.calibration", "answer_confidence"),
+    "confidence_from_probs": (".decisions.calibration", "confidence_from_probs"),
+    "check_min_confidence": (".decisions.confidence", "check_min_confidence"),
+    "check_min_confidence_map": (".decisions.confidence", "check_min_confidence_map"),
+    "resolve_min_confidence": (".decisions.confidence", "resolve_min_confidence"),
+    "flag_low_confidence": (".decisions.confidence", "flag_low_confidence"),
+    "apply_confidence_gate": (".decisions.confidence", "apply_confidence_gate"),
+    "GATE_STATES": (".decisions.confidence", "GATE_STATES"),
+    "jev_confidence": (".decisions.confidence", "jev_confidence"),
+    "render_options": (".decisions.questions", "render_options"),
+    "QTYPES": (".decisions.questions", "QTYPES"),
+    "QTYPE_NAMES": (".decisions.questions", "QTYPE_NAMES"),
+    "shortlist_choice": (".decisions.shortlist", "shortlist_choice"),
+    "predict_shortlist": (".decisions.shortlist", "predict_shortlist"),
+    "predict_tournament": (".decisions.shortlist", "predict_tournament"),
+    "embed_fn_from_agent": (".decisions.shortlist", "embed_fn_from_agent"),
+    "cached_embed_fn": (".decisions.shortlist", "cached_embed_fn"),
     "LayaRouter": (".integrations", "LayaRouter"),
     "LayaGuardrail": (".integrations", "LayaGuardrail"),
     "LayaGuardrailError": (".integrations", "LayaGuardrailError"),

@@ -67,14 +67,16 @@ if [ "$SKIP_VERIFY" -eq 0 ]; then
   done
 fi
 if [ "$SKIP_MODELS" -eq 0 ]; then
-  "$VENV/bin/python" - "$DIR/models/jev-multimodal-qwen3.5-4b" <<'PY'
+  "$VENV/bin/python" - "$DIR/models" <<'PY'
+from pathlib import Path
 import sys
 from huggingface_hub import snapshot_download
+from laya_multimodal.models.revisions import DEFAULT_CHECKPOINT, PINNED_REVISIONS
 
 snapshot_download(
-  "ZeeoRe/jev-multimodal-qwen3.5-4b",
-  revision="5ea706ae049932f34aa78cb26e119939eb145cc3",
-  local_dir=sys.argv[1],
+  DEFAULT_CHECKPOINT,
+  revision=PINNED_REVISIONS[DEFAULT_CHECKPOINT],
+  local_dir=Path(sys.argv[1]) / DEFAULT_CHECKPOINT.rsplit("/", 1)[-1],
   allow_patterns=["multimodal_config.json", "backbone_config/*", "processor/*", "*.safetensors"],
 )
 PY

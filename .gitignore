@@ -38,6 +38,7 @@ node_modules/
 
 # Local setup artifacts and download caches
 models/
+!/laya_multimodal/models/
 .hf-cache/
 .pip-cache/
 
@@ -81,6 +82,7 @@ credentials.json
 
 # Documentation site build output (zensical build)
 site/
+/.zensical-docs-*.toml
 
 # local fitted heads from the text routing examples
 fit-routing/

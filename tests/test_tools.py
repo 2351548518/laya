@@ -13,14 +13,13 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import laya_multimodal
-from laya_multimodal.integrations._controls import (
+from laya_multimodal.integrations import LayaLowConfidenceError, LayaToolSelector
+from laya_multimodal.integrations.shared.request_options import (
     DECISION_CONTROLS,
     HOOK_CONTROLS,
     PREDICT_CONTROLS,
 )
 from laya_multimodal.integrations.tools import (
-    LayaLowConfidenceError,
-    LayaToolSelector,
     _extract_tool_metadata,
     _format_tools_criteria,
 )

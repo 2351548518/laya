@@ -33,7 +33,7 @@ def main():
 
     import laya_multimodal
     import torch
-    from laya_multimodal.revisions import default_checkpoint
+    from laya_multimodal.models.revisions import default_checkpoint
 
     source = args.model or default_checkpoint()
     started = time.perf_counter()

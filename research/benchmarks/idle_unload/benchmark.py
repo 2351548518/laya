@@ -37,7 +37,7 @@ def memory():
 
 
 def make_router(checkpoint):
-    from laya_multimodal.router import Router
+    from laya_multimodal.decisions.routing import Router
     router = Router(multimodal=checkpoint, device="mps")
     router.preload(["multimodal"])
     return router

@@ -26,7 +26,7 @@ COPY laya_multimodal/ ./laya_multimodal/
 # the same image can run a one-shot request or serve the Jev-compatible API.
 RUN pip install ".[serve,multimodal]" "torch==${TORCH_VERSION}" \
     && python /opt/check_torch.py "${TORCH_INDEX}" \
-    && python -c 'import laya_multimodal.multimodal, torchvision' \
+    && python -c 'import laya_multimodal.models.multimodal, torchvision' \
     && pip check
 
 FROM ${PYTHON_IMAGE} AS runtime

@@ -40,7 +40,7 @@ media preprocessing or decision decoding.
 ## Documentation
 
 Describe the command or API the reader should call and the checkpoint it needs. English pages
-live under `docs/`, with corresponding Simplified Chinese pages under `docs/zh-CN/`.
+live under `docs/`, with corresponding Simplified Chinese pages under `docs_zh/`.
 Update both versions when an example, interface or metric changes. Keep shared v6 images,
 configuration and sample indexes in `docs/project-readme/assets/`.
 
@@ -48,7 +48,7 @@ Build and check the documentation before submitting changes.
 
 ```bash
 python -m pip install -r requirements-docs.txt
-zensical build --strict --clean
+python scripts/docs_site.py build
 python tests/test_packaging.py
 ```
 

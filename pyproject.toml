@@ -12,7 +12,7 @@ license = { text = "Apache-2.0" }
 authors = [
     { name = "Convai Innovations" }
 ]
-keywords = ["decision-model", "rlcd", "calibration", "system-one", "routing", "guardrails", "moderation", "triage"]
+keywords = ["decision-model", "calibration", "system-one", "routing", "guardrails", "moderation", "triage"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -29,13 +29,22 @@ dependencies = [
     "safetensors>=0.4.0",
     "huggingface_hub>=0.20.0",
     "numpy>=1.20.0",
-    # Verifies the Ed25519 signature on policies exported from Embedding Studio (laya_multimodal/policy.py).
+    # Verifies the Ed25519 signature on policies exported from Embedding Studio (laya_multimodal/decisions/policy.py).
     "cryptography>=41",
 ]
 
 [tool.setuptools]
 # assets/, research/ and notebooks/ sit in the root, so auto-discovery bails out.
-packages = ["laya_multimodal", "laya_multimodal.mcp", "laya_multimodal.integrations"]
+packages = [
+    "laya_multimodal",
+    "laya_multimodal.decisions",
+    "laya_multimodal.evaluation",
+    "laya_multimodal.integrations",
+    "laya_multimodal.integrations.shared",
+    "laya_multimodal.mcp",
+    "laya_multimodal.models",
+    "laya_multimodal.training",
+]
 
 [project.optional-dependencies]
 # Native media encoders, compact typed decisions, and local training.
@@ -55,7 +64,7 @@ serve = [
 # `pip install laya-multimodal[mcp]` adds the MCP stdio server (laya_multimodal.mcp / the laya-multimodal-mcp-server CLI).
 mcp = ["mcp>=2.2.0"]
 
-# `pip install laya-multimodal[structured]` adds pydantic for the typed-model helpers (laya_multimodal/structured.py).
+# `pip install laya-multimodal[structured]` adds pydantic for the typed-model helpers (laya_multimodal/decisions/structured.py).
 structured = ["pydantic>=2.0.0"]
 
 # Optional local Vega reader with its upstream dependencies.
@@ -90,7 +99,6 @@ agno = [
 laya-multimodal = "laya_multimodal.cli:main"
 laya-multimodal-serve = "laya_multimodal.serve:main"
 laya-multimodal-mcp-server = "laya_multimodal.mcp.server:main"
-laya-multimodal-train-decisions = "laya_multimodal.multimodal_train:main"
 
 [project.urls]
 Homepage = "https://github.com/2351548518/laya"

@@ -61,4 +61,4 @@ server's model memory. The idle allocation reduction and answer parity reproduce
 `validation.json` records two complete runs of the shared CI/release suite list, the required lint
 and compile gates, and strict documentation builds with no `griffe:` diagnostics. Run the same
 checks with `python scripts/test_suites.py`, the commands in `AGENTS.md`, and
-`zensical build --strict --clean`.
+`python scripts/docs_site.py build`.

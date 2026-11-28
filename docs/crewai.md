@@ -1,6 +1,6 @@
 # CrewAI Integration
 
-**English** · [简体中文](zh-CN/crewai.md)
+**English** · [简体中文](../docs_zh/crewai.md)
 
 Use locally hosted native decisions with CrewAI crews.
 

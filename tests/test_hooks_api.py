@@ -14,6 +14,7 @@ import contextlib
 import dataclasses
 import functools
 import hashlib
+from importlib.util import find_spec
 import inspect
 import io
 import json
@@ -26,9 +27,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import laya_multimodal  # noqa: E402
 from laya_multimodal import Agent, AsyncHook, BaseHook, OptionStabilityHook, PredictContext, PredictHook, Router, load  # noqa: E402
-from laya_multimodal.hooks import HOOK_EVENTS, Hook, calibrate_reliability, decide_reliability  # noqa: E402
-from laya_multimodal.router import _question_schema  # noqa: E402
-from laya_multimodal.vega import VegaAgent  # noqa: E402
+from laya_multimodal.decisions.hooks import HOOK_EVENTS, Hook, calibrate_reliability, decide_reliability  # noqa: E402
+from laya_multimodal.decisions.routing import _question_schema  # noqa: E402
+from laya_multimodal.models.vega import VegaAgent  # noqa: E402
 
 PASS, FAIL = [], []
 
@@ -74,7 +75,7 @@ HOOK_KEYS = {
 # --------------------------------------------------------------- constructors
 check("public API is exported from the native package", laya_multimodal.__name__, "laya_multimodal")
 check("public hook context is defined in the native package",
-      PredictContext.__module__, "laya_multimodal.hooks")
+      PredictContext.__module__, "laya_multimodal.decisions.hooks")
 check("HTTP SDK stays outside core exports", "LayaClient" in laya_multimodal.__all__, False)
 check("HTTP batch response stays outside core exports", "BatchPrediction" in laya_multimodal.__all__, False)
 # TS HTTP batch declarations live in sdk/typescript; its public consumer tests pin their shape.
@@ -92,8 +93,8 @@ check_param("Router.__init__", Router.__init__, "default", "multimodal")
 check_param("Router.__init__", Router.__init__, "multimodal", None)
 check_param("load", load, "model_id_or_path", None)
 from laya_multimodal.cli import build_parser  # noqa: E402
-from laya_multimodal.multimodal import MultimodalAgent, MULTIMODAL_MODELS  # noqa: E402
-from laya_multimodal.revisions import DEFAULT_CHECKPOINT  # noqa: E402
+from laya_multimodal.models.multimodal import MultimodalAgent, MULTIMODAL_MODELS  # noqa: E402
+from laya_multimodal.models.revisions import DEFAULT_CHECKPOINT  # noqa: E402
 check("CLI native checkpoint selector", build_parser().parse_args(["--multimodal", "native"]).multimodal, "native")
 check_true("Agent is the native public runtime", Agent is MultimodalAgent)
 check("Router publishes the native checkpoint", laya_multimodal.DEFAULT_MODELS, {"multimodal": DEFAULT_CHECKPOINT})
@@ -104,29 +105,19 @@ except ValueError:
     check_true("the old model alias is rejected", True)
 else:
     check_true("the old model alias is rejected", False)
-with patch("laya_multimodal.multimodal.MultimodalAgent") as load_native:
+with patch("laya_multimodal.models.multimodal.MultimodalAgent") as load_native:
     check("load forwards native hooks and device", load("checkpoint", device="cpu", hooks=[]), load_native.return_value)
     check("native load arguments", load_native.call_args.args, ("checkpoint",))
     check("native load options", load_native.call_args.kwargs, {"device": "cpu", "hooks": []})
 check("Qwen3.5 4B alias", MULTIMODAL_MODELS["qwen3.5-4b"], "Qwen/Qwen3.5-4B")
 check("Qwen3.5 9B alias", MULTIMODAL_MODELS["qwen3.5-9b"], "Qwen/Qwen3.5-9B")
-from laya_multimodal.multimodal_train import MultimodalTrainConfig, finetune_multimodal  # noqa: E402
-from laya_multimodal.multimodal_train import calibrate_multimodal, metrics as multimodal_metrics  # noqa: E402
+from laya_multimodal.models.modality_calibration import calibrate_multimodal  # noqa: E402
+from laya_multimodal.evaluation.native_metrics import collect_records, metrics as multimodal_metrics  # noqa: E402
 check_param("calibrate_multimodal", calibrate_multimodal, "ordinal_channels", False, inspect.Parameter.KEYWORD_ONLY)
 check_param("multimodal metrics", multimodal_metrics, "ordinal_calibration", None)
+check_param("multimodal evaluation", collect_records, "max_micro_tokens", None, inspect.Parameter.KEYWORD_ONLY)
 check_true("multimodal runtime preserves Agent decision helpers", issubclass(MultimodalAgent, Agent))
 check_param("MultimodalAgent.save", MultimodalAgent.save, "mode", None)
-check_param("finetune_multimodal", finetune_multimodal, "selection_data", None)
-check_param("finetune_multimodal", finetune_multimodal, "reference_data", None)
-check_param("MultimodalTrainConfig", MultimodalTrainConfig, "global_batch_size", None)
-check_param("MultimodalTrainConfig", MultimodalTrainConfig, "order_micro_batch", None)
-check_param("MultimodalTrainConfig", MultimodalTrainConfig, "resume_from", None)
-check_param("MultimodalTrainConfig", MultimodalTrainConfig, "resume_optimizer", True)
-check_param("MultimodalTrainConfig", MultimodalTrainConfig, "schedule_steps", None)
-check_param("MultimodalTrainConfig", MultimodalTrainConfig, "lora_targets", "qv")
-check_param("MultimodalTrainConfig", MultimodalTrainConfig, "reference_gold_agree", False)
-check_param("MultimodalTrainConfig", MultimodalTrainConfig, "readout", None)
-check_param("MultimodalTrainConfig", MultimodalTrainConfig, "prompt_version", None)
 check_param("MultimodalAgent.__init__", MultimodalAgent.__init__, "readout", None)
 check_param("MultimodalAgent.__init__", MultimodalAgent.__init__, "prompt_version", None)
 check_param("MultimodalAgent.__init__", MultimodalAgent.__init__, "grounding_slots", None)
@@ -134,19 +125,21 @@ check_param("MultimodalAgent.detect", MultimodalAgent.detect, "labels", None)
 check_param("MultimodalAgent.detect", MultimodalAgent.detect, "threshold", .5)
 MultimodalAgent._check_question("locate", {"type": "box", "instructions": "the red mug"})
 check_true("multimodal Box preserves official no-criteria schema", True)
-from laya_multimodal.vega import _fold as fold_vega_answer  # noqa: E402
+from laya_multimodal.models.vega import _fold as fold_vega_answer  # noqa: E402
 vega_choice = fold_vega_answer({"choice": "1", "probs": {"1": .9, "other": .1}, "prediction_set": ["1"]},
                                {"type": "choice", "criteria": {1: "first", "other": "other"}})
 check("Vega choice preserves caller label types", vega_choice["choice"], 1)
 check("Vega probabilities preserve caller label types", vega_choice["probabilities"], {1: .9, "other": .1})
 check("Vega prediction set preserves caller label types", vega_choice["prediction_set"], [1])
-from laya_multimodal.train import GroundingTrainConfig, finetune_grounding  # noqa: E402
-from laya_multimodal.grounding import grounding_loss  # noqa: E402
-from laya_multimodal.grounding import GroundingHead  # noqa: E402
+from laya_multimodal.train import GroundingTrainConfig, finetune_grounding, main as train_main  # noqa: E402
+from laya_multimodal.models.grounding import grounding_loss  # noqa: E402
+from laya_multimodal.models.grounding import GroundingHead  # noqa: E402
 check_param("GroundingHead", GroundingHead, "slots", 1)
 check_param("GroundingHead", GroundingHead, "architecture", None)
 check_param("grounding_loss", grounding_loss, "quality_matched_only", False)
+check_param("grounding_loss", grounding_loss, "collect_components", True, inspect.Parameter.KEYWORD_ONLY)
 check_param("GroundingTrainConfig", GroundingTrainConfig, "mode", "head")
+check_param("GroundingTrainConfig", GroundingTrainConfig, "global_batch_size", 32)
 check_param("GroundingTrainConfig", GroundingTrainConfig, "slots", 1)
 check_param("GroundingTrainConfig", GroundingTrainConfig, "micro_batch", 4)
 check_param("GroundingTrainConfig", GroundingTrainConfig, "max_micro_tokens", 4096)
@@ -180,8 +173,16 @@ check_param("finetune_grounding", finetune_grounding, "decision_dev_data", None)
 check_param("finetune_grounding", finetune_grounding, "row_validator", None)
 check_param("finetune_grounding", finetune_grounding, "resume_from", None)
 check_param("finetune_grounding", finetune_grounding, "reporter", None)
-from laya_multimodal.multimodal_train import load_rows as load_multimodal_rows  # noqa: E402
+check_param("train.main", train_main, "argv", None)
+check("training main is defined in the joint trainer", train_main.__module__, "laya_multimodal.train")
+check("the decision-only trainer is retired", find_spec("laya_multimodal.multimodal_train"), None)
+check("the joint trainer owns CLI parsing", find_spec("laya_multimodal.train_cli"), None)
+from laya_multimodal.data import load_rows as load_multimodal_rows  # noqa: E402
 check_param("multimodal data loader", load_multimodal_rows, "path", inspect.Parameter.empty)
+from laya_multimodal.training.objectives import decision_loss  # noqa: E402
+check_param("joint decision loss", decision_loss, "kl_weight", 0.0, inspect.Parameter.KEYWORD_ONLY)
+check_param("joint decision loss", decision_loss, "reference_mask", None, inspect.Parameter.KEYWORD_ONLY)
+check_param("joint decision loss", decision_loss, "collect_components", True, inspect.Parameter.KEYWORD_ONLY)
 for _media in ("image", "audio", "video", "sampling_rate"):
     check_param("MultimodalAgent.predict", MultimodalAgent.predict, _media, None)
 
@@ -352,14 +353,15 @@ check_param("predict_tournament", laya_multimodal.predict_tournament, "predict_k
             inspect.Parameter.VAR_KEYWORD)
 
 # Detection diagnostics are opt-in and do not replace existing analysis fields.
-from laya_multimodal.lang import analyse, latin_profile  # noqa: E402
+from laya_multimodal.decisions.language import analyse, latin_profile  # noqa: E402
 
 for label, fn in (("analyse", analyse), ("Router.route", Router.route),
                   ("Router.route_batch", Router.route_batch)):
     check_param(label, fn, "explain", False, inspect.Parameter.KEYWORD_ONLY)
 check("latin_profile keeps its signature", list(sig(latin_profile)), ["text"])
 
-from laya_multimodal.mcp.tools import laya_route, laya_route_batch  # noqa: E402
+from laya_multimodal.mcp.tools import laya_route, laya_route_batch, laya_status  # noqa: E402
+check_param("laya_status", laya_status, "preload", True, inspect.Parameter.KEYWORD_ONLY)
 
 check_param("laya_route", laya_route, "explain", False, inspect.Parameter.KEYWORD_ONLY)
 check_param("laya_route_batch", laya_route_batch, "explain", False, inspect.Parameter.KEYWORD_ONLY)
@@ -442,12 +444,12 @@ check_true("PredictHook is callable-typed", callable(PredictHook))
 for name in ("PredictContext", "PredictHook", "Hook", "BaseHook", "AsyncHook"):
     check_true("__all__/%s" % name, name in laya_multimodal.__all__)
     check_true("laya.%s exists" % name, hasattr(laya_multimodal, name))
-check_true("laya_multimodal.hooks/run_coroutine_sync exists",
-           callable(getattr(__import__("laya_multimodal.hooks", fromlist=["run_coroutine_sync"]),
+check_true("laya_multimodal.decisions.hooks/run_coroutine_sync exists",
+           callable(getattr(__import__("laya_multimodal.decisions.hooks", fromlist=["run_coroutine_sync"]),
                             "run_coroutine_sync", None)))
 # Lazily exported, so `hasattr` is what proves `__getattr__` resolves it and not just that the
 # name sits in `__all__`. It must stay reachable as `laya_multimodal.PINNED_REVISIONS` for the checkpoint
-# integrity guide; `laya_multimodal.revisions` is not the documented path.
+# integrity guide; `laya_multimodal.models.revisions` is not the documented path.
 check_true("__all__/PINNED_REVISIONS", "PINNED_REVISIONS" in laya_multimodal.__all__)
 check_true("laya_multimodal.PINNED_REVISIONS exists", hasattr(laya_multimodal, "PINNED_REVISIONS"))
 
@@ -462,13 +464,13 @@ for _confidence_name in ("answer_confidence", "confidence_from_probs", "jev_conf
 for event in HOOK_EVENTS:
     check_true("BaseHook/%s callable" % event, callable(getattr(BaseHook, event, None)))
 
-# process-wide default registry lives in laya_multimodal.hooks (not the top level)
+# process-wide default registry lives in laya_multimodal.decisions.hooks (not the top level)
 for helper in ("default_hooks", "set_default_hooks", "add_default_hook", "clear_default_hooks",
                "compose_hooks", "validate_timeout"):
-    check_true("laya_multimodal.hooks/%s exists" % helper, callable(getattr(__import__("laya_multimodal.hooks", fromlist=[helper]), helper, None)))
+    check_true("laya_multimodal.decisions.hooks/%s exists" % helper, callable(getattr(__import__("laya_multimodal.decisions.hooks", fromlist=[helper]), helper, None)))
 check_true("defaults/not exported at top level", not hasattr(laya_multimodal, "set_default_hooks"))
 
-from laya_multimodal.hooks import validate_timeout  # noqa: E402
+from laya_multimodal.decisions.hooks import validate_timeout  # noqa: E402
 
 check("validate_timeout/None", validate_timeout(None), None)
 check("validate_timeout/positive float", validate_timeout(1.5), 1.5)
@@ -873,8 +875,8 @@ check("examples/hooks/cache.py/the batch answers in the caller's order",
 # ------------------------------------------- taught hook bodies cover every decision of a call
 #
 # A hook fires once per call, and one call can carry many states: `Agent.predict_batch` hands the
-# hook every state at once, with `ctx.results` aligned to `ctx.states` by index (`laya_multimodal/agent.py`),
-# while `ctx.usage` and `ctx.elapsed_ms` are totals for the whole call (`laya_multimodal/hooks.py`). So a
+# hook every state at once, with `ctx.results` aligned to `ctx.states` by index (`laya_multimodal/models/base.py`),
+# while `ctx.usage` and `ctx.elapsed_ms` are totals for the whole call (`laya_multimodal/decisions/hooks.py`). So a
 # taught body that reads only index 0 audits, guards, gates or flags one decision out of N.
 # Each body below is exec'd out of the file that teaches it -- no model, no weights -- so a copy
 # that drifts back to `[0]` fails here instead of in someone's production audit trail.
@@ -1067,7 +1069,7 @@ class ChildCaller(Enricher):
 
     Mirrors `Agent.predict` exactly: `state` and `questions` positional, `on_predict_start`
     fired before the return with a fresh child `PredictContext`, and NO `run_id` in the
-    payload (that field lives on `PredictContext`, `laya_multimodal/hooks.py:35`, and no predict path
+    payload (that field lives on `PredictContext`, `laya_multimodal/decisions/hooks.py:35`, and no predict path
     writes it into the response dict).
     """
 
@@ -1161,7 +1163,7 @@ check("HTTP route refuses prediction-only controls and operator hook policy",
 
 # The opt-in shortlist evaluator is a public Python entry point. Pin its required
 # provenance arguments without adding an eager import to the package root.
-from laya_multimodal.evals_shortlist import evaluate_shortlist  # noqa: E402
+from laya_multimodal.evaluation.choice import evaluate_shortlist  # noqa: E402
 
 check_param("evaluate_shortlist", evaluate_shortlist, "k", 20)
 check_param("evaluate_shortlist", evaluate_shortlist, "dataset_path", None)
@@ -1171,14 +1173,14 @@ for param in ("checkpoint_id", "embedder_id"):
 # "a chain step and a raw HTTP client get the same answer" has to hold of them too. If serve dropped
 # one from `BODY_CONTROLS`, a wrapper sending it would get a 422 its caller cannot fix from the
 # integrations -- this says so at the shared declaration instead of at a request.
-from laya_multimodal.integrations._controls import ROUTER_ONLY_CONTROLS as _router_only  # noqa: E402
+from laya_multimodal.integrations.shared.request_options import ROUTER_ONLY_CONTROLS as _router_only  # noqa: E402
 
 check("serve accepts every routing hint an integration sends",
       [key for key in _router_only if key not in _http_controls], [])
 check("routing hints are not among serve's refusals",
       sorted(set(_router_only) & set(_http_refusals)), [])
 
-from laya_multimodal.evals_tournament import evaluate_tournament  # noqa: E402
+from laya_multimodal.evaluation.choice import evaluate_tournament  # noqa: E402
 
 check_param("evaluate_tournament", evaluate_tournament, "group_size", 16)
 check_param("evaluate_tournament", evaluate_tournament, "dataset_path", None)
@@ -1188,7 +1190,7 @@ check_param("evaluate_tournament", evaluate_tournament, "checkpoint_id", inspect
 # docs/hooks/examples.md ## Composition teaches one scope ordering contract; the pre-fix wording
 # ("Installed hooks first, then convenience callables") named only two tiers and put installed at
 # the head, which compose_hooks contradicts.
-from laya_multimodal import hooks as _examples_hooks_mod  # noqa: E402
+from laya_multimodal.decisions import hooks as _examples_hooks_mod  # noqa: E402
 
 _examples_md = os.path.join(os.path.dirname(os.path.dirname(__file__)),
                             "docs", "hooks", "examples.md")
@@ -1291,8 +1293,8 @@ _missing_timeout = [s.splitlines()[0].split("(")[0].strip()
 check("docs/hooks/api.md every block that names hooks_raise also names hooks_timeout",
       _missing_timeout, [])
 
-from laya_multimodal.router import Router as _ApiRouter  # noqa: E402
-from laya_multimodal.agent import Agent as _ApiAgent  # noqa: E402
+from laya_multimodal.decisions.routing import Router as _ApiRouter  # noqa: E402
+from laya_multimodal.models.base import Agent as _ApiAgent  # noqa: E402
 
 for _label, _obj in [
     ("Agent.__init__", _ApiAgent.__init__),
@@ -1308,7 +1310,7 @@ for _label, _obj in [
 # --------------------------------------------- docs/hooks/tracing.md nested-calls example
 # reads the child's `run_id`. `Agent.predict` returns `model`/`answers`/`usage` and `Router.predict`
 # adds `routing` -- no path returns a `run_id`, which is a `PredictContext` field
-# (laya_multimodal/hooks.py:35). The pre-fix example's `child.get("run_id")` silently recorded `None`, so a
+# (laya_multimodal/decisions/hooks.py:35). The pre-fix example's `child.get("run_id")` silently recorded `None`, so a
 # reader copying it linked every child span to no run at all.
 _tracing_md = os.path.join(REPO, "docs", "hooks", "tracing.md")
 with open(_tracing_md, encoding="utf-8") as _tf:
@@ -1323,7 +1325,7 @@ check_true("docs/hooks/tracing.md nested-call example passes a per-call on_predi
 
 # Code truth: no laya predict path ever writes `"run_id":` as a payload key, so the ban cannot be
 # re-falsified by adding the key at a later refactor.
-for _src_rel in ("laya_multimodal/multimodal.py", "laya_multimodal/router.py", "laya_multimodal/serve.py"):
+for _src_rel in ("laya_multimodal/models/multimodal.py", "laya_multimodal/decisions/routing.py", "laya_multimodal/serve.py"):
     with open(os.path.join(REPO, _src_rel), encoding="utf-8") as _sf:
         _src_text = _sf.read()
     check('%s never writes "run_id" as a payload key' % _src_rel,
@@ -1357,7 +1359,7 @@ for _setting, _marker in (
         check_true(_label + " accepts " + _setting, _setting in inspect.signature(_method).parameters)
 
 # --------------------------------------- docs/hooks/lifecycle.md three-tier composition
-# laya_multimodal/hooks.py::compose_hooks returns `defaults + installed + per-call`, so every lifecycle
+# laya_multimodal/decisions/hooks.py::compose_hooks returns `defaults + installed + per-call`, so every lifecycle
 # diagram and the ordering rules must name all three tiers with defaults first. Pre-fix, the
 # Agent.predict_batch diagram said `installed hooks + per-call hooks (installed first)`, the
 # Router.predict diagram said the same without the parenthetical, the Router.predict_batch
@@ -1411,7 +1413,7 @@ check_true("docs/hooks/lifecycle.md example block includes a defaults row",
 # AST-side truth: compose_hooks's return must be exactly `defaults + list(installed) +
 # normalise_hooks(...)`. If a future change reorders the concat, the doc gate above would still
 # pass on stale wording, so bind the doc to the code with this second check.
-from laya_multimodal import hooks as _hooks_mod  # noqa: E402
+from laya_multimodal.decisions import hooks as _hooks_mod  # noqa: E402
 
 _compose_src = inspect.getsource(_hooks_mod.compose_hooks)
 _compose_tree = ast.parse(_compose_src.strip(), "<compose_hooks>")
@@ -1497,14 +1499,14 @@ check_true("Router.route_batch accepts routing hooks only",
 
 # --------------------------------------------------------------- patterns.md composition order
 # `docs/hooks/patterns.md`'s Composition paragraph told the reader "installed hooks run first,
-# in order". Two things are wrong with that: `laya_multimodal/hooks.py::compose_hooks` returns
+# in order". Two things are wrong with that: `laya_multimodal/decisions/hooks.py::compose_hooks` returns
 # `defaults + installed + per-call`, so process-wide defaults -- not installed hooks -- are at
 # the head; and the same page's "Process-wide instrumentation" section (line 261) already says
 # "Defaults run before the instance and per-call hooks", so the sentence contradicts a section
 # further down its own file. `lifecycle.md`'s rule 1 (fixed in #991) says the same thing. The
 # gate bans the pre-fix wording, requires the tier vocabulary, and drives `compose_hooks` live
 # to prove the emitted order matches the prose.
-from laya_multimodal import hooks as _hooks_mod  # noqa: E402
+from laya_multimodal.decisions import hooks as _hooks_mod  # noqa: E402
 
 check_true("hooks module exports compose_hooks", callable(_hooks_mod.compose_hooks))
 
@@ -1599,7 +1601,7 @@ finally:
     _hooks_mod.clear_default_hooks()
 
 
-from laya_multimodal.evals import compare_agreement, evaluate_agreement  # noqa: E402
+from laya_multimodal.evaluation.evaluator import compare_agreement, evaluate_agreement  # noqa: E402
 
 check("compare_agreement signature", list(inspect.signature(compare_agreement).parameters),
       ["reference", "repeat", "student", "bootstrap_samples", "seed"])
@@ -1610,7 +1612,7 @@ check("agreement provenance is required",
       inspect.Parameter.empty)
 
 # The TypeScript HTTP confidence extension follows this core contract, not entropy confidence.
-from laya_multimodal.confidence import jev_confidence  # noqa: E402
+from laya_multimodal.decisions.confidence import jev_confidence  # noqa: E402
 
 check("jev_confidence signature", list(inspect.signature(jev_confidence).parameters), ["answer"])
 check("Jev choice confidence", round(jev_confidence({"type": "choice", "probabilities": {"a": 0.8, "b": 0.2}}), 4), 0.6)

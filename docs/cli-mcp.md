@@ -1,6 +1,6 @@
 # CLI and MCP
 
-**English** · [简体中文](zh-CN/cli-mcp.md)
+**English** · [简体中文](../docs_zh/cli-mcp.md)
 
 Set `LAYA_MULTIMODAL_MODEL` to a trained native checkpoint directory to use it with both
 the CLI and MCP. The setup script installs the merged Qwen3.5 checkpoint by default.

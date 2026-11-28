@@ -27,8 +27,8 @@ def headings(path):
 class PackagingTests(unittest.TestCase):
     def test_documentation_language_switches_connect_each_pair(self):
         docs = ROOT / "docs"
-        locale = docs / "zh-CN"
-        english = {page.relative_to(docs) for page in docs.rglob("*.md") if not page.is_relative_to(locale)}
+        locale = ROOT / "docs_zh"
+        english = {page.relative_to(docs) for page in docs.rglob("*.md")}
         chinese = {page.relative_to(locale) for page in locale.rglob("*.md")}
         self.assertEqual(english, chinese)
         for name in sorted(english):
@@ -44,12 +44,13 @@ class PackagingTests(unittest.TestCase):
         config = tomllib.loads((ROOT / "pyproject.toml").read_text())
         project = config["project"]
         self.assertEqual(project["name"], "laya-multimodal")
-        self.assertNotIn("laya", config["tool"]["setuptools"]["packages"])
+        source_packages = {".".join(path.parent.relative_to(ROOT).parts)
+                           for path in (ROOT / "laya_multimodal").rglob("__init__.py")}
+        self.assertEqual(set(config["tool"]["setuptools"]["packages"]), source_packages)
         paths = {
             "laya-multimodal": "laya_multimodal.cli",
             "laya-multimodal-serve": "laya_multimodal.serve",
             "laya-multimodal-mcp-server": "laya_multimodal.mcp.server",
-            "laya-multimodal-train-decisions": "laya_multimodal.multimodal_train",
         }
         self.assertEqual(project["scripts"], {cmd: f"{module}:main" for cmd, module in paths.items()})
         for command, module in paths.items():
@@ -58,8 +59,8 @@ class PackagingTests(unittest.TestCase):
                 self.assertTrue(any(isinstance(node, ast.FunctionDef) and node.name == "main" for node in tree.body))
 
     def test_local_documentation_links_resolve(self):
-        roots = ["docs", "examples", "benchmarks", "verify", "notebooks", "sdk"]
-        documents = [ROOT / name for name in ("README.md", "README.zh-CN.md", "LOCAL_SETUP.md",
+        roots = ["docs", "docs_zh", "examples", "benchmarks", "verify", "notebooks", "sdk"]
+        documents = [ROOT / name for name in ("README.md", "README_zh.md", "LOCAL_SETUP.md",
                                               "AGENTS.md", "CONTRIBUTING.md")]
         for root in roots:
             documents.extend(path for path in (ROOT / root).rglob("*.md")

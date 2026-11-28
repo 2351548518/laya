@@ -1,13 +1,13 @@
 # API reference
 
-**English** · [简体中文](../zh-CN/hooks/api.md)
+**English** · [简体中文](../../docs_zh/hooks/api.md)
 
-Everything on this page is importable from `laya_multimodal` (the common names) or `laya_multimodal.hooks` (the
+Everything on this page is importable from `laya_multimodal` (the common names) or `laya_multimodal.decisions.hooks` (the
 whole surface).
 
 ```python
 from laya_multimodal import PredictContext, PredictHook, Hook, OptionStabilityHook
-from laya_multimodal.hooks import HOOK_EVENTS, normalise_hooks, dispatch, aggregate_usage
+from laya_multimodal.decisions.hooks import HOOK_EVENTS, normalise_hooks, dispatch, aggregate_usage
 ```
 
 - [PredictContext](#predictcontext)
@@ -177,7 +177,7 @@ It attaches a `reliability` diagnostic block to each choice question's answer:
 ### Calibrating and replaying decisions
 
 Collect `soft_stability` with `accept=None, escalate=None` on labelled evaluation examples,
-then pass those numeric values and correctness labels to `laya_multimodal.hooks.calibrate_reliability`.
+then pass those numeric values and correctness labels to `laya_multimodal.decisions.hooks.calibrate_reliability`.
 Only fit or replay probed, numeric scores; exclude unprobed reports with `soft_stability=None`
 and keep their `decision=None`.
 The fitter requires equal, nonempty, sized score and label sequences; generators raise
@@ -253,12 +253,12 @@ and a hook added inside the block with `add_hook` is left in place.
 
 ## Process-wide defaults
 
-`laya_multimodal.hooks` keeps a small process-wide registry, so a tracer, metrics hook or tenant tagger does
+`laya_multimodal.decisions.hooks` keeps a small process-wide registry, so a tracer, metrics hook or tenant tagger does
 not have to be threaded through every `Agent` and `Router`. Defaults run **first**, then the
 hooks installed on the instance, then per-call hooks.
 
 ```python
-from laya_multimodal import hooks
+from laya_multimodal.decisions import hooks
 
 hooks.set_default_hooks(hooks=[Tracer()])          # replaces the set, accepts the hooks= arguments
 hooks.add_default_hook(Metrics())                  # appends
@@ -439,7 +439,7 @@ completion from sync code, on the caller's loop if it is free, or on a backgroun
 caller already has one. `aggregate_usage` sums per-state usage blocks.
 
 ```python
-from laya_multimodal.hooks import normalise_hooks, dispatch, PredictContext
+from laya_multimodal.decisions.hooks import normalise_hooks, dispatch, PredictContext
 
 hooks = normalise_hooks(on_predict_start=[log, redact])
 ctx = PredictContext(states=["..."], questions={...})

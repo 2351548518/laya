@@ -9,8 +9,8 @@ import tempfile
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from laya_multimodal.evals import file_fingerprint
-from laya_multimodal.multimodal import MultimodalAgent, _is_adapter_model
+from laya_multimodal.evaluation.evaluator import file_fingerprint
+from laya_multimodal.models.multimodal import MultimodalAgent, _is_adapter_model
 
 
 def fingerprints(root):

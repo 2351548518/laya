@@ -15,9 +15,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np  # noqa: E402
 
 import laya_multimodal  # noqa: E402
-from laya_multimodal.agent import Agent  # noqa: E402
-from laya_multimodal.common import render_options  # noqa: E402
-from laya_multimodal.shortlist import (  # noqa: E402
+from laya_multimodal.models.base import Agent  # noqa: E402
+from laya_multimodal.decisions.questions import render_options  # noqa: E402
+from laya_multimodal.decisions.shortlist import (  # noqa: E402
     cached_embed_fn,
     embed_fn_from_agent,
     predict_shortlist,

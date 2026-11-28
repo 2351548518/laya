@@ -7,7 +7,8 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from laya_multimodal.common import ece_score, render_criterion, render_options  # noqa: E402
+from laya_multimodal.decisions.calibration import ece_score
+from laya_multimodal.decisions.questions import render_criterion, render_options  # noqa: E402
 
 PASS, FAIL = [], []
 
@@ -163,7 +164,7 @@ parsed = json.loads(render_options(
 check("emitted json round-trips", parsed, {"a": 1})
 
 # public labels reach the renderer through Agent._to_internal without changing caller data
-from laya_multimodal.agent import Agent  # noqa: E402
+from laya_multimodal.models.base import Agent  # noqa: E402
 
 public_labels = {"true": "A", "false": "B"}
 public_question = {"type": "noul", "instructions": "Is this true?", "labels": public_labels}

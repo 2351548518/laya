@@ -192,7 +192,7 @@ def main() -> None:
     import transformers
 
     import laya_multimodal
-    from laya_multimodal import evals
+    from laya_multimodal.evaluation import evaluator as evals
 
     torch.set_num_threads(2)
     torch.manual_seed(0)

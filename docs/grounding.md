@@ -1,6 +1,6 @@
 # Local single-box grounding
 
-**English** · [简体中文](zh-CN/grounding.md)
+**English** · [简体中文](../docs_zh/grounding.md)
 
 The single-box head reads the same backbone used for typed decisions. It takes the last valid
 hidden state and applies layer normalization, a linear projection, GELU and a final linear layer.

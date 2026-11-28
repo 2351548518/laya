@@ -44,11 +44,11 @@ try:
     agent = "resolved-without-torch"
 except ImportError:
     agent = "blocked"
-try:
-    laya_multimodal.shortlist_choice
-    sh = "resolved-without-torch"
-except ImportError:
-    sh = "blocked"
+shortlisted = laya_multimodal.shortlist_choice(
+    "query", {"match": "", "other": ""}, lambda _: [[1, 0], [1, 0], [0, 1]], k=1,
+)
+assert "torch" not in sys.modules, "shortlist_choice pulled in torch"
+sh = "ok" if shortlisted == ["match"] else "wrong-label"
 # The reviewed pins must be reachable with torch unavailable: the checkpoint-integrity guide
 # tells operators to pass one, and pinning matters most in the offline and on-device
 # deployments that may not have torch imported at all.
@@ -67,7 +67,7 @@ check("no-torch/import laya_multimodal succeeds", proc.returncode, 0)
 out = proc.stdout.strip().split()
 check("no-torch/detect_script works", out[0] if out else None, "latin")
 check("no-torch/Agent stays lazy", out[1] if len(out) > 1 else None, "blocked")
-check("no-torch/shortlist stays lazy", out[2] if len(out) > 2 else None, "blocked")
+check("no-torch/shortlist_choice works with supplied embeddings", out[2] if len(out) > 2 else None, "ok")
 check("no-torch/PINNED_REVISIONS resolves", out[3] if len(out) > 3 else None, "ok")
 
 
@@ -182,7 +182,7 @@ check("no-mcp/server names the extra and how to install it",
       [])
 
 # ...and the same surface stays pure-Python without torch, which is this file's own premise: `remote`
-# reaches for `laya_multimodal.serve` and `laya_multimodal.router`, `tools` for `laya_multimodal.confidence`/`hooks`/`presets`.
+# reaches for `laya_multimodal.serve` and `laya_multimodal.decisions.routing`, `tools` for `laya_multimodal.decisions.confidence`/`hooks`/`presets`.
 NO_MCP_NO_TORCH = r'''
 import sys
 sys.path.insert(0, %r)

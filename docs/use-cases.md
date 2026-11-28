@@ -1,6 +1,6 @@
 # Decision workflows
 
-**English** · [简体中文](zh-CN/use-cases.md)
+**English** · [简体中文](../docs_zh/use-cases.md)
 
 Use a typed decision to choose from a set of actions the application already knows how to perform.
 Keep action execution and its input validation at the application boundary.

@@ -1,4 +1,4 @@
-"""Contract guard for laya_multimodal.evidence: readiness evidence states over existing artifacts.
+"""Contract guard for laya_multimodal.evaluation.evidence: readiness evidence states over existing artifacts.
 
 Run: python tests/test_evidence.py
 """
@@ -10,8 +10,8 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from laya_multimodal import evidence  # noqa: E402
-from laya_multimodal import evals_cli  # noqa: E402
+from laya_multimodal.evaluation import evidence  # noqa: E402
+from laya_multimodal.evaluation import cli as evals_cli  # noqa: E402
 
 PASS, FAIL = [], []
 
@@ -180,14 +180,14 @@ _untouched = {"config": {}, "schema": "laya-evals-report/1"}
 evidence.inspect_report(_untouched)
 check("the report document is not mutated", _untouched, {"config": {}, "schema": "laya-evals-report/1"})
 
-# ------------------------------------------------------ identity vocabulary pinned to laya_multimodal.evals
-# `laya_multimodal/evidence.py` copies the report-identity vocabulary instead of importing `laya_multimodal.evals` (numpy at
+# ------------------------------------------------------ identity vocabulary pinned to laya_multimodal.evaluation.evaluator
+# `laya_multimodal/evaluation/evidence.py` copies the report-identity vocabulary instead of importing `laya_multimodal.evaluation.evaluator` (numpy at
 # module scope), and a copy is only safe while it is held against the original -- the same way
 # `tests/test_conformal_abstention.py` holds `confidence.BUCKET_QTYPES` against `common.temp_bucket`.
 # Unpinned, a key renamed upstream would make every report read as identity-incomplete here, and a key
 # added upstream would read as identity-complete; both silently, in the verdict this module exists to
 # give. These checks fail in both directions, on either side of the copy.
-from laya_multimodal import evals  # noqa: E402
+from laya_multimodal.evaluation import evaluator as evals  # noqa: E402
 
 check("the copied identity vocabulary is evals' own, in order",
       list(evidence._IDENTITY_KEYS), list(evals._IDENTITY_KEYS))
@@ -322,7 +322,7 @@ with open(os.path.join(_bad_config_ckpt, "rl_agent_config.json"), "w", encoding=
     f.write("{nope")
 
 # The last tuple element is the string the refusal must contain. For five rows that is the whole
-# path, because `laya_multimodal/evidence.py` builds those messages from the argument the caller passed. The
+# path, because `laya_multimodal/evaluation/evidence.py` builds those messages from the argument the caller passed. The
 # directory row is the exception: its refusal is the operating system's own `OSError` text, and the
 # Windows CI runner reports that path in 8.3 form (`C:\Users\RUNNER~1\...` where the test holds
 # `C:\Users\runneradmin\...`), so an exact full-path match there tests the runner's temp layout
@@ -405,7 +405,7 @@ _BLOCK = (
     "tmp = tempfile.mkdtemp(); ckpt = os.path.join(tmp, 'c'); os.makedirs(ckpt)\n"
     "with open(os.path.join(ckpt, 'rl_agent_config.json'), 'w') as f:\n"
     "    json.dump({'training': {'laya_train_calibration': {'choice': {'items': 5, 'temperature': 1.0, 'issues': []}}}}, f)\n"
-    "from laya_multimodal import evals_cli, evidence\n"
+    "from laya_multimodal.evaluation import cli as evals_cli, evidence\n"
     "rc = evals_cli.main(['evidence', '--checkpoint', ckpt])\n"
     "res = evidence.inspect_checkpoint(ckpt)\n"
     "print('RC', rc, 'TORCH', 'torch' in sys.modules)\n"

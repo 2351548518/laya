@@ -8,7 +8,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import laya_multimodal  # noqa: E402
-from laya_multimodal.structured import (  # noqa: E402
+from laya_multimodal.decisions.structured import (  # noqa: E402
     SchemaError,
     answers_to_json,
     answer_to_pydantic,
@@ -311,7 +311,7 @@ check_true("decide/details high conf flag unset", det.answers["department"].get(
 # the details artifact, so the number that filter reads has to be the one the gate uses.
 #
 # `DecisionResult.confidence` is built from the answer's `confidence` field, which is normalized
-# entropy: `laya_multimodal/common.py` calls it "not calibrated: it is not what temperature scaling fits and
+# entropy: `laya_multimodal/decisions/questions.py` calls it "not calibrated: it is not what temperature scaling fits and
 # not what the reported ECE measures", `tests/test_confidence.py` pins that a two-option
 # distribution reads 0.90 on a `noul` and 0.53 on an equivalent `choice`, and #394 is an open issue
 # saying a confidence threshold does not transfer across option counts -- which is the entropy

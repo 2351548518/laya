@@ -1,6 +1,6 @@
 # Historical guardrail measurements
 
-**English** · [简体中文](zh-CN/guardrail-limitations.md)
+**English** · [简体中文](../docs_zh/guardrail-limitations.md)
 
 A 53-case synthetic study tested the earlier Laya 0.3.21 and 0.3.22 checkpoints on CPU. It found
 misses on document-shaped inputs and false alarms on benign text that quoted attack vocabulary.

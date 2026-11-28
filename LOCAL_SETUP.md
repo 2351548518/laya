@@ -36,7 +36,7 @@ sets the HTTP port.
 
 ```bash
 python verify/multimodal_smoke_test.py --help
-python -m laya_multimodal.train_cli --help
+python -m laya_multimodal.train --help
 ```
 
 The packaged trainer uses the files in the installed source checkout. Start a fresh run with a

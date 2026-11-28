@@ -6,8 +6,10 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from laya_multimodal.multimodal import MultimodalAgent
-from laya_multimodal.multimodal_train import calibrate_multimodal, check_splits, collect_records, load_rows, metrics
+from laya_multimodal.models.multimodal import MultimodalAgent
+from laya_multimodal.models.modality_calibration import calibrate_multimodal
+from laya_multimodal.data import check_splits, load_rows
+from laya_multimodal.evaluation.native_metrics import collect_records, metrics
 
 
 def calibration_passes(raw, changed):

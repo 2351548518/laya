@@ -1,6 +1,6 @@
 # Questions and answers
 
-**English** · [简体中文](zh-CN/questions-and-answers.md)
+**English** · [简体中文](../docs_zh/questions-and-answers.md)
 
 A request has a state and questions keyed by ID. Each question defines the output shape. The
 native agent reads a question's own prompt and returns the answer under the same ID. Without

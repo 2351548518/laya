@@ -2,7 +2,7 @@
 
 Used by the scheduled `evals` workflow: it runs `research/eval/laya_eval.py`, then points this
 at the result and a baseline in `research/results/`. The comparison uses
-`laya_multimodal.evals.EvalReport.compare`, so the tolerance semantics match the CLI.
+`laya_multimodal.evaluation.evaluator.EvalReport.compare`, so the tolerance semantics match the CLI.
 
     python research/evals/check_regression.py fresh.json baseline.json thresholds.json
 """
@@ -18,7 +18,7 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__f
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from laya_multimodal.evals import EvalReport  # noqa: E402
+from laya_multimodal.evaluation.evaluator import EvalReport  # noqa: E402
 
 METRICS = ("accuracy", "ece", "mean_confidence")
 

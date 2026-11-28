@@ -11,7 +11,9 @@ import sys
 import numpy as np
 import pytest
 
-from laya_multimodal import _agreement, confidence, evals
+from laya_multimodal.decisions import confidence
+from laya_multimodal.evaluation import evaluator as evals
+from laya_multimodal.evaluation import agreement
 
 
 def run_document(run_id, rows, *, teacher=True):
@@ -142,7 +144,7 @@ def test_bootstrap_preserves_decision_weights_with_unequal_case_sizes():
 def test_the_bootstrap_batch_split_is_invisible_in_the_published_interval():
     """`paired_delta_ci95` depends on the records, `bootstrap_samples` and `seed`, and on nothing else.
 
-    `_agreement._interval` draws its replicate indices in batches so the index matrix stays under
+    `agreement._interval` draws its replicate indices in batches so the index matrix stays under
     131072 `int64` -- 1 MiB -- and the comment there says exactly that: "batching bounds the index
     matrix memory". It has to stay true that nothing else moves: the report publishes
     `bootstrap_samples` and `seed` as the identity of the interval, so a rewrite that reseeds per
@@ -166,7 +168,7 @@ def test_the_bootstrap_batch_split_is_invisible_in_the_published_interval():
     keep a memory budget, or delete this test along with the split.
     """
     cases = 120
-    budget = re.search(r"(\d+) // len\(clusters\)", inspect.getsource(_agreement._interval))
+    budget = re.search(r"(\d+) // len\(clusters\)", inspect.getsource(agreement._interval))
     assert budget is not None, (
         "`_interval` no longer splits its bootstrap draw by a row budget, so the split this test "
         "guards is gone: either keep a memory budget here, or delete this test together with the "
@@ -426,7 +428,7 @@ def test_evaluate_treats_abstained_argmax_as_uncovered():
 
 
 def test_the_gate_writes_the_marker_and_the_report_reads_it():
-    """Abstention is `laya_multimodal.confidence`'s vocabulary, so this result comes from that gate.
+    """Abstention is `laya_multimodal.decisions.confidence`'s vocabulary, so this result comes from that gate.
 
     The fixture above types the state by hand, which pins nothing about the field a gated runner
     actually returns: renaming the state, renaming the key, or reading the key as "any marker
@@ -484,7 +486,7 @@ def test_evaluate_validates_every_input_before_first_runner_call(invalid):
 
 
 def cli(*args):
-    return subprocess.run([sys.executable, "-m", "laya_multimodal.evals_cli", "agreement", *map(str, args)],
+    return subprocess.run([sys.executable, "-m", "laya_multimodal.evaluation.cli", "agreement", *map(str, args)],
                           cwd=Path(__file__).resolve().parents[1], capture_output=True,
                           text=True, encoding="utf-8", timeout=30)
 
@@ -519,7 +521,7 @@ def test_cli_reads_bom_prefixed_saved_runs(tmp_path):
     The three agreement reads opened `utf-8`, so a UTF-8 BOM stayed as U+FEFF and `json.load` refused
     a document that is valid JSON, answering `cannot read agreement run ... Unexpected UTF-8 BOM
     (decode using utf-8-sig)` -- a refusal naming the decoding this CLI could have asked for itself.
-    `laya_multimodal/cli.py`, `laya_multimodal/train.py` and `laya_multimodal/evidence.py` open a caller's file with `utf-8-sig` for
+    `laya_multimodal/cli.py`, `laya_multimodal/train.py` and `laya_multimodal/evaluation/evidence.py` open a caller's file with `utf-8-sig` for
     exactly this reason, and the byte-for-byte equality below is the point: the BOM changes nothing
     about the numbers, so it must change nothing about the verdict.
     """

@@ -210,7 +210,7 @@ def _project_jev_strict(result: Dict[str, Any], questions: Optional[Dict] = None
     With the original questions, use TypeSafe confidence and preserve structured
     score legends and image references. The legacy batch projection keeps its values.
     """
-    from .confidence import jev_confidence
+    from .decisions.confidence import jev_confidence
 
     answers: Dict[str, Any] = {}
     for qid, answer in (result.get("answers") or {}).items():
@@ -254,7 +254,7 @@ def _add_jev_confidence(result: Dict[str, Any]) -> Dict[str, Any]:
     probabilities give no usable number is left without the field rather than given a guess.
     The result is copied, not edited, so a router that reuses its answer dicts is unaffected.
     """
-    from .confidence import jev_confidence
+    from .decisions.confidence import jev_confidence
     if not isinstance(result.get("answers"), dict):
         return result
     answers: Dict[str, Any] = {}
@@ -368,7 +368,7 @@ def _tournament_plan(questions: Any, group: int) -> Optional[Dict[str, List[str]
     `predict_tournament` does. A label that is not a string cannot be mapped back onto the answer,
     so such a choice keeps one pass too, and is refused when one pass is not an option.
     """
-    from .shortlist import _criteria_items
+    from .decisions.shortlist import _criteria_items
     if not isinstance(questions, dict):
         return None
     large: Dict[str, List[str]] = {}
@@ -418,7 +418,7 @@ def _predict_with_tournament(router: Any, state: Any, questions: Dict[str, Any],
     Which choices are narrowed, and when an `option_order` is kept or dropped, is
     `_tournament_plan`'s; a dropped order is reported as `x_tournament.option_order_dropped`.
     """
-    from .shortlist import predict_tournament
+    from .decisions.shortlist import predict_tournament
     large = _tournament_plan(questions, group)
     if large is None:
         return router.predict(state, questions, **predict_kwargs)
@@ -452,7 +452,7 @@ def _predict_with_tournament(router: Any, state: Any, questions: Dict[str, Any],
 
 def _published_model_ids() -> Dict[str, str]:
     """Public checkpoint IDs clients may use instead of a registered name."""
-    from .router import DEFAULT_MODELS
+    from .decisions.routing import DEFAULT_MODELS
 
     return {repo.lower(): name for name, repo in DEFAULT_MODELS.items()}
 
@@ -485,7 +485,7 @@ def _resolve_model(model: Optional[str], resolve=None) -> Optional[str]:
     published = _published_model_ids().get(text.lower())
     if published is not None:
         return published
-    from .router import normalise_name
+    from .decisions.routing import normalise_name
 
     # The resolver raises ValueError on anything that is not a known checkpoint or
     # alias. `resolve` defaults to the built-in table's `normalise_name`; the request
@@ -699,14 +699,14 @@ def _validate_min_confidence(body: Dict[str, Any]) -> Optional[float]:
     """Round-trip the body's ``min_confidence`` through core's validator, reporting its 422.
 
     Validation happens here rather than inside ``predict`` so a bad threshold is refused before the
-    request takes an inference slot, and through ``laya_multimodal.confidence`` rather than a copy of its
+    request takes an inference slot, and through ``laya_multimodal.decisions.confidence`` rather than a copy of its
     bounds so the accepted range cannot drift from what the abstention gate itself enforces.
     """
     from fastapi import HTTPException
 
     if body.get("min_confidence") is None:
         return None
-    from .confidence import check_min_confidence
+    from .decisions.confidence import check_min_confidence
 
     try:
         return check_min_confidence(body["min_confidence"])
@@ -795,7 +795,7 @@ def _default_model_option(extra_models: Optional[Dict[str, Any]] = None) -> Dict
     raw = os.environ.get("LAYA_DEFAULT_MODEL")
     if raw is None or not raw.strip():
         return {}
-    from .router import canonical_name, normalise_name
+    from .decisions.routing import canonical_name, normalise_name
 
     try:
         name = normalise_name(raw)
@@ -928,7 +928,7 @@ def _state_length_lower_bound_over(state: Any, cap: int) -> int:
 def _state_length(state: Any) -> int:
     r"""Length of the state text that will be tokenized; 400 if it has none.
 
-    `laya_multimodal.common.serialize_state(state)` is what gets tokenized -- the state itself for a string,
+    `laya_multimodal.decisions.questions.serialize_state(state)` is what gets tokenized -- the state itself for a string,
     `json.dumps(state, ensure_ascii=False)` for a dict or list, which the agents then strip mask
     tokens out of, and that can only shorten it. `MAX_STATE_CHARS` has to be measured on that
     text, not on `str()`, which is a different length in both directions:
@@ -941,9 +941,8 @@ def _state_length(state: Any) -> int:
       writes the one character it is, so a state that serializes to 8344 characters -- a sixth of
       the limit -- was refused with "state too large (50004 > 50000 chars)".
 
-    `json.dumps` inline rather than importing `serialize_state`: `laya_multimodal.common` imports torch at
-    module level and `import laya_multimodal.serve` must not (tests/test_lazy_import.py). The two are pinned
-    to each other in tests/test_serve.py.
+    The HTTP limit uses the same JSON encoding as `serialize_state` while keeping request sizing
+    in the standard library. Tests compare the two encoders on nested and Unicode states.
 
     Cost. At the gate's own ceiling the dump is 0.133 ms against 0.080 ms for the `str()` it
     replaces -- orders of magnitude under the forward pass that state then gets, so the serialized
@@ -1211,7 +1210,7 @@ def _apply_thread_limit():
 def build_router():
     """Build a Router from the environment, preloading unless told otherwise."""
     from .mcp.device import env_device
-    from .router import MULTIMODAL_MODEL, Router
+    from .decisions.routing import MULTIMODAL_MODEL, Router
 
     _apply_thread_limit()
     # `env_device` rather than a raw read: it strips, the way `LAYA_MODELS` two lines
@@ -1517,7 +1516,7 @@ def create_app(router: Optional[Any] = None):
 
     async def _systemone_inner(request: Request):
         nonlocal gate
-        from .systemone import (
+        from .decisions.systemone import (
             IMAGE_HEADER, MAX_IMAGE_REQUEST_BYTES, ImageRequestError, image_form_parts, prepare_image_request,
         )
 
@@ -1567,7 +1566,7 @@ def create_app(router: Optional[Any] = None):
         has_box = any(isinstance(q, dict) and q.get("type") == "box" for q in questions.values())
         image_request = bool(assets or files or has_box)
         if image_request:
-            from .router import MULTIMODAL_MODEL, canonical_name
+            from .decisions.routing import MULTIMODAL_MODEL, canonical_name
 
             if not images_enabled:
                 raise HTTPException(status_code=400, detail="set " + IMAGE_HEADER + ": true for assets or box questions")

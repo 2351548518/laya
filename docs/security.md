@@ -1,6 +1,6 @@
 # Checkpoint integrity
 
-**English** · [简体中文](zh-CN/security.md)
+**English** · [简体中文](../docs_zh/security.md)
 
 Load a trusted native checkpoint. The runtime uses safetensors for model weights and verifies
 an optional SHA-256 map before loading artifacts. It disables Transformers remote code loading.

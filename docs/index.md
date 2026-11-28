@@ -1,6 +1,6 @@
 # laya-multimodal documentation
 
-**English** · [简体中文](zh-CN/index.md)
+**English** · [简体中文](../docs_zh/index.md)
 
 laya-multimodal runs local System One decisions on text and supported image, video and audio
 inputs. Each question returns a typed `choice`, `noul`, `score` or `box` answer with zero

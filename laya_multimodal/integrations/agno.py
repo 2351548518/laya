@@ -80,24 +80,26 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Shared per-call control infrastructure (same as crewai.py / langchain.py /
 # llamaindex.py).  The rule for which controls exist lives in one place so
-# that adding a control in `._controls` without updating a wrapper fails in
+# that adding a control in `shared.request_options` without updating a wrapper fails in
 # that wrapper's test suite rather than silently disappearing.
 # ---------------------------------------------------------------------------
-from ._controls import budget_kwargs as _budget_kwargs, hook_kwargs as _hook_kwargs  # noqa: E402
-from ._controls import decision_kwargs as _decision_kwargs  # noqa: E402
-from ._controls import predict_kwargs as _predict_kwargs, reject_remote_hooks as _reject_remote_hooks  # noqa: E402
-from ._controls import reject_remote_lang_guess as _reject_remote_lang_guess  # noqa: E402
-from ._controls import require_router_controls as _require_router_controls  # noqa: E402
-from ._controls import router_kwargs as _router_kwargs  # noqa: E402
-from ._guard import answer_number as _answer_number  # noqa: E402
-from ._guard import answers_map as _answers_map  # noqa: E402
-from ._guard import malformed as _malformed  # noqa: E402
-from ._guard import score_violation_probability as _score_violation_probability  # noqa: E402
-from ..confidence import _gate_confidence  # noqa: E402
+from .shared.request_options import budget_kwargs as _budget_kwargs, hook_kwargs as _hook_kwargs  # noqa: E402
+from .shared.request_options import decision_kwargs as _decision_kwargs  # noqa: E402
+from .shared.request_options import (
+    predict_kwargs as _predict_kwargs,
+    reject_remote_hooks as _reject_remote_hooks,
+)  # noqa: E402
+from .shared.request_options import reject_remote_lang_guess as _reject_remote_lang_guess  # noqa: E402
+from .shared.request_options import require_router_controls as _require_router_controls  # noqa: E402
+from .shared.request_options import router_kwargs as _router_kwargs  # noqa: E402
+from .shared.decision_responses import answer_number as _answer_number  # noqa: E402
+from .shared.decision_responses import answers_map as _answers_map  # noqa: E402
+from .shared.decision_responses import malformed as _malformed  # noqa: E402
+from .shared.decision_responses import score_violation_probability as _score_violation_probability  # noqa: E402
+from ..decisions.confidence import _gate_confidence  # noqa: E402
 
-# One exception class per integration so `except LayaLowConfidenceError` works
-# even when only one integration is imported.
-from ._errors import LayaLowConfidenceError  # noqa: E402
+# Re-export the shared exception for callers importing the Agno adapter directly.
+from .shared.errors import LayaLowConfidenceError  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -360,7 +362,7 @@ def _get_default_router():
     if _DEFAULT_ROUTER is None:
         with _DEFAULT_ROUTER_LOCK:
             if _DEFAULT_ROUTER is None:
-                from ..router import Router
+                from ..decisions.routing import Router
                 _DEFAULT_ROUTER = Router()
     return _DEFAULT_ROUTER
 
@@ -390,7 +392,7 @@ def _execute_decision(
 ) -> Dict[str, Any]:
     """Run one decision on the local runner or a laya-multimodal-serve node.
 
-    Which controls either path accepts is ``._controls``' rule, shared with the
+    Which controls either path accepts is ``shared.request_options``' rule, shared with the
     LangChain, CrewAI and LlamaIndex wrappers – they all end at the same
     ``predict`` call and the same request body.
     """
@@ -790,7 +792,7 @@ class LayaAgnoGuardrail:
         self.last_decision: Optional[Dict[str, Any]] = None
 
     def _default_questions(self) -> Dict[str, Any]:
-        from ..presets import guard_questions
+        from ..decisions.presets import guard_questions
         return guard_questions()
 
     def screen(self, message: Any) -> Any:

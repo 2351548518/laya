@@ -15,7 +15,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from laya_multimodal import Router, BaseHook  # noqa: E402
-from laya_multimodal import lang  # noqa: E402
+from laya_multimodal.decisions import language as lang  # noqa: E402
 
 EN = "This is an English note about the order. "
 DE = "Ich kann mich nicht anmelden und brauche Hilfe"
@@ -182,7 +182,7 @@ def test_router_keeps_fallback_and_never_loads_models(default):
 ])
 def test_explicit_routes_do_not_invent_detector_evidence(override):
     router = Router()
-    with patch("laya_multimodal.router.analyse", side_effect=AssertionError("detector must be skipped")):
+    with patch("laya_multimodal.decisions.routing.analyse", side_effect=AssertionError("detector must be skipped")):
         result = router.route(DE, explain=True, **override)
     assert result["detection"] is None
 

@@ -1,6 +1,6 @@
 # Native multimodal decisions
 
-**English** · [简体中文](zh-CN/multimodal.md)
+**English** · [简体中文](../docs_zh/multimodal.md)
 
 `MultimodalAgent` turns text and native media into typed answers. The backbone processes the
 input, and the candidate scorer or single-box head reads its hidden states. Each question uses
@@ -71,15 +71,15 @@ commands from the repository root. [Native example](https://github.com/235154851
 
 ## From input to answer
 
-`MultimodalAgent` in `laya_multimodal/multimodal.py` passes the rendered question and its input to the
+`MultimodalAgent` in `laya_multimodal/models/multimodal.py` passes the rendered question and its input to the
 backbone's processor. For `choice`, `noul` and `score`, `candidate_positions` identifies the
 candidate marker tokens after the processor inserts media tokens. `CandidateScorer` in
-`laya_multimodal/multimodal_readout.py` projects and compares each marker's hidden state with the final
+`laya_multimodal/models/readout.py` projects and compares each marker's hidden state with the final
 question state. A softmax turns the resulting logits into probabilities. Probabilities of 0.2
 for `continue` and 0.8 for `inspect` yield `choice="inspect"`. The same probabilities over
 levels 0 and 1 yield `score=0.8`.
 
-For a `box` question, `GroundingHead` in `laya_multimodal/grounding.py` projects the final valid hidden
+For a `box` question, `GroundingHead` in `laya_multimodal/models/grounding.py` projects the final valid hidden
 state to one normalized box. Its quality score estimates the intersection over union (IoU)
 between the predicted box and the target.
 
@@ -167,11 +167,15 @@ The joint trainer can record metrics locally or online from rank zero.
 ## Calibration and evaluation
 
 Fit decision temperatures on calibration data and check them on a separate development set.
+Read the selected checkpoint from the training report. Prepare a separate `calibration` split
+using the same JSONL format as development.
 
 ```bash
-python scripts/multimodal/calibrate.py --model multimodal-runs/example/sft/best \
-  --calibration multimodal-data/example/full/calibration.jsonl \
-  --validation multimodal-data/example/full/decision_dev.jsonl \
+checkpoint=$(python -c 'import json, sys; print(json.load(sys.stdin)["checkpoint"])' \
+  < multimodal-runs/example/sft/training_report.json)
+python scripts/multimodal/calibrate.py --model "$checkpoint" \
+  --calibration multimodal-data/example/native/calibration.jsonl \
+  --validation multimodal-data/example/native/decision_dev.jsonl \
   --out multimodal-runs/example/final
 ```
 

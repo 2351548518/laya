@@ -6,7 +6,6 @@ experiments belong in the ignored `_local/` workbench.
 | Command | Purpose |
 | --- | --- |
 | `train.py` | Checkout entry point for `laya-multimodal train`, from head warmup through joint adaptation |
-| `monitor_swanlab.py` | Backfill SwanLab metrics from legacy training logs |
 | `calibrate.py` | Fit held-out calibration and check it on independent development records |
 | `prepare_dataset.py` | Convert native JSONL and Kev records to a shared request and supervision layout |
 | `evaluate.py` | Evaluate native decisions and single-box geometry |
@@ -22,7 +21,7 @@ conversion and quantization. [Runtime setup](../../docs/multimodal-release.md#ru
 
 For new runs, `train.py --swanlab local` records metrics directly from the training loop. Use
 `--swanlab online --swanlab-project PROJECT` from an authenticated SwanLab environment for an
-account dashboard. `monitor_swanlab.py` remains available to backfill logs from existing runs.
+account dashboard.
 [SwanLab tutorial](../../docs/project-readme/multimodal.md#swanlab)
 
 Export a frozen benchmark directory containing `manifest.json` and its verified JSONL files.

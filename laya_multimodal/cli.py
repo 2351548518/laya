@@ -9,7 +9,7 @@
 Routing (the default) never downloads a checkpoint, so it works offline and
 returns in milliseconds. --predict loads the routed checkpoint on first use.
 Use --multimodal with a trained local checkpoint. --preset answers one of the
-ready-made question presets from laya_multimodal.presets and implies --predict.
+ready-made question presets from laya_multimodal.decisions.presets and implies --predict.
 --batch scores a whole file (or stdin, with `-`) through Router.predict_batch in one
 process, so the states share checkpoint loads and forward passes; --json prints JSONL.
 --questions supplies a question set from a JSON file. Use --max-len for a native request's
@@ -50,14 +50,14 @@ def model_name(value):
 
     ``argparse``'s ``choices=`` compared strings exactly, so ``--model en`` was rejected with
     "invalid choice" even though the call this flag feeds -- ``router.predict(model=...)`` --
-    has always accepted it. ``laya_multimodal.router.normalise_name`` is the one registry of checkpoints and
+    has always accepted it. ``laya_multimodal.decisions.routing.normalise_name`` is the one registry of checkpoints and
     aliases, so delegating here cannot fall behind it, and the name that reaches the router is
     already canonical: what a caller prints is the checkpoint, not its spelling. ``auto`` means
     "do not pin one", which is what omitting the flag means, so it maps to ``None``.
     """
     if value.strip().lower() == "auto":
         return None
-    from laya_multimodal.router import normalise_name
+    from laya_multimodal.decisions.routing import normalise_name
 
     try:
         return normalise_name(value)
@@ -68,12 +68,12 @@ def model_name(value):
 def min_confidence_value(value):
     """Resolve a `--min-confidence` argument through core's own validator, so the range is core's.
 
-    ``laya_multimodal.confidence.check_min_confidence`` is what ``Router.predict`` and ``Router.predict_batch``
+    ``laya_multimodal.decisions.confidence.check_min_confidence`` is what ``Router.predict`` and ``Router.predict_batch``
     run this argument through, so a threshold this flag accepts is exactly one the call accepts --
     including the boolean and the infinite value that ``float()`` alone waves through
     (``--min-confidence inf`` would ask for a gate no answer can clear).
     """
-    from laya_multimodal.confidence import check_min_confidence
+    from laya_multimodal.decisions.confidence import check_min_confidence
 
     try:
         number = float(value)
@@ -179,7 +179,7 @@ def load_questions(path):
         # run()'s `except (ImportError, OSError, RuntimeError)` printed "could not run Laya" and
         # advised checking the network, which is a false diagnosis for a wrong --questions path.
         raise ValueError("--questions file %s cannot be read: %s" % (path, error)) from error
-    # The same three refusals `laya_multimodal/evidence.py::_read_json_object` makes: a bare JSONDecodeError or
+    # The same three refusals `laya_multimodal/evaluation/evidence.py::_read_json_object` makes: a bare JSONDecodeError or
     # UnicodeDecodeError says what is wrong with the text but not which file, and a too-deep document
     # surfaces as a RecursionError that the caller's `except (OSError, RuntimeError, ...)` misreads as
     # a dependency/download problem. Prefix each with the path so it is a usage error about this file.
@@ -502,10 +502,10 @@ def interactive(args):
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] == "eval":
-        from .evals_cli import main as eval_main
+        from .evaluation.cli import main as eval_main
         return eval_main(argv[1:])
     if argv and argv[0] == "train":
-        from .train_cli import main as train_main
+        from .train import main as train_main
         return train_main(argv[1:])
     args = build_parser().parse_args(argv)
     # Redirected output is encoded with the locale's codec by default (cp1252 on Windows), which

@@ -738,7 +738,7 @@ else:
 # --------------------------------------------------------------- 6. LayaDecision
 from laya_multimodal.integrations import langchain as langchain_module  # noqa: E402
 from laya_multimodal.integrations.langchain import LayaDecision  # noqa: E402
-from laya_multimodal.structured import DecisionResult, SchemaError, decide  # noqa: E402
+from laya_multimodal.decisions.structured import DecisionResult, SchemaError, decide  # noqa: E402
 
 DECISION_SCHEMA = {
     "type": "object",
@@ -861,9 +861,9 @@ finally:
 # decision could not widen its own window or attach the cache/audit hook its siblings can. These
 # checks drive the whole control family through the bypass and read it back off the runner.
 import inspect  # noqa: E402
-from laya_multimodal.agent import Agent  # noqa: E402
-from laya_multimodal.integrations import _controls  # noqa: E402
-from laya_multimodal.router import Router  # noqa: E402
+from laya_multimodal.models.base import Agent  # noqa: E402
+from laya_multimodal.integrations.shared import request_options  # noqa: E402
+from laya_multimodal.decisions.routing import Router  # noqa: E402
 
 DECISION_ALL_CONTROLS = {"max_len": 1024, "head_max_len": 512, "hooks": ["H"],
                          "on_predict_start": "S", "on_predict_end": "E",
@@ -938,7 +938,7 @@ class _StrictDecisionAgent:
 # Handing a routing hint to a runner with no routing step is the one thing the node must not do
 # silently: core would raise `TypeError` past every hook on the way to an answer that ignores the
 # hint, and dropping it quietly is the silence this whole module exists to break.
-for _hint, _sample in zip(_controls.ROUTER_ONLY_CONTROLS, ("typed-decisions", "de")):
+for _hint, _sample in zip(request_options.ROUTER_ONLY_CONTROLS, ("typed-decisions", "de")):
     _strict = _StrictDecisionAgent()
     _raised, _message = False, ""
     try:
@@ -953,8 +953,8 @@ for _hint, _sample in zip(_controls.ROUTER_ONLY_CONTROLS, ("typed-decisions", "d
     check("decision/controls %s refusal happens before the call" % _hint, _strict.seen, None)
 
 # The names it reads out of the shared module are the names it actually forwards -- a control
-# added to `._controls` without reaching this bypass fails here rather than being dropped silently.
-check("decision/controls reads both budgets", set(_controls.PREDICT_CONTROLS),
+# added to `request_options` without reaching this bypass fails here rather than being dropped silently.
+check("decision/controls reads both budgets", set(request_options.PREDICT_CONTROLS),
       {"max_len", "head_max_len"})
 _dag = set(inspect.signature(Agent.system_one).parameters)
 _dr = set(inspect.signature(Router.predict).parameters)
@@ -1190,10 +1190,10 @@ finally:
 # `BODY_CONTROLS`, so they are safe to forward on the local and the remote path alike -- unlike
 # `task` / `lang_guess`, which are Router-only. A wrapper that drops them cannot route a
 # non-English state or measure the abstention gate it is supposed to honor.
-from laya_multimodal.integrations import _controls  # noqa: E402
+from laya_multimodal.integrations.shared import request_options  # noqa: E402
 import inspect  # noqa: E402
-from laya_multimodal.agent import Agent  # noqa: E402
-from laya_multimodal.router import Router  # noqa: E402
+from laya_multimodal.models.base import Agent  # noqa: E402
+from laya_multimodal.decisions.routing import Router  # noqa: E402
 
 DECISION_CRITERIA = {"billing": "invoices", "tech": "bugs"}
 DECISION_NODES = (
@@ -1205,8 +1205,8 @@ DECISION_NODES = (
         questions={"faithful": {"type": "noul", "instructions": "faithful?"}}, agent=a, **kw)),
 )
 
-check("decision/_controls names the tuple", _controls.DECISION_CONTROLS, ("lang", "min_confidence"))
-for _c in _controls.DECISION_CONTROLS:
+check("decision/request_options names the tuple", request_options.DECISION_CONTROLS, ("lang", "min_confidence"))
+for _c in request_options.DECISION_CONTROLS:
     check_true("decision/%s accepted by Agent.system_one" % _c,
                _c in set(inspect.signature(Agent.system_one).parameters))
     check_true("decision/%s accepted by Router.predict" % _c,
@@ -1257,7 +1257,7 @@ try:
     # Nothing set sends nothing.
     LayaRouter(DECISION_CRITERIA, base_url="http://laya:8000").invoke("x")
     check_true("decision/remote omits unset decision controls",
-               not any(k in decision_remote_calls[-1] for k in _controls.DECISION_CONTROLS),
+               not any(k in decision_remote_calls[-1] for k in request_options.DECISION_CONTROLS),
                repr(decision_remote_calls[-1]))
 finally:
     langchain_module._call_remote = _decision_real_call_remote
@@ -1365,8 +1365,8 @@ for name, build in HOOK_NODES:
 # core instead of at the call site. Whether the hooks then run is core's contract, pinned by
 # tests/test_hooks.py; a mock runner that ignores its kwargs could not prove it either way.
 import inspect  # noqa: E402
-from laya_multimodal.agent import Agent  # noqa: E402
-from laya_multimodal.router import Router  # noqa: E402
+from laya_multimodal.models.base import Agent  # noqa: E402
+from laya_multimodal.decisions.routing import Router  # noqa: E402
 
 agent_params = set(inspect.signature(Agent.system_one).parameters)
 router_params = set(inspect.signature(Router.predict).parameters)
@@ -1377,20 +1377,20 @@ for param in ALL_HOOK_KWARGS:
 
 # --------------------------------------------------------------- 7c. The control family, derived
 #
-# `laya_multimodal/integrations/_controls.py` says the shared tuples are checked by this suite and that this
+# `laya_multimodal/integrations/shared/request_options.py` says the shared tuples are checked by this suite and that this
 # suite asserts every wrapper's constructor accepts all of them. The two literals above name the
 # controls by copying them, so neither half happens here: tests/test_crewai.py and
 # tests/test_llamaindex.py read their control set out of the module, which makes a control added
 # there fail those suites, while the copies here keep their old five and seven names and this suite
 # stays green while the new control is dropped at every LangChain entry point. Derive the union and
 # pin it against both the copies and the constructors.
-CONTROLS = (tuple(_controls.PREDICT_CONTROLS) + tuple(_controls.DECISION_CONTROLS)
-            + tuple(_controls.HOOK_CONTROLS))
+CONTROLS = (tuple(request_options.PREDICT_CONTROLS) + tuple(request_options.DECISION_CONTROLS)
+            + tuple(request_options.HOOK_CONTROLS))
 
 check("controls/ALL_HOOK_KWARGS covers HOOK_CONTROLS",
-      set(ALL_HOOK_KWARGS), set(_controls.HOOK_CONTROLS))
+      set(ALL_HOOK_KWARGS), set(request_options.HOOK_CONTROLS))
 check("controls/DECISION_ALL_CONTROLS covers the bypass family", set(DECISION_ALL_CONTROLS),
-      set(_controls.PREDICT_CONTROLS) | set(_controls.HOOK_CONTROLS))
+      set(request_options.PREDICT_CONTROLS) | set(request_options.HOOK_CONTROLS))
 
 for cls in (LayaRouter, LayaGuardrail, LayaTriage, LayaEvaluator):
     init_params = set(inspect.signature(cls.__init__).parameters)
@@ -1400,7 +1400,7 @@ for cls in (LayaRouter, LayaGuardrail, LayaTriage, LayaEvaluator):
 # `LayaDecision` bypasses `_execute_decision` and calls `decide` directly, so it is driven by its
 # own seven-name literal rather than the union; the two `DECISION_CONTROLS` it omits are a gap in
 # the wrapper, not in this list.
-for _c in tuple(_controls.PREDICT_CONTROLS) + tuple(_controls.HOOK_CONTROLS):
+for _c in tuple(request_options.PREDICT_CONTROLS) + tuple(request_options.HOOK_CONTROLS):
     check_true("controls/LayaDecision takes %s" % _c,
                _c in set(inspect.signature(LayaDecision.__init__).parameters))
 
@@ -1459,7 +1459,7 @@ finally:
 
 
 # ------------------------------------ 8. The two Router-only routing hints, on every entry point
-from laya_multimodal.integrations import _controls as controls_module  # noqa: E402
+from laya_multimodal.integrations.shared import request_options as controls_module  # noqa: E402
 
 ROUTER_HINTS = tuple(controls_module.ROUTER_ONLY_CONTROLS)
 
@@ -1745,7 +1745,7 @@ except ValueError as exc:
 # multilingual checkpoint for every one of these. The no-hint column is printed, not pinned: it is
 # the current detection heuristic's behaviour, and a run that fixes #54 should move the print, not
 # turn the suite red.
-from laya_multimodal.router import Router as _RoutingRouter  # noqa: E402
+from laya_multimodal.decisions.routing import Router as _RoutingRouter  # noqa: E402
 
 _DE_NO_DIACRITICS = [
     "Zahlung fehlgeschlagen", "Wo finde ich meine Rechnung", "Ich kann mich nicht anmelden",
@@ -1945,7 +1945,7 @@ finally:
 #
 # The section above stops at `answers` itself. Two consumers -- `LayaGuardrail._finish` and
 # `LayaTriage._finish` -- then trusted everything under it, while `LayaTaskGuard.screen` and
-# `LayaAgentRouter.screen` had already moved to `_guard.answers_map`/`_guard.answer_number` (#1335).
+# `LayaAgentRouter.screen` had already moved to `decision_responses.answers_map`/`decision_responses.answer_number` (#1335).
 # Three levels leaked here: an answer that is not an object, a `noul` that is not a number, and a
 # `noul` key the answer does not carry.
 _LC_NESTED_ANSWER = [

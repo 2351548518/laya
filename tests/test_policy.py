@@ -1,6 +1,6 @@
 """Policies from Embedding Studio load from a folder or the downloaded .zip, and are verified first.
 
-No model needed: these exercise laya_multimodal.policy directly with real Ed25519 signatures from a throwaway
+No model needed: these exercise laya_multimodal.decisions.policy directly with real Ed25519 signatures from a throwaway
 key, so a tampered file, a foreign key, a missing signature and a wrong engine are each refused
 by name before anything could be installed.
 """
@@ -16,7 +16,7 @@ cryptography = pytest.importorskip("cryptography")
 from cryptography.hazmat.primitives import serialization as S  # noqa: E402
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey  # noqa: E402
 
-from laya_multimodal import policy  # noqa: E402
+from laya_multimodal.decisions import policy  # noqa: E402
 
 
 def _key():

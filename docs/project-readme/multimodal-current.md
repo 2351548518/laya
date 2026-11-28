@@ -1,6 +1,6 @@
 # v6 architecture, data and training
 
-**English** · [简体中文](../zh-CN/project-readme/multimodal-current.md)
+**English** · [简体中文](../../docs_zh/project-readme/multimodal-current.md)
 
 v6 uses Qwen3.5-4B with a shared candidate scorer and a single-box head. It starts from the
 original pretrained backbone, warms up both heads on 30,720 rows and jointly fine-tunes on
@@ -283,7 +283,7 @@ Open the CPU walkthrough and compare its `worked_calculations` with these result
    SFT checkpoints activations and offloads saved tensors at 3,072 padded tokens. The
    Qwen chunk-scan optimization affects the training gradient path.
 
-The run log's `grounding step` advances once per global update. The arithmetic is
+The optimizer step advances once per global update. The arithmetic is
 `30,720 / 64 = 480` for warmup and `ceil(1,500,000 / 64) = 23,438` for SFT.
 [Train source interface](../reference/train.md) · [Read the run log](multimodal.md#resume)
 
@@ -305,7 +305,8 @@ trainer keeps the last two complete snapshots. [Resume](multimodal.md#resume)
 ### Matched development results
 
 These November 27, 2026 measurements use the same 1,624 decisions and 449 positive boxes.
-Later results can be read from the run's `GROUNDING DEV` entries.
+Later results are available in the run's development entries, labelled `DEV` in the current
+trainer and `GROUNDING DEV` in the archived v6 logs.
 
 | Checkpoint | Decision accuracy | Box Acc@IoU≥0.5 |
 | --- | ---: | ---: |

@@ -1,6 +1,6 @@
 # Examples from 64 decision tasks
 
-**English** · [简体中文](../zh-CN/project-readme/multimodal-current-examples.md)
+**English** · [简体中文](../../docs_zh/project-readme/multimodal-current-examples.md)
 
 Each task has three examples from the v6 training snapshot. Percentages use the modality's
 training row count as their denominator. The excerpts preserve the original instructions, states

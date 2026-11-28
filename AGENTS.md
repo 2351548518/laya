@@ -27,7 +27,7 @@ Context for AI coding assistants (Claude Code, Codex, Cursor, Copilot, Gemini CL
 | `laya_multimodal/` core | — | plain script suites: `python tests/test_router.py`, `tests/test_criteria.py`, `tests/test_hooks.py`, `tests/test_hooks_api.py` |
 | native model or training | [Native multimodal guide](docs/multimodal.md) | `python -m pytest -q tests/test_multimodal.py tests/test_grounding.py tests/test_multimodal_cli.py tests/test_multimodal_export.py` |
 | server path | `tests/test_serve.py` | `python -m pytest tests/test_serve.py` (skips when the `serve` extra is missing) |
-| docs, docstrings in `laya_multimodal/` | `docs/`, `docs/.nav.yml` for page order | `pip install -r requirements-docs.txt`, then `zensical build --strict --clean` with no `griffe:` lines in the output |
+| docs, docstrings in `laya_multimodal/` | `docs/` and `docs_zh/`, with `.nav.yml` for page order | `pip install -r requirements-docs.txt`, then `python scripts/docs_site.py build` with no `griffe:` lines in the output |
 
 Optional extras are declared in `pyproject.toml` (`multimodal`, `serve`, `swanlab`, `vega`, `langchain`, `langgraph`); install only what the change needs.
 

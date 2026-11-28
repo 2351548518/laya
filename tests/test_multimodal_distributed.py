@@ -1,4 +1,7 @@
 """Real two-process gradient synchronization, uneven tails and optimizer/data-cursor resume."""
+from contextlib import redirect_stdout
+from datetime import datetime
+from io import StringIO
 import json
 from pathlib import Path
 import sys
@@ -13,17 +16,16 @@ pytest.importorskip("PIL")
 pytest.importorskip("scipy")
 pytestmark = pytest.mark.skipif(not dist.is_available() or not dist.is_gloo_available(), reason="needs PyTorch Gloo")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from laya_multimodal.multimodal_distributed import _atomic_torch_save, distributed_context  # noqa: E402
-from laya_multimodal.multimodal_distributed import DistributedContext  # noqa: E402
+from laya_multimodal.training.distributed import DistributedContext, _atomic_torch_save, distributed_context  # noqa: E402
 from laya_multimodal.train import (  # noqa: E402
     GroundingTrainConfig, _evaluate_development, _shared_indexed_rows, finetune_grounding,
 )
-from laya_multimodal.grounding import GroundingHead  # noqa: E402
-from laya_multimodal.multimodal_train import MultimodalTrainConfig, finetune_multimodal, load_rows  # noqa: E402
+from laya_multimodal.models.grounding import GroundingHead  # noqa: E402
+from laya_multimodal.data import load_rows  # noqa: E402
 from test_multimodal import Q, tiny_agent  # noqa: E402
 
 
-def _save_head(agent, directory, mode="head"):
+def _save_head(agent, directory):
     from safetensors.torch import save_file
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
@@ -31,12 +33,22 @@ def _save_head(agent, directory, mode="head"):
               str(directory / "decision_head.safetensors"))
 
 
-def _train_cpu(train, output, *, held_out=None, **settings):
+def _joint_agent():
     agent = tiny_agent()
-    agent.save = lambda path, mode="head": _save_head(agent, path, mode)
-    config = MultimodalTrainConfig(mode="head", epochs=2, micro_batch=1, global_batch_size=4,
-        grad_accum=4, learning_rate=.01, gradient_checkpointing=False, log_every=1, **settings)
-    report = finetune_multimodal(train, output, agent=agent, config=config, **(held_out or {}))
+    agent.model.grounding_head = GroundingHead(8, 16, 1, "single-v1")
+    agent.grounding_trained = agent.detection_trained = False
+    agent.save = lambda path: _save_head(agent, path)
+    return agent
+
+
+def _train_cpu(directory, output):
+    agent = _joint_agent()
+    config = GroundingTrainConfig(epochs=2, micro_batch=1, global_batch_size=4,
+        eval_every=2, head_learning_rate=.01, train_readout_in_warmup=True, batch_decisions=True,
+        distributed_decision_eval=True)
+    finetune_grounding(directory / "train.jsonl", directory / "dev.jsonl", output, agent=agent, config=config,
+                       decision_dev_data=directory / "decision_dev.jsonl")
+    report = json.loads((output / "training_report.json").read_text())
     return agent.model.lm_head.weight.detach().clone(), report
 
 
@@ -59,14 +71,10 @@ def _distributed_worker(rank, world, directory):
         context.sum_gradients([large])
         assert torch.all(large.grad == 3)
         del large
-        held_out = {name + "_data": directory / (name + ".jsonl") for name in ("validation", "test", "selection")}
-        with patch("laya_multimodal.multimodal_train.load_rows", wraps=load_rows) as loaded:
-            weight, report = _train_cpu(directory / "train.jsonl", directory / "parallel", held_out=held_out)
-        requested = [call.args[0] for call in loaded.call_args_list]
-        assert requested == [directory / "train.jsonl"] + (list(held_out.values()) if context.main else [])
-        assert report["world_size"] == world and report["trained_decisions"] == 10
-        assert report["validation_rows"] == report["test_rows"] == report["selection_rows"] == 5
-        assert len(report["selection_history"]) == 2 and report["after"]["overall"]["n"] == 5
+        weight, report = _train_cpu(directory, directory / "parallel")
+        assert report["world_size"] == world and report["steps"] == 4
+        assert report["forward_passes"] == {"geometry": 0, "decisions": 10}
+        assert len(report["selection_history"]) == 2 and report["after"]["decisions"]["overall"]["n"] == 5
         torch.save(weight, directory / ("rank%d.pt" % rank))
     finally:
         dist.destroy_process_group()
@@ -80,11 +88,9 @@ def _dataset(path):
 
 
 def test_two_process_training_matches_single_process_with_uneven_tail(tmp_path):
-    _dataset(tmp_path / "train.jsonl")
-    held_out = {name + "_data": tmp_path / (name + ".jsonl") for name in ("validation", "test", "selection")}
-    for path in held_out.values():
-        _dataset(path)
-    expected, _ = _train_cpu(tmp_path / "train.jsonl", tmp_path / "single", held_out=held_out)
+    for name in ("train", "dev", "decision_dev"):
+        _dataset(tmp_path / (name + ".jsonl"))
+    expected, _ = _train_cpu(tmp_path, tmp_path / "single")
     mp.spawn(_distributed_worker, args=(2, str(tmp_path)), nprocs=2, join=True)
     for rank in range(2):
         actual = torch.load(tmp_path / ("rank%d.pt" % rank), weights_only=True)
@@ -130,7 +136,7 @@ def test_joint_development_and_startup_share_work_without_changing_results(tmp_p
 
 
 def _joint_restart_worker(rank, world, directory):
-    from laya_multimodal._grounding_checkpoint import resolve_checkpoint, save_checkpoint
+    from laya_multimodal.training.checkpoint import resolve_checkpoint, save_checkpoint
 
     torch.set_num_threads(1)
     path = Path(directory)
@@ -155,10 +161,7 @@ def _joint_restart_worker(rank, world, directory):
             assert report["grounding_retention_passed"] and isinstance(selected, bool)
 
     def train(output, resume_from=None, reporter=None):
-        agent = tiny_agent()
-        agent.model.grounding_head = GroundingHead(8, 16, 1, "single-v1")
-        agent.grounding_trained = agent.detection_trained = False
-        agent.save = lambda destination: _save_head(agent, destination)
+        agent = _joint_agent()
         cfg = GroundingTrainConfig(epochs=2, global_batch_size=2, micro_batch=1, eval_every=2,
             learning_rate=.01, head_learning_rate=.01, train_readout_in_warmup=True,
             batch_decisions=True, shuffle_options=True, checkpoint_every=1, replay_fraction=.5)
@@ -180,18 +183,26 @@ def _joint_restart_worker(rank, world, directory):
         assert json.loads((saved / "progress.json").read_text())["steps"] == 2
         assert (saved / ("option_rng_rank%d.pt" % rank)).is_file()
         reporter = Recorder()
-        actual = train(path / "continued", resume_from=path / "interrupted", reporter=reporter)
+        log = StringIO()
+        with redirect_stdout(log):
+            actual = train(path / "continued", resume_from=path / "interrupted", reporter=reporter)
         torch.testing.assert_close(actual, expected, atol=0, rtol=0)
         if ctx.main:
+            events = [line.split(" ", 2) for line in log.getvalue().splitlines()]
+            assert [kind for _, kind, _ in events] == ["RESUME", "TRAIN", "DEV", "DEV"]
+            assert all(datetime.fromisoformat(stamp).utcoffset() is not None for stamp, _, _ in events)
+            assert events[0][2] == "step=2"
+            assert events[1][2].startswith("step=3 loss=") and events[1][2].endswith(" ranks=2")
             assert reporter.events == [("start", 2), ("train", 3), ("dev", 4), ("train", 6), ("dev", 6), ("final", 6)]
             reference = json.loads((path / "full/training_report.json").read_text())
             resumed = json.loads((path / "continued/training_report.json").read_text())
             assert resumed["steps"] == reference["steps"] == 6
             assert resumed["resume"]["starting_step"] == 2
             assert resumed["selection_history"] == reference["selection_history"]
+            assert [json.loads(payload) for _, kind, payload in events if kind == "DEV"] == resumed["selection_history"][-2:]
             assert len(list((path / "continued/optimizer-checkpoints").glob("step-*"))) == 2
         else:
-            assert not reporter.events
+            assert not reporter.events and not log.getvalue()
     finally:
         dist.destroy_process_group()
 
@@ -200,29 +211,6 @@ def test_joint_training_restores_optimizer_and_order_across_ranks(tmp_path):
     for name in ("train", "dev", "replay"):
         _dataset(tmp_path / (name + ".jsonl"))
     mp.spawn(_joint_restart_worker, args=(2, str(tmp_path)), nprocs=2, join=True)
-
-
-def test_resume_restores_adam_state_and_replays_the_data_cursor(tmp_path):
-    _dataset(tmp_path / "train.jsonl")
-    expected, _ = _train_cpu(tmp_path / "train.jsonl", tmp_path / "complete")
-    _, partial = _train_cpu(tmp_path / "train.jsonl", tmp_path / "partial", max_steps=2)
-    assert partial["trained_decisions"] == 5
-    actual, resumed = _train_cpu(tmp_path / "train.jsonl", tmp_path / "continued",
-        resume_from=str(tmp_path / "partial/checkpoint_latest"))
-    assert resumed["resume"]["optimizer_restored"] and resumed["resume"]["starting_decisions"] == 5
-    assert resumed["trained_decisions"] == 10 and resumed["optimizer_steps"] == 4
-    torch.testing.assert_close(actual, expected, atol=0, rtol=0)
-
-
-def test_cosine_schedule_horizon_survives_an_early_stop(tmp_path):
-    _dataset(tmp_path / "train.jsonl")
-    expected, _ = _train_cpu(tmp_path / "train.jsonl", tmp_path / "complete", lr_schedule="cosine")
-    _train_cpu(tmp_path / "train.jsonl", tmp_path / "partial", max_steps=2, lr_schedule="cosine")
-    checkpoint = str(tmp_path / "partial/checkpoint_latest")
-    actual, _ = _train_cpu(tmp_path / "train.jsonl", tmp_path / "continued", resume_from=checkpoint, lr_schedule="cosine")
-    torch.testing.assert_close(actual, expected, atol=0, rtol=0)
-    with pytest.raises(ValueError, match="lr_schedule"):
-        _train_cpu(tmp_path / "train.jsonl", tmp_path / "changed", resume_from=checkpoint)
 
 
 def test_optimizer_restore_rejects_missing_rank_rng_before_mutating_optimizer(tmp_path):

@@ -1,6 +1,6 @@
 # Lifecycle
 
-**English** · [简体中文](../zh-CN/hooks/lifecycle.md)
+**English** · [简体中文](../../docs_zh/hooks/lifecycle.md)
 
 This page is the precise order of events for each entry point. If you only read one diagram,
 read the [Router](#routerpredict) one; it is the superset.
@@ -62,7 +62,7 @@ The same `ctx` object flows through start, error and end, so `run_id` correlates
 hook can read `ctx.error`.
 
 The `finally` guard is `ctx.results is not None`, not truthiness, and the empty batch is the only
-case where they differ: `predict_batch([])` sets `ctx.results = []` (`laya_multimodal/multimodal.py::MultimodalAgent.predict_batch`),
+case where they differ: `predict_batch([])` sets `ctx.results = []` (`laya_multimodal/models/multimodal.py::MultimodalAgent.predict_batch`),
 so the guard passes, `ctx.usage` becomes `{"input_tokens": 0, "output_tokens": 0}`, and the confidence
 gate still runs over the (empty) result list. A call that raised before any result leaves
 `ctx.results` and `ctx.usage` both `None`. So for an end hook `usage is None` means "this call

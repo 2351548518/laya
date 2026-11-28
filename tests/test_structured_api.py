@@ -14,7 +14,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import laya_multimodal  # noqa: E402
-from laya_multimodal import structured  # noqa: E402
+from laya_multimodal.decisions import structured  # noqa: E402
 
 PASS, FAIL = [], []
 
@@ -106,7 +106,7 @@ for label, cls in (("Agent", laya_multimodal.Agent), ("Router", laya_multimodal.
 for name in ("decide", "DecisionResult"):
     check_true("__all__/%s" % name, name in laya_multimodal.__all__)
     check_true("laya.%s exists" % name, hasattr(laya_multimodal, name))
-check_true("laya_multimodal.structured.SchemaError is a ValueError", issubclass(structured.SchemaError, ValueError))
+check_true("laya_multimodal.decisions.structured.SchemaError is a ValueError", issubclass(structured.SchemaError, ValueError))
 
 
 print("\n%d passed, %d failed" % (len(PASS), len(FAIL)))

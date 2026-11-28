@@ -1,6 +1,6 @@
 # Schema-driven decisions
 
-**English** · [简体中文](zh-CN/structured.md)
+**English** · [简体中文](../docs_zh/structured.md)
 
 Turn a JSON schema, or a pydantic model, into Laya questions, and get back typed values with
 per-field decision probabilities. The native model scores each generated question and projects
@@ -73,7 +73,7 @@ level between `minimum` and `maximum`; a boolean is `noul >= 0.5`.
 
 ## Rejections
 
-A schema that cannot be answered from a fixed option set raises `laya_multimodal.structured.SchemaError`
+A schema that cannot be answered from a fixed option set raises `laya_multimodal.decisions.structured.SchemaError`
 (a `ValueError`) naming the exact path. These examples use a field named `name`.
 
 | property schema | message |
@@ -145,7 +145,7 @@ On a `Router` each state is still routed on its own, so one call can span checkp
 keywords reach `predict_batch` depends on who reads them. The call-level ones — `batch_size=`,
 `hooks=`, `sort_by_length=` — are passed as keywords to `predict_batch`. The routing pins and the
 token budget — `model=`, `task=`, `lang=`, `lang_guess=`, `max_len=`, `head_max_len=`, the tuple
-`laya_multimodal/structured.py::_ROUTER_REQUEST_KEYS` names — are read off every *request* by a `Router`, whose
+`laya_multimodal/decisions/structured.py::_ROUTER_REQUEST_KEYS` names — are read off every *request* by a `Router`, whose
 `predict_batch` declares none of them, so `decide_batch` copies them onto each request instead; that
 is why `decide_batch(states, schema=..., model="multimodal")` pins a checkpoint the way `decide`
 does. On an `Agent`-like runner the split is visible: its `predict_batch` declares `batch_size=`,

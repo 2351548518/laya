@@ -1,6 +1,6 @@
 # HTTP API
 
-**English** · [简体中文](zh-CN/http-api.md)
+**English** · [简体中文](../docs_zh/http-api.md)
 
 `POST /v1/systemone` uses the TypeSafe System One format for text, image decisions and
 single-box localization. The default is the released Qwen3.5-4B decision checkpoint. Set

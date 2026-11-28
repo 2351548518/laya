@@ -1,6 +1,6 @@
 <h1 align="center">laya-multimodal</h1>
 
-**English** · [简体中文](README.zh-CN.md)
+**English** · [简体中文](README_zh.md)
 
 <img src="assets/laya-multimodal-banner.webp" alt="Text, image, video and audio inputs converge into a local decision" width="100%">
 
@@ -45,15 +45,16 @@ Pass `--skip-models` to use an existing checkpoint. [Host setup](LOCAL_SETUP.md)
 
 ```text
 laya_multimodal/
-    multimodal.py               Checkpoint loading, input preparation and inference
-    multimodal_readout.py       Candidate scoring
-    grounding.py                Single-box head, geometry and localization loss
-    multimodal_data.py          Native JSONL loading and batch collation
-    train.py, train_cli.py      Joint training loop and command
-    multimodal_*.py             Native training, objectives, distribution and calibration
-    systemone.py, serve.py       System One request handling and HTTP service
-    router.py, hooks.py         Checkpoint selection and inference lifecycle hooks
-    mcp/, integrations/         MCP server and optional framework integrations
+    __init__.py, cli.py         Python exports and terminal command
+    train.py, serve.py          Joint training and HTTP service
+    data.py                     Native JSONL, supervision and batch collation
+    models/                     Backbones, media processing, decision readouts and Box heads
+    decisions/                  Question schemas, routing, confidence and System One
+    training/                   Losses, LoRA, distributed updates, snapshots and logging
+    evaluation/                 Native metrics, agreement, shortlist, tournament and regression gates
+    integrations/               Framework adapters and tool selection
+        shared/                 Request options, decision responses and adapter errors
+    mcp/                        MCP server and decision tools
 configs/multimodal/             Starter head warmup and LoRA configurations
 scripts/multimodal/             Data preparation, evaluation, calibration and export
 benchmarks/, verify/            Latency reports and native checkpoint smoke checks
@@ -61,10 +62,18 @@ research/                       Evaluation fixtures, audit code and historical r
 sdk/python/, sdk/typescript/     HTTP clients
 examples/, notebooks/            Local inference examples and training walkthroughs
 tests/                          Runtime, training, packaging and API regression tests
-docs/, assets/                   Guides, architecture drawings and project artwork
+docs/, docs_zh/, assets/         English and Chinese guides, diagrams and project artwork
 Dockerfile, compose*.yaml       CPU, NVIDIA CUDA and DGX Spark deployment
 setup_laya.sh, start.bat        Host setup and Windows service launcher
 ```
+
+Ordinary Python module names start with a lowercase letter and use `snake_case`.
+Each framework has its own adapter module. Shared adapter code lives in `integrations/shared/`,
+and public classes are exported from `laya_multimodal.integrations`.
+
+`decisions/calibration.py` fits reusable probability calibrators.
+`models/modality_calibration.py` fits per-modality temperatures and ordinal calibration.
+`evaluation/native_metrics.py` collects and scores native checkpoint decisions.
 
 Local weights go in `models/`, prepared data in `multimodal-data/`, and training checkpoints
 and reports in `multimodal-runs/`. Use `_local/` for temporary experiments. Git ignores these
@@ -205,13 +214,13 @@ base=models/pretrained/Qwen3.5-4B
 data=multimodal-data/example/native
 run=multimodal-runs/example
 
-torchrun --standalone --nproc_per_node=4 --module laya_multimodal.train_cli \
+torchrun --standalone --nproc_per_node=4 --module laya_multimodal.train \
   --model "$base" --data "$data" --train-split warmup --out "$run/head" \
   --config configs/multimodal/head.json --visual-only --require-original-base --allow-unadmitted
 
 warmup_checkpoint=$(python -c 'import json, sys; print(json.load(sys.stdin)["checkpoint"])' \
   < "$run/head/training_report.json")
-torchrun --standalone --nproc_per_node=4 --module laya_multimodal.train_cli \
+torchrun --standalone --nproc_per_node=4 --module laya_multimodal.train \
   --model "$warmup_checkpoint" --data "$data" --out "$run/sft" \
   --config configs/multimodal/sft.json --visual-only --allow-unadmitted
 ```
@@ -225,8 +234,7 @@ Run `laya-multimodal train --help` for settings. Enable `checkpoint_every` in th
 save recoverable training snapshots, and resume using the original settings with `--resume`.
 Install `.[multimodal,swanlab]` and set `--swanlab local` for local metrics. After authenticating
 with SwanLab, use `--swanlab online --swanlab-project PROJECT` for an online dashboard.
-The separate `laya-multimodal-train-decisions` command supports native decision distillation
-and reference-KL experiments. [Detailed training guide](docs/finetune.md)
+[Detailed training guide](docs/finetune.md)
 
 ## Evaluation and tests
 

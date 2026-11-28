@@ -27,7 +27,7 @@ export function validateJson(value: unknown, path = 'request', ancestors = new S
 
 /**
  * The fields a question may carry. `type`, `instructions` and `criteria` are the schema; the
- * other two are documented extensions the server honours (`laya_multimodal/agent.py::_check_question`) and
+ * other two are documented extensions the server honours (`laya_multimodal/models/base.py::_check_question`) and
  * the Python client passes through unchanged ("Question extensions such as `option_order` pass
  * through unchanged", `sdk/python/README.md`):
  *

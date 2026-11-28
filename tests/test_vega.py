@@ -1,4 +1,4 @@
-"""`laya_multimodal.VegaAgent(vegaml=True)`: vega's engine behind laya's surface (laya_multimodal/vega.py).
+"""`laya_multimodal.VegaAgent(vegaml=True)`: vega's engine behind laya's surface (laya_multimodal/models/vega.py).
 
 Two layers, so the suite is useful on every machine that runs it:
 
@@ -23,7 +23,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import laya_multimodal  # noqa: E402
-from laya_multimodal import vega as lv  # noqa: E402
+from laya_multimodal.models import vega as lv  # noqa: E402
 
 VEGA = lv.is_available()
 MODEL_TESTS = VEGA and os.environ.get("LAYA_VEGA_TESTS") == "1"
@@ -201,7 +201,7 @@ def test_tournament_elimination_keeps_a_non_string_label():
     # The elimination round feeds the engine's winner back into the criteria map. Before the fold
     # translated the engine's string-keyed vocabulary back to the caller's labels, an int label
     # came back as "1" and the next round raised KeyError: '1'.
-    from laya_multimodal.shortlist import predict_tournament
+    from laya_multimodal.decisions.shortlist import predict_tournament
 
     class Engine:
         def predict(self, state, questions, **kw):
@@ -377,7 +377,7 @@ def test_without_vegaml_the_argument_fails_with_the_install_hint():
 
 
 def test_learner_is_vegamls_continuous_learner():
-    import laya_multimodal.learn as ll
+    import laya_multimodal.models.vega_learning as ll
 
     assert "Learner" in laya_multimodal.__all__ and laya_multimodal.Learner is ll.Learner
     learn = pytest.importorskip("vegaml.learn")
@@ -387,7 +387,7 @@ def test_learner_is_vegamls_continuous_learner():
 def test_learner_without_vegaml_says_what_to_install(monkeypatch):
     import sys
 
-    import laya_multimodal.learn as ll
+    import laya_multimodal.models.vega_learning as ll
 
     monkeypatch.setitem(sys.modules, "vegaml.learn", None)
     with pytest.raises(ImportError, match=r"vegaml 0.17"):
@@ -395,7 +395,7 @@ def test_learner_without_vegaml_says_what_to_install(monkeypatch):
 
 
 def test_escalator_is_vegamls_teacher_for_the_learner():
-    import laya_multimodal.learn as ll
+    import laya_multimodal.models.vega_learning as ll
 
     assert "Escalator" in laya_multimodal.__all__ and laya_multimodal.Escalator is ll.Escalator
     learn = pytest.importorskip("vegaml.learn")
@@ -407,7 +407,7 @@ def test_escalator_is_vegamls_teacher_for_the_learner():
 def test_escalator_without_vegaml_says_what_to_install(monkeypatch):
     import sys
 
-    import laya_multimodal.learn as ll
+    import laya_multimodal.models.vega_learning as ll
 
     monkeypatch.setitem(sys.modules, "vegaml.learn", None)
     with pytest.raises(ImportError, match=r"vegaml 0.18"):
@@ -417,7 +417,7 @@ def test_escalator_without_vegaml_says_what_to_install(monkeypatch):
 def test_vllm_teacher_is_vegamls_self_hosted_teacher(monkeypatch):
     import sys
 
-    import laya_multimodal.learn as ll
+    import laya_multimodal.models.vega_learning as ll
 
     assert "vllm_teacher" in laya_multimodal.__all__ and laya_multimodal.vllm_teacher is ll.vllm_teacher
     monkeypatch.setitem(sys.modules, "vegaml.learn", None)
@@ -558,7 +558,7 @@ def test_predict_long_counts_an_uncached_read(monkeypatch):
 
 
 def test_predict_long_with_timeout_does_not_dispatch_an_internal_hook(monkeypatch):
-    from laya_multimodal import hooks
+    from laya_multimodal.decisions import hooks
 
     def no_hook_thread(*args, **kwargs):
         raise AssertionError("there is no user hook to dispatch")
@@ -787,7 +787,7 @@ def test_image_path(agent):
 
 
 # ----------------------------------------------------------------------------- video
-# The clip is split into what the engine can read (laya_multimodal/video.py) and the path is chosen by
+# The clip is split into what the engine can read (laya_multimodal/models/video.py) and the path is chosen by
 # content. The helpers need the ffmpeg binary and nothing else, so they are tested on synthetic
 # clips ffmpeg itself generates; the model-backed tests ride the LAYA_VEGA_MEDIA_TESTS gate.
 
@@ -810,7 +810,7 @@ def test_probe_survives_a_banner_that_reports_no_duration(monkeypatch):
     # already gets on the ffprobe path. Weight-free: ffprobe is hidden and the banner is fed in.
     import types
 
-    from laya_multimodal import video as v
+    from laya_multimodal.models import video as v
 
     banner = (b"Input #0, h264, from 'clip.h264':\n"
               b"  Duration: N/A, bitrate: N/A\n"
@@ -829,7 +829,7 @@ def test_probe_survives_a_banner_that_reports_no_duration(monkeypatch):
 def test_ffprobe_reports_streams_when_duration_is_unavailable(monkeypatch, duration):
     import json
 
-    from laya_multimodal import video as v
+    from laya_multimodal.models import video as v
 
     info = {"format": {"duration": duration}, "streams": [{"codec_type": "video"}, {"codec_type": "audio"}]}
     monkeypatch.setattr(v.shutil, "which", lambda name: "/usr/bin/" + name)
@@ -841,7 +841,7 @@ def test_ffprobe_reports_streams_when_duration_is_unavailable(monkeypatch, durat
 def test_video_without_duration_reads_first_frame_without_seeking(monkeypatch):
     from io import BytesIO
 
-    from laya_multimodal import video as v
+    from laya_multimodal.models import video as v
 
     Image = pytest.importorskip("PIL.Image")
     buffer = BytesIO()
@@ -860,7 +860,7 @@ def test_video_without_duration_reads_first_frame_without_seeking(monkeypatch):
 @needs_ffmpeg
 def test_video_helpers_on_synthetic_clips(tmp_path):
     import numpy as np
-    from laya_multimodal import video as v
+    from laya_multimodal.models import video as v
 
     silent = _clip(tmp_path, "silent", "anullsrc=r=16000:cl=mono")
     tone = _clip(tmp_path, "tone", "sine=f=440:r=16000", "testsrc=s=160x120:d=3")
@@ -889,7 +889,7 @@ def test_video_helpers_on_synthetic_clips(tmp_path):
 
 @needs_ffmpeg
 def test_video_bytes_go_through_a_temporary_file(tmp_path):
-    from laya_multimodal import video as v
+    from laya_multimodal.models import video as v
 
     path = _clip(tmp_path, "silent", "anullsrc=r=16000:cl=mono")
     raw = open(path, "rb").read()
@@ -1073,7 +1073,7 @@ def test_sample_frames_reports_the_time_each_frame_came_from(monkeypatch):
     pytest.importorskip("PIL")
     import io
     from PIL import Image
-    from laya_multimodal import video as v
+    from laya_multimodal.models import video as v
 
     buf = io.BytesIO()
     Image.new("RGB", (2, 2)).save(buf, "PNG")

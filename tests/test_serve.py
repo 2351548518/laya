@@ -52,7 +52,7 @@ from laya_multimodal.serve import (  # noqa: E402
 
 # Read from the router rather than copied here: the workload below has to reach the
 # typed-decisions checkpoint the same way a request does.
-from laya_multimodal.revisions import DEFAULT_CHECKPOINT  # noqa: E402
+from laya_multimodal.models.revisions import DEFAULT_CHECKPOINT  # noqa: E402
 
 
 class FakeRouter:
@@ -989,7 +989,7 @@ print("ok")
 
 def test_build_router_strips_the_device_before_torch_sees_it(monkeypatch):
     """A value pasted from a Dockerfile or a `.env` file carries a trailing newline."""
-    import laya_multimodal.router
+    import laya_multimodal.decisions.routing
     import laya_multimodal.serve
 
     seen = {}
@@ -1001,7 +1001,7 @@ def test_build_router_strips_the_device_before_torch_sees_it(monkeypatch):
         def preload(self, names=None):
             seen["preloaded"] = names
 
-    monkeypatch.setattr(laya_multimodal.router, "Router", RecordingRouter)
+    monkeypatch.setattr(laya_multimodal.decisions.routing, "Router", RecordingRouter)
     monkeypatch.setenv("LAYA_PRELOAD", "0")
     for raw, want in ((" cpu\n", "cpu"), ("cuda ", "cuda"), ("   ", None), ("cpu", "cpu")):
         monkeypatch.setenv("LAYA_DEVICE", raw)
@@ -1013,7 +1013,7 @@ def test_build_router_strips_the_device_before_torch_sees_it(monkeypatch):
 
 
 def test_build_router_preloads_the_configured_native_checkpoint_by_default(monkeypatch):
-    import laya_multimodal.router
+    import laya_multimodal.decisions.routing
     import laya_multimodal.serve
 
     class RecordingRouter:
@@ -1024,7 +1024,7 @@ def test_build_router_preloads_the_configured_native_checkpoint_by_default(monke
         def preload(self, names=None):
             self.preloaded.append(names)
 
-    monkeypatch.setattr(laya_multimodal.router, "Router", RecordingRouter)
+    monkeypatch.setattr(laya_multimodal.decisions.routing, "Router", RecordingRouter)
     monkeypatch.setenv("LAYA_PRELOAD", "1")
     monkeypatch.setenv("LAYA_MULTIMODAL_MODEL", " trained-checkpoint ")
     monkeypatch.delenv("LAYA_MODELS", raising=False)
@@ -1157,7 +1157,7 @@ def test_resolve_port_reads_a_blank_value_as_unset(monkeypatch):
 
 
 def test_resolve_model_follows_the_router_registry(monkeypatch):
-    from laya_multimodal import router as router_mod
+    from laya_multimodal.decisions import routing as router_mod
 
     monkeypatch.setitem(router_mod.DEFAULT_MODELS, "vision", "example/vision-checkpoint")
     monkeypatch.setitem(router_mod._ALIASES, "visual", "vision")
@@ -1314,7 +1314,7 @@ def _run_workload(router, cycles):
 
 
 def test_max_loaded_reaches_the_router_the_server_builds(monkeypatch):
-    from laya_multimodal.router import Router
+    from laya_multimodal.decisions.routing import Router
 
     # Unset has to be reported as "not set", not as a copy of Router's default, or the two
     # numbers drift the day the default moves. Checked at the resolver, because a copy of 2 and
@@ -1575,7 +1575,7 @@ class ValidatingRouter:
     loaded = ["multimodal"]
 
     def predict(self, state, questions, model=None):
-        from laya_multimodal.agent import Agent
+        from laya_multimodal.models.base import Agent
         for qid, qdef in questions.items():
             Agent._check_question(qid, qdef)
         raise AssertionError("validation should have rejected this before predict()")
@@ -2622,7 +2622,7 @@ _ZWSP_STATE = {"body": "\u200b" * 8332}    # len(str()) == 50004, serialized == 
 
 
 def _serialized_len(state):
-    """The length `laya_multimodal.common.serialize_state` produces, without importing torch."""
+    """The length `laya_multimodal.decisions.questions.serialize_state` produces, without importing torch."""
     return len(json.dumps(state, ensure_ascii=False))
 
 
@@ -2689,7 +2689,7 @@ def test_the_declared_limit_is_the_limit_for_ordinary_states(monkeypatch, reques
 def test_the_gate_agrees_with_the_function_that_feeds_the_tokenizer():
     """Pin serve.py's inline `json.dumps` to `serialize_state` itself.
 
-    serve.py cannot import it -- `laya_multimodal.common` imports torch at module level and
+    serve.py cannot import it -- `laya_multimodal.decisions.questions` imports torch at module level and
     `import laya_multimodal.serve` must not (tests/test_lazy_import.py) -- so the mirror is held here
     instead. Looked up rather than imported at module scope so that a serve.py without the
     helper fails this one check instead of aborting the suite's import.
@@ -2698,7 +2698,7 @@ def test_the_gate_agrees_with_the_function_that_feeds_the_tokenizer():
 
     state_length = getattr(serve_mod, "_state_length", None)
     assert state_length is not None, "laya_multimodal.serve no longer measures the state through _state_length"
-    serialize_state = pytest.importorskip("laya_multimodal.common").serialize_state
+    serialize_state = pytest.importorskip("laya_multimodal.decisions.questions").serialize_state
     for state in (_QUOTE_STATE, _ZWSP_STATE, "plain text", {}, [],
                   {"a": {"b": ["c", 1, 1.5, None, True]}},
                   ["\u4e2d\u6587", '"', "'", "\n", "\x00", "\U0001f600"],
@@ -2886,7 +2886,7 @@ NEW_CONTROL_VALUES = {"task": "multimodal", "lang": "de", "lang_guess": "de",
 
 def test_every_predict_control_is_forwarded_or_refused():
     """`BODY_CONTROLS` and `BODY_REFUSALS` must cover `Router.predict` exactly, both directions."""
-    from laya_multimodal.router import Router
+    from laya_multimodal.decisions.routing import Router
 
     taken = set(inspect.signature(Router.predict).parameters) - {"self", "state", "questions"}
     declared = set(BODY_CONTROLS) | set(BODY_REFUSALS) | set(MEDIA_REFUSALS)
@@ -2947,13 +2947,13 @@ def test_a_language_control_must_be_a_code_string(monkeypatch, key, value):
 
 @pytest.mark.parametrize("value", [1.5, -0.1, True, "0.9"])
 def test_min_confidence_is_validated_by_core(monkeypatch, value):
-    """The bounds belong to `laya_multimodal.confidence`, so serve must report core's own message.
+    """The bounds belong to `laya_multimodal.decisions.confidence`, so serve must report core's own message.
 
     Comparing against the `ValueError` core raises for the same value is what keeps the accepted
     range from drifting: a restated `[0.0, 1.0]` check here would pass CI on the day core widened
     it and start rejecting requests the abstention gate would have honoured.
     """
-    from laya_multimodal.confidence import check_min_confidence
+    from laya_multimodal.decisions.confidence import check_min_confidence
 
     try:
         check_min_confidence(value)
@@ -2993,7 +2993,7 @@ def test_an_unknown_task_gets_cores_answer_not_a_500(monkeypatch):
     reports as a 422 carrying its message. Listing the accepted tasks in `serve` instead would be
     a second registry to keep in step -- the failure mode #544 and #638 removed elsewhere.
     """
-    from laya_multimodal.router import normalise_name
+    from laya_multimodal.decisions.routing import normalise_name
 
     class RoutingRouter(BudgetRouter):
         def predict(self, state, questions, model=None, **kwargs):
@@ -3152,7 +3152,7 @@ def test_batch_call_controls_are_exactly_predict_batch_kwargs_or_refusal():
     to the batch path -- a caller cannot shorten the deadline on which the operator's own hooks
     execute.
     """
-    from laya_multimodal.router import Router
+    from laya_multimodal.decisions.routing import Router
 
     taken = set(inspect.signature(Router.predict_batch).parameters) - {"self", "requests"}
     declared = (set(BATCH_BODY_CALL_CONTROLS) | set(BODY_REFUSALS)
@@ -3620,7 +3620,7 @@ def _route_decision_keys():
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "RouteDecision":
             keys.update(kw.arg for kw in node.keywords if kw.arg)
-    assert keys, "no RouteDecision(...) call with keywords in laya_multimodal/router.py; retarget this"
+    assert keys, "no RouteDecision(...) call with keywords in laya_multimodal/decisions/routing.py; retarget this"
     return sorted(keys)
 
 
@@ -3676,7 +3676,7 @@ def _answer_literal_keys(rel):
 
 
 def _gate_written_keys():
-    """Every key the abstention gate writes onto an answer, from `laya_multimodal/confidence.py` itself."""
+    """Every key the abstention gate writes onto an answer, from `laya_multimodal/decisions/confidence.py` itself."""
     path = os.path.join(ROOT, "laya_multimodal", "confidence.py")
     with open(path, encoding="utf-8") as handle:
         tree = ast.parse(handle.read(), filename=path)

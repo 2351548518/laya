@@ -1,6 +1,6 @@
 # LangChain & LangGraph Integration
 
-**English** · [简体中文](zh-CN/langchain.md)
+**English** · [简体中文](../docs_zh/langchain.md)
 
 Use native typed decisions in LangChain and LangGraph to route, score and screen inputs.
 

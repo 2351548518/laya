@@ -1,5 +1,5 @@
 # Documentation site, built with Zensical (https://zensical.org). Preview locally:
-#   pip install -r requirements-docs.txt && zensical serve
+#   pip install -r requirements-docs.txt && python scripts/docs_site.py serve
 
 [project]
 site_name = "laya-multimodal"
@@ -8,7 +8,7 @@ repo_url = "https://github.com/2351548518/laya"
 repo_name = "2351548518/laya"
 edit_uri = "edit/main/docs/"
 copyright = "Apache 2.0. Developed by Convai Innovations."
-# Navigation for English and Simplified Chinese lives in docs/.nav.yml and docs/zh-CN/.nav.yml.
+# Navigation is in docs/.nav.yml and docs_zh/.nav.yml. scripts/docs_site.py stages the site sources.
 
 [project.theme]
 # Reuse the repository's logo.

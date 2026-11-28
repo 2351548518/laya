@@ -488,7 +488,7 @@ def test_remote_mcp_startup_and_every_tool_avoid_torch(serve):
             else:
                 raise AssertionError("remote in-process tool did not refuse the call")
         assert "torch" not in sys.modules
-        assert "laya_multimodal.shortlist" not in sys.modules
+        assert "laya_multimodal.decisions.shortlist" not in sys.modules
         assert not server._ROUTER._agents
     ''')
     env = dict(os.environ, LAYA_BASE_URL=serve, LAYA_THREADS="2", LAYA_PRELOAD="1")

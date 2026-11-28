@@ -1,6 +1,6 @@
 # Tracing
 
-**English** · [简体中文](../zh-CN/hooks/tracing.md)
+**English** · [简体中文](../../docs_zh/hooks/tracing.md)
 
 Every predict-event hook of one call receives the same `PredictContext.run_id`, so a tracer can
 correlate the start, end and error events (and any spans it opens) without keeping its own

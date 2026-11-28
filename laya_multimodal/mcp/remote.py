@@ -30,7 +30,7 @@ import urllib.parse
 from typing import Any, Dict, List, Optional, Sequence, Union
 
 from .. import __version__
-from ..router import Router
+from ..decisions.routing import Router
 from ..serve import BODY_CONTROLS, BODY_REFUSALS
 
 DEFAULT_TIMEOUT_S = 300.0

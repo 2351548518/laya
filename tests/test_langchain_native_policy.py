@@ -146,7 +146,7 @@ class NativePolicyTests(unittest.TestCase):
         self.assertIs(caught.exception, failure)
 
     def test_vega_policy_survives_the_adapter_without_model_weights(self):
-        from laya_multimodal.vega import VegaAgent
+        from laya_multimodal.models.vega import VegaAgent
 
         class Engine:
             mode = "auto"

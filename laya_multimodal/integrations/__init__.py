@@ -1,5 +1,5 @@
 """Third-party agent and framework integrations for Laya."""
-from ._errors import LayaLowConfidenceError
+from .shared.errors import LayaLowConfidenceError
 from .agno import (
     AgnoRouteDecision,
     LayaAgnoGuardrail,

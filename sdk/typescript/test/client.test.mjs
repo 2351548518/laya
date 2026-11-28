@@ -321,7 +321,7 @@ test('the truncation report reaches the caller verbatim and is validated when se
 });
 
 // A live `/v1/systemone` answer's `routing.detection`, verbatim, for a state whose subject and
-// notes are English but whose customer message is German. Every branch of `laya_multimodal.lang.analyse()`
+// notes are English but whose customer message is German. Every branch of `laya_multimodal.decisions.language.analyse()`
 // reports the same eight keys, which is what tests/test_router.py pins on the Python side;
 // `mixed_segment` is the one that names the segment that pulled the state off English (#384).
 const mixedDetection = {
@@ -391,7 +391,7 @@ test('the confidence an answer was gated on and the gate report reach the caller
   assert.equal(result.answers.team.abstention, 'passed');
   assert.equal(result.answers.team.abstention_threshold, 0.35);
 
-  // 'unevaluated' is the third state core reports (laya_multimodal/confidence.py); accepted like the others.
+  // 'unevaluated' is the third state core reports (laya_multimodal/decisions/confidence.py); accepted like the others.
   const unevaluated = structuredClone(gateReport);
   unevaluated.answers.refund.abstention = 'unevaluated';
   assert.equal((await new Laya({ fetch: async () => json(unevaluated) })
@@ -479,7 +479,7 @@ test('presets are fresh and custom email categories are copied', () => {
 });
 
 test('accepts the question extensions the server accepts (option_order, noul labels)', async () => {
-  // The server honours both (laya_multimodal/agent.py::_check_question) and the Python client passes them
+  // The server honours both (laya_multimodal/models/base.py::_check_question) and the Python client passes them
   // through unchanged. The client's closed whitelist rejected them as "unknown question field"
   // before the request went out, so option ordering and custom noul wording were unreachable
   // from this SDK.

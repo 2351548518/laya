@@ -5,11 +5,11 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from laya_multimodal.evals import file_fingerprint
+from laya_multimodal.evaluation.evaluator import file_fingerprint
 from laya_multimodal.train import grounding_metrics, load_grounding_rows
-from laya_multimodal.multimodal import MultimodalAgent
-from laya_multimodal.multimodal_data import read_records
-from laya_multimodal.multimodal_train import collect_records, load_rows, metrics
+from laya_multimodal.models.multimodal import MultimodalAgent
+from laya_multimodal.data import load_rows, read_records
+from laya_multimodal.evaluation.native_metrics import collect_records, metrics
 
 
 def harmonic_accuracy(decisions, grounding):

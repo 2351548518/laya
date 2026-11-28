@@ -259,7 +259,7 @@ check_true("guard/score_fallback_flagged",
            harm_result({"type": "score", "score": 1.5, "confidence": 0.5})["passed"] is False)
 check_true("guard/score_fallback_passes", harm_result({"type": "score", "score": 0.53, "confidence": 0.5})["passed"])
 
-from laya_multimodal.integrations._guard import probability_map
+from laya_multimodal.integrations.shared.decision_responses import probability_map
 
 # A remote JSON integer may be wider than a Python float. Refuse it as a malformed numeric field
 # instead of leaking OverflowError from the shared answer guard.
@@ -297,7 +297,7 @@ except Exception as _exc:
 # 0.0/1.0 because `bool` subclasses `int` -- each of which crashed or mis-scored the guardrail screen.
 # A distribution that is not a mapping of real numbers now falls back to the same normalised expected
 # level the empty path uses; a numeric (and numeric-string) distribution sums exactly as before.
-from laya_multimodal.integrations._guard import score_violation_probability
+from laya_multimodal.integrations.shared.decision_responses import score_violation_probability
 
 _VALID = {"0": 0.10, "1": 0.15, "2": 0.30, "3": 0.45}
 check_true("guardprob/valid_distribution",
@@ -537,18 +537,18 @@ for _body, _label in (({"model": "laya-multilingual"}, "answers absent"),
 # arguments since #530 / #532; this surface forwarded only `model`, so a crew with more candidate
 # agents than the default head budget fits could not widen its own window. The rule now lives in
 # one module the three integrations import, and the lists below are read out of it rather than
-# written out again here -- a control added to `._controls` without reaching this file fails here.
+# written out again here -- a control added to `request_options` without reaching this file fails here.
 import inspect
-from laya_multimodal.agent import Agent
-from laya_multimodal.integrations import _controls
+from laya_multimodal.models.base import Agent
+from laya_multimodal.integrations.shared import request_options
 from laya_multimodal.integrations import crewai as crewai_module
 from laya_multimodal.integrations import langchain as langchain_module
 from laya_multimodal.integrations import llamaindex as llamaindex_module
-from laya_multimodal.router import Router
+from laya_multimodal.decisions.routing import Router
 
-CONTROLS = (tuple(_controls.PREDICT_CONTROLS) + tuple(_controls.DECISION_CONTROLS)
-            + tuple(_controls.HOOK_CONTROLS))
-ROUTER_HINTS = tuple(_controls.ROUTER_ONLY_CONTROLS)
+CONTROLS = (tuple(request_options.PREDICT_CONTROLS) + tuple(request_options.DECISION_CONTROLS)
+            + tuple(request_options.HOOK_CONTROLS))
+ROUTER_HINTS = tuple(request_options.ROUTER_ONLY_CONTROLS)
 
 
 def _params(fn):
@@ -557,13 +557,13 @@ def _params(fn):
 
 # The shared tuples name the arguments the shared builders accept, in both directions.
 check("controls/budget tuple names budget_kwargs",
-      set(_params(_controls.budget_kwargs)), set(_controls.PREDICT_CONTROLS))
+      set(_params(request_options.budget_kwargs)), set(request_options.PREDICT_CONTROLS))
 check("controls/decision tuple names decision_kwargs",
-      set(_params(_controls.decision_kwargs)), set(_controls.DECISION_CONTROLS))
+      set(_params(request_options.decision_kwargs)), set(request_options.DECISION_CONTROLS))
 check("controls/hook tuple names hook_kwargs",
-      set(_params(_controls.hook_kwargs)), set(_controls.HOOK_CONTROLS))
+      set(_params(request_options.hook_kwargs)), set(request_options.HOOK_CONTROLS))
 check("controls/routing tuple names router_kwargs",
-      set(_params(_controls.router_kwargs)), set(_controls.ROUTER_ONLY_CONTROLS))
+      set(_params(request_options.router_kwargs)), set(request_options.ROUTER_ONLY_CONTROLS))
 
 # Everything this file calls a control is an argument a real runner accepts, or a chain would fail
 # with a TypeError deep inside core instead of at the call site.
@@ -686,20 +686,20 @@ def remote_body(controls):
 
 check("controls/remote body carries both budgets",
       {k: v for k, v in remote_body({"max_len": 1024, "head_max_len": 384}).items()
-       if k in _controls.PREDICT_CONTROLS},
+       if k in request_options.PREDICT_CONTROLS},
       {"max_len": 1024, "head_max_len": 384})
 check("controls/remote body omits unset budgets",
-      [k for k in remote_body({}) if k in _controls.PREDICT_CONTROLS], [])
+      [k for k in remote_body({}) if k in request_options.PREDICT_CONTROLS], [])
 check("controls/remote body keeps a zero",
       remote_body({"head_max_len": 0}).get("head_max_len"), 0)
 # `lang` / `min_confidence` are laya-multimodal-serve `BODY_CONTROLS` too, so the same override reaches the
 # remote node -- and an unset one stays out of the body rather than shadowing the deployment.
 check("controls/remote body carries the decision controls",
       {k: v for k, v in remote_body({"lang": "es", "min_confidence": 0.3}).items()
-       if k in _controls.DECISION_CONTROLS},
+       if k in request_options.DECISION_CONTROLS},
       {"lang": "es", "min_confidence": 0.3})
 check("controls/remote body omits unset decision controls",
-      [k for k in remote_body({}) if k in _controls.DECISION_CONTROLS], [])
+      [k for k in remote_body({}) if k in request_options.DECISION_CONTROLS], [])
 check("controls/remote body keeps min_confidence=0.0",
       remote_body({"min_confidence": 0.0}).get("min_confidence"), 0.0)
 

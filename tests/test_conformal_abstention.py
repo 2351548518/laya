@@ -13,13 +13,13 @@ from decimal import Decimal
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from laya_multimodal.calibrate import (  # noqa: E402
+from laya_multimodal.decisions.calibration import (  # noqa: E402
     apply_binning_map,
     fit_abstention_thresholds,
     fit_binning_map,
     MIN_ABSTAIN_BUCKET_N,
 )
-from laya_multimodal.confidence import (  # noqa: E402
+from laya_multimodal.decisions.confidence import (  # noqa: E402
     check_min_confidence,
     check_min_confidence_map,
     resolve_min_confidence,
@@ -179,8 +179,9 @@ check_raises("validate/map non-string key rejected", ValueError,
 # both sides, because it is deliberately copied: `confidence.py` must import without PyTorch, so it
 # cannot read `common.QTYPES`.
 import inspect  # noqa: E402
-from laya_multimodal import confidence as confidence_module  # noqa: E402
-from laya_multimodal.common import QTYPES, temp_bucket  # noqa: E402
+from laya_multimodal.decisions import confidence as confidence_module  # noqa: E402
+from laya_multimodal.decisions.questions import QTYPES
+from laya_multimodal.decisions.calibration import temp_bucket  # noqa: E402
 
 check_true("vocabulary/the copy has something to be honest about",
            len(confidence_module.bucket_keys()) == 12, sorted(confidence_module.bucket_keys()))

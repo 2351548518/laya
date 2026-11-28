@@ -1,6 +1,6 @@
 # MultimodalAgent
 
-**English** · [简体中文](../zh-CN/reference/multimodal.md)
+**English** · [简体中文](../../docs_zh/reference/multimodal.md)
 
 Load a trained native checkpoint with `laya_multimodal.MultimodalAgent(path, device="cpu")`. Use
 `predict(state, questions)` for one input or `predict_batch(states, questions)` to apply
@@ -22,7 +22,7 @@ input needs an audio-capable backbone. [Formats and input budgets](../multimodal
 `usage.forward_passes` counts those questions. `usage.output_tokens` is zero.
 [Single-box contract](../grounding.md#prediction-contract)
 
-::: laya_multimodal.multimodal.MultimodalAgent
+::: laya_multimodal.models.multimodal.MultimodalAgent
     options:
       members:
         - predict

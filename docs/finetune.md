@@ -1,6 +1,6 @@
 # Joint fine-tuning
 
-**English** · [简体中文](zh-CN/finetune.md)
+**English** · [简体中文](../docs_zh/finetune.md)
 
 Adapt an original local Qwen3.5 or Gemma 4 backbone for typed decisions and one box per image
 question. The joint recipe has two stages. Head warmup freezes the backbone. LoRA fine-tuning
@@ -35,14 +35,18 @@ This example allows ordinary local JSONL without saved processor admission. With
 receipts, omit `--allow-unadmitted`. For an audio-capable Gemma 4 backbone, omit `--visual-only`
 and use the appropriate audio or video records. Select GPUs through `CUDA_VISIBLE_DEVICES`. For
 four processes, replace `laya-multimodal train` in each command with
-`torchrun --standalone --nproc_per_node=4 --module laya_multimodal.train_cli` or follow the
+`torchrun --standalone --nproc_per_node=4 --module laya_multimodal.train` or follow the
 recorded v6 launch example. [v6 two-stage example](project-readme/multimodal.md#reproduce)
+
+A merged checkpoint with the candidate readout and v2 prompt includes the backbone configuration
+needed to start a new run. Head-only and LoRA checkpoints also need their original backbone.
 
 ## Targets and losses
 
 A hard `expected` label `"inspect"` becomes `[0, 1]` for the candidate order
-`continue, inspect`. A soft `gold[question_id].probabilities` target such as `[0.2, 0.8]`
-weights both cross-entropy terms and takes precedence over `expected`. In the head recipe, Brier
+`continue, inspect`. A soft `gold[question_id].probabilities` mapping such as
+`{"continue": 0.2, "inspect": 0.8}` becomes `[0.2, 0.8]` in that order and takes precedence over
+`expected`. These two values weight the cross-entropy terms. In the head recipe, Brier
 loss helps shape probabilities, and ranked probability score (RPS) supervises ordinal
 questions. For a box, use coordinate L1, generalized IoU (GIoU) and the quality loss, which
 uses the model's observed IoU against the target.
@@ -84,5 +88,5 @@ steps, losses, gradient norms, learning rates and later development metrics.
 [SwanLab](project-readme/multimodal.md#swanlab)
 
 For Python calls use `GroundingTrainConfig` and `finetune_grounding` in `laya_multimodal.train`.
-The optional `laya-multimodal-train-decisions` command runs decision-only distillation and
-reference-KL experiments. [Training API](reference/train.md)
+Both the command and the Python API use this trainer. Run held-out evaluation and calibration
+on its saved checkpoints. [Training API](reference/train.md)

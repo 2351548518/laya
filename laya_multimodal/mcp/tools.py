@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Callable, Protocol, Sequence
+from typing import Any, Callable, Sequence
 
 from .. import __version__
-from ..confidence import check_min_confidence
-from ..hooks import validate_timeout
-from ..presets import state_field
+from ..decisions.confidence import check_min_confidence
+from ..decisions.hooks import validate_timeout
+from ..decisions.presets import state_field
 from .device import agent_device, device_report, router_agent
 
 
@@ -19,10 +19,6 @@ class ToolError(Exception):
         super().__init__(message)
         self.code = code
         self.message = message
-
-
-class AgentLike(Protocol):
-    def predict(self, state: dict, questions: dict) -> dict: ...
 
 
 PRESETS: dict[str, str] = {
@@ -72,7 +68,7 @@ def get_available_presets() -> dict[str, dict[str, Any]]:
 
 VALID_TYPES = {"choice", "score", "noul"}
 # `auto` is this layer's own sentinel -- "route it, do not pin a checkpoint". Every other value is a
-# checkpoint name, and the registry of those (names, aliases, casing) is core's: `laya_multimodal.router` runs
+# checkpoint name, and the registry of those (names, aliases, casing) is core's: `laya_multimodal.decisions.routing` runs
 # every model argument through `normalise_name` before it loads anything, which is the same call the
 # tools below end up making through `router.predict(model=...)`. A second list here could only ever
 # be narrower than that one, so it is not repeated.
@@ -82,7 +78,7 @@ AUTO = "auto"
 def _check_noul_labels(name: str, labels: Any) -> None:
     """`labels` renames a noul answer's two model-facing texts; mirror the agent's rule.
 
-    `laya_multimodal.common._resolve_noul_labels` is the contract: exactly `false` and `true`, each a
+    `laya_multimodal.decisions.questions._resolve_noul_labels` is the contract: exactly `false` and `true`, each a
     distinct non-empty string. The agent raises `ValueError` on anything else, and the tool
     wrapper turns a `ValueError` into `internal_error` -- the code this layer uses for a tool
     that broke. So the check is repeated here rather than imported, both to keep the message
@@ -244,7 +240,7 @@ def validate_preset(preset: Any) -> str:
 
 
 def _resolve_checkpoint(name: Any, router: Any = None) -> str:
-    from laya_multimodal.router import normalise_name
+    from laya_multimodal.decisions.routing import normalise_name
 
     resolve = getattr(router, "resolve", None) or normalise_name
     return resolve(name)
@@ -323,7 +319,7 @@ def validate_min_confidence(value: Any) -> float | None:
     """The per-call abstention threshold (``min_confidence``), or ``None`` when unset.
 
     Range, booleans and non-finite values are core's rule, not this layer's, so it defers to
-    ``laya_multimodal.confidence.check_min_confidence`` and only wraps its ``ValueError`` as a clean
+    ``laya_multimodal.decisions.confidence.check_min_confidence`` and only wraps its ``ValueError`` as a clean
     ``invalid_min_confidence`` the client can read -- the way ``validate_task`` carries core's
     task list instead of restating it. ``None`` means "answer everything", which is the flag's
     meaning on the CLI and the checkpoint default on every surface.
@@ -700,7 +696,7 @@ def laya_shortlist(
 
     The shared guardrails tell clients not to run >20-option choice questions
     without shortlisting; this tool is that shortlisting (the in-process
-    ``laya_multimodal.shortlist.predict_shortlist`` pattern over MCP). Embeddings come
+    ``laya_multimodal.decisions.shortlist.predict_shortlist`` pattern over MCP). Embeddings come
     from the answering checkpoint's own encoder (``embed_fn_from_agent``), so
     no extra model is downloaded; ``embed_fn`` is injectable for tests or for
     a dedicated bi-encoder.
@@ -733,7 +729,7 @@ def laya_shortlist(
             "laya_predict with head_max_len raised, or run the MCP server without LAYA_BASE_URL.",
         )
     # Lazy: keeps numpy/shortlist out of module import for laya_multimodal.mcp.tools.
-    from laya_multimodal.shortlist import (
+    from laya_multimodal.decisions.shortlist import (
         DEFAULT_SHORTLIST_K,
         cached_embed_fn,
         embed_fn_from_agent,
@@ -921,7 +917,7 @@ def laya_tournament(
     if "lang" in routing_overrides:
         forward["lang"] = routing_overrides["lang"]
 
-    from laya_multimodal.shortlist import predict_tournament
+    from laya_multimodal.decisions.shortlist import predict_tournament
 
     started = time.perf_counter()
     routing = None
@@ -1151,7 +1147,7 @@ def laya_preset(
     )
 
 
-def _remote_status(router: Any, preload: bool) -> dict:
+def _remote_status(router: Any) -> dict:
     """``laya_status`` for a remote router: the server's own /health, no torch import here."""
     out: dict[str, Any] = {
         "mode": "remote",
@@ -1178,7 +1174,7 @@ def _remote_status(router: Any, preload: bool) -> dict:
 
 def laya_status(*, router: Any = None, loaded: list[str] | None = None, preload: bool = True) -> dict:
     if router is not None and hasattr(router, "base_url") and hasattr(router, "health"):
-        return _remote_status(router, preload)
+        return _remote_status(router)
     report = device_report()
     versions: dict[str, str | None] = {
         "laya-multimodal": __version__,
@@ -1505,9 +1501,9 @@ def laya_decide(
     ``values`` -- the raw answer stays in ``confidence``/``probabilities`` -- so a
     client that trusts the values can tell "not confident" from a confident pick.
     """
-    # Lazy: keeps laya_multimodal.structured (pure Python, but a module import is still a
+    # Lazy: keeps laya_multimodal.decisions.structured (pure Python, but a module import is still a
     # module import) out of this module's import-time surface.
-    from laya_multimodal.structured import SchemaError, decide
+    from laya_multimodal.decisions.structured import SchemaError, decide
 
     state_d = validate_state(state)
     model_name = validate_model(model, router=router)

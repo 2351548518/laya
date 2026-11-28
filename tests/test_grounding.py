@@ -6,10 +6,10 @@ import numpy as np
 import pytest
 import torch
 
-from laya_multimodal.agent import Agent
-from laya_multimodal.grounding import GroundingHead, box_answer, box_iou, grounding_loss, last_valid_state, validate_boxes
+from laya_multimodal.models.base import Agent
+from laya_multimodal.models.grounding import GroundingHead, box_answer, box_iou, grounding_loss, last_valid_state, validate_boxes
 from laya_multimodal.train import GroundingTrainConfig
-from laya_multimodal.multimodal import MultimodalAgent
+from laya_multimodal.models.multimodal import MultimodalAgent
 
 
 def test_box_geometry_and_masked_last_state():
@@ -56,7 +56,7 @@ def test_single_box_default_trains_without_importing_the_set_matcher(monkeypatch
 @pytest.mark.parametrize('padding',['none','left','right'])
 def test_single_box_selects_before_float_cast_with_exact_outputs_and_gradients(dtype,padding):
     import copy
-    from laya_multimodal.grounding import ordered_boxes
+    from laya_multimodal.models.grounding import ordered_boxes
     torch.manual_seed(27);torch.set_num_threads(1)
     original=GroundingHead(16,32);optimized=copy.deepcopy(original)
     hidden=torch.randn(3,29,16,dtype=dtype,requires_grad=True)
@@ -200,7 +200,9 @@ def test_batched_geometry_preserves_per_example_gradients(multiple):
     hidden=torch.randn(3,6,16);mask=torch.tensor([[0,0,1,1,1,1],[1,1,1,1,1,1],[0,1,1,1,1,1]])
     targets=[[[.1,.1,.3,.7]],[],[[.6,.2,.9,.8]]]
     if multiple:targets[0].append([.5,.1,.9,.9])
-    joint,_=grounding_loss(batched(hidden,mask,multiple=multiple),targets,multiple=multiple)
+    joint, parts = grounding_loss(batched(hidden, mask, multiple=multiple), targets,
+                                  multiple=multiple, collect_components=False)
+    assert parts == {}
     (joint*3/7).backward()
     for i in range(3):
         individual,_=grounding_loss(sequential(hidden[i:i+1],mask[i:i+1],multiple=multiple),[targets[i]],multiple=multiple)
@@ -278,7 +280,7 @@ def test_indexed_grounding_rows_detect_changed_path(tmp_path, change):
 
 
 def test_decision_batch_checks_reference_only_when_kl_enabled(monkeypatch):
-    from laya_multimodal import multimodal_train
+    from laya_multimodal import train
     from laya_multimodal.train import _decision_batch_loss
 
     calls = []
@@ -287,7 +289,7 @@ def test_decision_batch_checks_reference_only_when_kl_enabled(monkeypatch):
         calls.append(args)
         return "current"
 
-    monkeypatch.setattr(multimodal_train, "example_hash", example_hash)
+    monkeypatch.setattr(train, "example_hash", example_hash)
     logits = torch.tensor([[.3, .7]]).log().requires_grad_()
     agent = SimpleNamespace(device=torch.device("cpu"), _logits=lambda inputs, width: logits)
     row = {"replay_reference": [.1, .9], "replay_reference_identity": "stale"}

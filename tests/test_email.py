@@ -1,6 +1,6 @@
 """Email cleaning: a disclaimer footer must not delete the sender's actual request.
 
-Regression tests for `laya_multimodal.email.clean_email_body`. `_DISCLAIMER` used to be applied to whole
+Regression tests for `laya_multimodal.decisions.email.clean_email_body`. `_DISCLAIMER` used to be applied to whole
 paragraphs, so any paragraph that merely *mentioned* boilerplate was deleted outright. When the
 footer ran on without a blank line, the request went with it:
 
@@ -19,8 +19,8 @@ as the start of a signature and everything after it was cut:
     # before: 'Hi,'    <- the request was cut away
 
 The last block guards a different kind of silence. `email_questions` was defined twice, here and
-in `laya_multimodal/presets.py`, and `laya_multimodal/__init__.py` re-exports the `presets` one. Editing the copy in
-`laya_multimodal/email.py` moved `laya_multimodal.email.email_questions` and left `laya_multimodal.email_questions` where it was,
+in `laya_multimodal/decisions/presets.py`, and `laya_multimodal/__init__.py` re-exports the `presets` one. Editing the copy in
+`laya_multimodal/decisions/email.py` moved `laya_multimodal.decisions.email.email_questions` and left `laya_multimodal.email_questions` where it was,
 with no test and no lint failing.
 
 The `edges/` block at the end is the same shape again: `clean_email_body` takes a `max_chars` budget
@@ -41,10 +41,10 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import laya_multimodal  # noqa: E402
-from laya_multimodal import email as email_module  # noqa: E402
-from laya_multimodal import presets  # noqa: E402
-from laya_multimodal.common import serialize_state  # noqa: E402
-from laya_multimodal.email import clean_email_body, email_state  # noqa: E402
+from laya_multimodal.decisions import email as email_module  # noqa: E402
+from laya_multimodal.decisions import presets  # noqa: E402
+from laya_multimodal.decisions.questions import serialize_state  # noqa: E402
+from laya_multimodal.decisions.email import clean_email_body, email_state  # noqa: E402
 
 PASS, FAIL = [], []
 
@@ -691,7 +691,7 @@ check(
 check_true(
     "email_questions/one definition behind both module paths",
     email_module.email_questions is presets.email_questions,
-    "laya_multimodal.email.email_questions is not laya_multimodal.presets.email_questions",
+    "laya_multimodal.decisions.email.email_questions is not laya_multimodal.decisions.presets.email_questions",
 )
 check_true(
     "email_questions/the package export is that same object",

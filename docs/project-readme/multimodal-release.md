@@ -1,6 +1,6 @@
 # Export a trained checkpoint
 
-**English** · [简体中文](../zh-CN/project-readme/multimodal-release.md)
+**English** · [简体中文](../../docs_zh/project-readme/multimodal-release.md)
 
 Run inference with the native checkpoint, merge the LoRA adapter, then export to GGUF for
 llama.cpp or mobile deployment. Test the result on the same inputs.

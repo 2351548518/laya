@@ -1,6 +1,6 @@
 # Staged adoption
 
-**English** · [简体中文](zh-CN/staged-adoption.md)
+**English** · [简体中文](../docs_zh/staged-adoption.md)
 
 Introduce model decisions in stages. The application keeps control of execution and review
 while the model supplies decisions, probabilities and hook events for comparison.

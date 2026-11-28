@@ -19,7 +19,7 @@ from huggingface_hub import hf_hub_download
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 import laya_multimodal  # noqa: E402
-from laya_multimodal.evals import ece  # noqa: E402
+from laya_multimodal.evaluation.evaluator import ece  # noqa: E402
 
 REVISIONS = {
     "mteb/banking77": "18072d2685ea682290f7b8924d94c62acc19c0b2",
@@ -105,7 +105,7 @@ def main():
         rows = random.Random(args.seed).sample(rows, args.limit)
     question = {"type": "choice", "instructions": instructions,
                 "criteria": {name.replace("_", " "): None for name in names}}
-    from laya_multimodal.revisions import default_checkpoint
+    from laya_multimodal.models.revisions import default_checkpoint
 
     source = args.model or default_checkpoint()
     agent = laya_multimodal.load(source, device=args.device)

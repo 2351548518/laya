@@ -12,10 +12,10 @@ from tempfile import TemporaryDirectory
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from laya_multimodal.agent import Agent
-from laya_multimodal.evals import file_fingerprint
-from laya_multimodal.systemone import MAX_CHOICE_OPTIONS, MAX_IMAGE_BYTES, MAX_IMAGE_REQUEST_BYTES, MAX_IMAGE_SIDE, MIN_IMAGE_SIDE
-from laya_multimodal.train import target_from_expected
+from laya_multimodal.models.base import Agent
+from laya_multimodal.evaluation.evaluator import file_fingerprint
+from laya_multimodal.decisions.systemone import MAX_CHOICE_OPTIONS, MAX_IMAGE_BYTES, MAX_IMAGE_REQUEST_BYTES, MAX_IMAGE_SIDE, MIN_IMAGE_SIDE
+from laya_multimodal.data import target_from_expected
 from scripts.multimodal.prepare_dataset import systemone_question
 
 

@@ -1,6 +1,6 @@
 # LangChain components
 
-**English** · [简体中文](../zh-CN/reference/langchain.md)
+**English** · [简体中文](../../docs_zh/reference/langchain.md)
 
 From the source checkout, install with `python -m pip install -e '.[langchain]'`. The [LangChain & LangGraph guide](../langchain.md)
 shows these components in chains and graphs.

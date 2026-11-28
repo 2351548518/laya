@@ -169,9 +169,9 @@ check("flags: --model forwarded", stub.route_calls[0][1]["model"] == "multimodal
 
 # ------------------------------------------------- --model is core's registry, not a copy of it
 # `choices=` compared strings exactly, so the flag knew three spellings while the router it feeds
-# has always resolved a dozen more. The names and aliases are imported from `laya_multimodal.router` rather
+# has always resolved a dozen more. The names and aliases are imported from `laya_multimodal.decisions.routing` rather
 # than written out, so this sweep follows the registry instead of drifting from it.
-from laya_multimodal.router import DEFAULT_MODELS, _ALIASES  # noqa: E402
+from laya_multimodal.decisions.routing import DEFAULT_MODELS, _ALIASES  # noqa: E402
 
 
 def parse_model(argv):
@@ -478,7 +478,7 @@ check("batch: redirected stdout is written as utf-8", code == 0
 # by writing Python. These run the real parser and the real `run_batch` over a recording router.
 import inspect as _inspect  # noqa: E402
 
-from laya_multimodal.router import Router as _CoreRouter  # noqa: E402
+from laya_multimodal.decisions.routing import Router as _CoreRouter  # noqa: E402
 
 many = os.path.join(tmp, "four.txt")
 with open(many, "w", encoding="utf-8") as handle:
@@ -800,7 +800,7 @@ for value in ("abc", ""):
 
 # --------------------------------------------------------------- --min-confidence (#361's gate)
 # The gate itself is core's: `Router.predict` and `Router.predict_batch` both run the argument
-# through `laya_multimodal.confidence.check_min_confidence` and then `flag_low_confidence`, which marks an
+# through `laya_multimodal.decisions.confidence.check_min_confidence` and then `flag_low_confidence`, which marks an
 # answer and keeps it. What this section covers is the CLI's half -- the flag reaches the call, an
 # unset flag is not sent as `None`, a value outside core's range is refused in core's words,
 # routing refuses the flag instead of exiting 0 having ignored it, and the mark a gated run
@@ -808,7 +808,7 @@ for value in ("abc", ""):
 import inspect  # noqa: E402
 
 from laya_multimodal import Router as _Router  # noqa: E402
-from laya_multimodal.confidence import check_min_confidence as _core_check  # noqa: E402
+from laya_multimodal.decisions.confidence import check_min_confidence as _core_check  # noqa: E402
 
 
 class GatedRouter(QuestionRecorder):
@@ -941,7 +941,7 @@ check("threshold: --json still carries the raw key",
 
 # --------------------------------------------------------------------- train subcommand
 code, out, err, stub = run_cli(["train", "--help"])
-check("train subcommand: dispatches to train_cli and shows help", code == 0 and "laya-multimodal train" in out and "--train-split" in out, out)
+check("train subcommand: dispatches to the joint trainer and shows help", code == 0 and "laya-multimodal train" in out and "--train-split" in out, out)
 
 # Drift pin, the other direction: every control `predict` takes that the parser can name must
 # arrive in the call, and the ones it cannot name must be the accepted three. A control added to

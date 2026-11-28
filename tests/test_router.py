@@ -46,7 +46,7 @@ class RouterTests(unittest.TestCase):
         router.register("multimodal", "/checkpoints/replacement")
         self.assertEqual(router.route("text")["repo"], "/checkpoints/replacement")
         agent = tiny_agent()
-        with patch("laya_multimodal.agent.load", return_value=agent) as load:
+        with patch("laya_multimodal.models.base.load", return_value=agent) as load:
             self.assertIs(router.load("multimodal"), agent)
         self.assertEqual(load.call_args.args, ("/checkpoints/replacement",))
 

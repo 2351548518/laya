@@ -1,6 +1,6 @@
 # Agno Integration
 
-**English** · [简体中文](zh-CN/agno.md)
+**English** · [简体中文](../docs_zh/agno.md)
 
 Use locally hosted native decisions with Agno teams.
 

@@ -1,6 +1,6 @@
 # Examples
 
-**English** · [简体中文](../zh-CN/hooks/examples.md)
+**English** · [简体中文](../../docs_zh/hooks/examples.md)
 
 Copy-paste recipes. Every snippet is self-contained apart from the helpers it names
 (`ship`, `CACHE`, and so on), which you supply.
@@ -194,7 +194,7 @@ only way in and it reads for lifecycle method names.
 
 ```python
 from laya_multimodal import Router
-from laya_multimodal.router import RouteDecision
+from laya_multimodal.decisions.routing import RouteDecision
 
 class Pin:
     def on_route(self, ctx):
@@ -331,7 +331,8 @@ Subclass `BaseHook` to override only what you need, and register something once 
 process instead of passing it to every `Agent` and `Router`.
 
 ```python
-from laya_multimodal import BaseHook, hooks
+from laya_multimodal import BaseHook
+from laya_multimodal.decisions import hooks
 
 class Audit(BaseHook):
     def on_predict_end(self, ctx):

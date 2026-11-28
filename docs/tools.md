@@ -1,6 +1,6 @@
 # Tool & Function Selection
 
-**English** · [简体中文](zh-CN/tools.md)
+**English** · [简体中文](../docs_zh/tools.md)
 
 `LayaToolSelector` scores candidate tools with a native decision checkpoint. The returned
 `ToolRouteDecision` carries the selected tool, its option probabilities and fallback status.
@@ -86,7 +86,7 @@ else:
 `LayaToolSelector` uses Laya's calibrated confidence scores to gate routing decisions. When an ambiguous or out-of-domain query is presented, the selector avoids bad tool invocations by falling back to a general agent or raising `LayaLowConfidenceError`:
 
 ```python
-from laya_multimodal.integrations._errors import LayaLowConfidenceError
+from laya_multimodal.integrations import LayaLowConfidenceError
 
 def general_fallback_llm(prompt: str):
     """Fallback handler for ambiguous or novel requests."""

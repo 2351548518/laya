@@ -1,171 +1,38 @@
 """Train native typed decisions and single-box grounding on one shared backbone."""
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+import argparse
+from dataclasses import asdict, dataclass, fields
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from array import array
 import hashlib
+from importlib.util import find_spec
 import json
 import math
 import os
 from pathlib import Path
 import random
 import time
-from typing import Any, Dict, List
 
 import torch
 from torch import distributed as dist
 from torch.nn import functional as F
 
-from ._grounding_checkpoint import load_checkpoint, save_checkpoint
-from .common import render_options
-from .evals import file_fingerprint
-from .grounding import box_iou, crowd_overlap, grounding_loss, validate_boxes
-from .multimodal import MultimodalAgent, _active_head, _is_adapter_model
-from .multimodal_data import can_shuffle_choice, collate_multimodal_inputs, normalize_record, read_records, record_input, record_modality
-from .multimodal_distributed import distributed_context
-from .multimodal_objectives import learning_rate_factor, optimizer_groups
-
-
-def target_from_gold(q: Dict[str, Any], gold_q: Dict[str, Any]) -> List[float]:
-    """Return the normalized target distribution for an internal question, in option order.
-
-    `gold_q["probabilities"]` is keyed by choice label, by `"false"`/`"true"` for noul, and by
-    the level index as a string for score -- the `{state, questions, gold}` schema in
-    `docs/finetune.md`. A choice label that is not a string is also looked up as its JSON key.
-    A row whose probabilities sum to zero becomes uniform. A negative or
-    non-finite probability raises `ValueError`.
-    """
-    probs = gold_q["probabilities"]
-
-    def get(key, default):
-        return probs.get(key, probs.get(str(key), default))
-
-    t, crit = q["t"], q["crit"]
-    if t == "choice":
-        target = [float(get(k, 0.0)) for k in crit.keys()]
-    elif t == "noul":
-        target = [float(get("false", 0.5)), float(get("true", 0.5))]
-    else:
-        target = [float(get(str(i), 0.0)) for i in range(len(crit))]
-    if any(not math.isfinite(v) or v < 0 for v in target):
-        raise ValueError("probabilities must be finite and non-negative, got %r" % (target,))
-    total = sum(target)
-    if total > 0:
-        return [v / total for v in target]
-    return [1.0 / len(target)] * len(target)
-
-
-def target_from_expected(q: Dict[str, Any], expected_val: Any,
-                         label_smoothing: float = 0.0) -> List[float]:
-    """Return the normalized target distribution from one expected answer, in option order.
-
-    `expected_val` is:
-    - a choice label (str or value matching a criterion) for choice questions
-    - a boolean for noul questions
-    - an integer level index or level string for score questions
-
-    When `label_smoothing > 0`, smooths probability mass uniformly:
-    target[i] = (1 - eps) * one_hot[i] + eps / K.
-    """
-    if isinstance(label_smoothing, bool) or not (0.0 <= label_smoothing < 1.0):
-        raise ValueError("label_smoothing must be in [0, 1), got %r" % (label_smoothing,))
-
-    t, crit = q["t"], q["crit"]
-    k = len(render_options(q))
-    idx = None
-    target = None
-
-    if t == "choice":
-        keys = list(crit.keys())
-        if expected_val in crit:
-            idx = keys.index(expected_val)
-        else:
-            str_expected = str(expected_val)
-            for i, key in enumerate(keys):
-                if str(key) == str_expected:
-                    idx = i
-                    break
-        if idx is None:
-            raise ValueError("expected answer %r not found in choice options %r" % (expected_val, keys))
-    elif t == "noul":
-        if isinstance(expected_val, bool):
-            idx = 1 if expected_val else 0
-        elif isinstance(expected_val, (int, float)):
-            if expected_val in (0, 1) or expected_val in (0.0, 1.0):
-                idx = int(expected_val)
-            else:
-                raise ValueError("numeric noul expected answer must be 0 or 1, got %r" % (expected_val,))
-        elif isinstance(expected_val, str):
-            lower = expected_val.strip().lower()
-            if lower in ("true", "1", "yes"):
-                idx = 1
-            elif lower in ("false", "0", "no"):
-                idx = 0
-        if idx is None:
-            raise ValueError("expected answer %r cannot be parsed as a noul boolean" % (expected_val,))
-    else:  # score
-        keys = list(crit.keys()) if isinstance(crit, dict) else [str(i) for i in range(len(crit))]
-        K = len(keys)
-        target = None
-        if isinstance(expected_val, str) and expected_val in keys:
-            idx = keys.index(expected_val)
-            target = [1.0 if i == idx else 0.0 for i in range(K)]
-        else:
-            try:
-                if not isinstance(expected_val, bool):
-                    val = float(expected_val)
-                    if 0.0 <= val <= float(K - 1):
-                        low = int(math.floor(val))
-                        if low == K - 1 or val == float(low):
-                            target = [1.0 if i == low else 0.0 for i in range(K)]
-                        else:
-                            frac = val - float(low)
-                            target = [0.0] * K
-                            target[low] = 1.0 - frac
-                            target[low + 1] = frac
-                    else:
-                        raise ValueError("expected score %r out of bounds [0, %d]" % (expected_val, K - 1))
-            except (ValueError, TypeError) as exc:
-                if isinstance(exc, ValueError) and "out of bounds" in str(exc):
-                    raise
-                pass
-        if target is None:
-            str_val = str(expected_val)
-            for i, key in enumerate(keys):
-                if str(key) == str_val:
-                    target = [1.0 if j == i else 0.0 for j in range(K)]
-                    break
-        if target is None:
-            raise ValueError("expected answer %r not found in score levels %r" % (expected_val, keys))
-
-    if target is None:
-        target = [1.0 if i == idx else 0.0 for i in range(k)]
-    if label_smoothing > 0.0:
-        smooth_val = label_smoothing / k
-        target = [(1.0 - label_smoothing) * v + smooth_val for v in target]
-    return target
-
-
-def decision_target(row, qid, question):
-    """Read the target in canonical option order, preferring soft labels when supplied."""
-    if qid in row.get("gold", {}):
-        return target_from_gold(question, row["gold"][qid])
-    return target_from_expected(question, row["expected"][qid])
-
-
-def _train_mode(agent, config):
-    agent.model.train()
-    if config.mode != "full":
-        base = agent.model.get_base_model() if _is_adapter_model(agent.model) else agent.model
-        for name in ("model.vision_tower", "model.audio_tower"):
-            try:
-                module = base.get_submodule(name)
-            except AttributeError:
-                continue
-            if module is not None:
-                module.eval()
+from .training.checkpoint import load_checkpoint, save_checkpoint
+from .training.distributed import distributed_context
+from .training.qwen_delta import qwen_training_delta
+from .training.reporting import log_training_event
+from .evaluation.evaluator import file_fingerprint
+from .models.grounding import box_iou, crowd_overlap, grounding_loss, validate_boxes
+from .models.multimodal import MultimodalAgent, _active_head, _is_adapter_model
+from .data import (
+    can_shuffle_choice, collate_multimodal_inputs, decision_target, example_hash, load_rows,
+    normalize_record, read_records, record_input, record_modality,
+    target_from_expected as target_from_expected, target_from_gold as target_from_gold,
+)
+from .evaluation.native_metrics import _evaluation_video_key, collect_records, metrics as decision_metrics
+from .training.objectives import configure_training, learning_rate_factor, optimizer_groups
 
 
 @dataclass
@@ -436,20 +303,18 @@ def grounding_retained(current, baseline, margin):
 
 
 def _decision_development_metrics(rows, records, tagged_only):
-    from .multimodal_train import example_hash, metrics
-    result={'decisions':metrics(records)}
+    result={'decisions':decision_metrics(records)}
     if tagged_only:
         keys={example_hash(row,qid,qdef) for row in rows if row.get('retention_reference')
               for qid,qdef in row['questions'].items()}
         selected=[record for record in records if record['example_hash'] in keys]
         if not selected:raise ValueError('tagged retention requested without reference development decisions')
-        result['retention_decisions']=metrics(selected)
+        result['retention_decisions']=decision_metrics(selected)
     return result
 
 
 def _decision_eval_shard(agent, rows, rank, world_size):
     """Keep requests for a shared clip together and balance the decoding work."""
-    from .multimodal_train import _evaluation_video_key
     groups = {}
     for index, row in enumerate(rows):
         key = _evaluation_video_key(agent, row)
@@ -469,7 +334,6 @@ def _decision_eval_shard(agent, rows, rank, world_size):
 
 
 def _decision_development_records(agent, rows, config, ctx, sharded):
-    from .multimodal_train import collect_records
     if not sharded:
         return collect_records(agent, rows, config.decision_eval_micro_batch, max_micro_tokens=config.max_micro_tokens)
     shard = _decision_eval_shard(agent, rows, ctx.rank, ctx.world_size)
@@ -620,9 +484,8 @@ def _activation_context(inputs, config):
 
 def _decision_batch_loss(agent,chunk,inputs,config):
     """Use the same per-example CE/RPS/Brier/KL objective as the scalar replay path."""
-    from .common import QTYPES
-    from .multimodal_objectives import decision_loss
-    from .multimodal_train import example_hash
+    from .decisions.questions import QTYPES
+    from .training.objectives import decision_loss
     width=max(len(item[4]) for item in chunk);raw=agent._logits(inputs,width);aligned=[];targets=[];references=[];accepted=[]
     for index,(row,qid,qdef,q,values) in enumerate(chunk):
         k=len(values);logits=raw[index,:k]
@@ -644,7 +507,7 @@ def _decision_batch_loss(agent,chunk,inputs,config):
         ordinal_weight=config.decision_ordinal_weight,brier_weight=config.decision_brier_weight,
         reference=torch.tensor(references,device=agent.device,dtype=torch.float32) if use_reference else None,
         reference_mask=torch.tensor(accepted,device=agent.device) if use_reference else None,
-        kl_weight=config.replay_kl_weight)
+        kl_weight=config.replay_kl_weight, collect_components=False)
     return loss
 
 
@@ -654,9 +517,17 @@ def _grounding_train_mode(agent, config):
         base = agent.model.get_base_model() if _is_adapter_model(agent.model) else agent.model
         base.grounding_head.train()
     else:
-        # Transformer checkpointing is conditional on training=True. Freeze stochastic
-        # vision/audio towers through the existing native training-mode helper.
-        _train_mode(agent, config)
+        # Transformer checkpointing requires training mode. Keep the frozen towers in eval mode.
+        agent.model.train()
+        if config.mode != "full":
+            base = agent.model.get_base_model() if _is_adapter_model(agent.model) else agent.model
+            for name in ("model.vision_tower", "model.audio_tower"):
+                try:
+                    module = base.get_submodule(name)
+                except AttributeError:
+                    continue
+                if module is not None:
+                    module.eval()
 
 
 @torch.no_grad()
@@ -777,7 +648,6 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
         raise ValueError(cfg.selection_metric + ' selection requires decision_dev_data')
     torch.manual_seed(cfg.seed)
     dev = load_grounding_rows(dev_data)
-    from .multimodal_train import MultimodalTrainConfig, configure_training, load_rows
     decision_dev = load_rows(decision_dev_data) if decision_dev_data else []
     dev_groups = {row["group"] for row in dev if row.get("group") is not None}
     decision_groups = set()
@@ -834,8 +704,7 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
         readout = base.decision_scorer if getattr(agent, 'readout', 'letter') == 'candidate' else _active_head(agent.model)
         readout.float().requires_grad_(cfg.train_readout_in_warmup)
     else:
-        configure_training(agent, MultimodalTrainConfig(mode=cfg.mode, lora_rank=cfg.lora_rank,
-            lora_alpha=cfg.lora_alpha, lora_targets=cfg.lora_targets, train_projectors=agent.model_type == 'gemma4'))
+        configure_training(agent, cfg, train_projectors=agent.model_type == 'gemma4')
         base = agent.model.get_base_model() if _is_adapter_model(agent.model) else agent.model
         if agent.model_type.startswith('qwen') and cfg.mode == 'lora':
             mergers = [name for name, _ in base.named_modules() if name.endswith('visual.merger')]
@@ -884,7 +753,7 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
         best, history, before = progress["best"], progress["history"], progress["before"]
         forward_counts, execution = progress["forward_counts"], progress["execution"]
         if ctx.main:
-            print("Resumed joint training at optimizer step %d" % steps, flush=True)
+            log_training_event("RESUME", "step=%d" % steps)
     starting_step = steps
     if ctx.main:
         (output / "before.json").write_text(json.dumps(before, indent=2) + "\n")
@@ -927,11 +796,12 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
                     geometry_forwards += 1
                     loss, _ = grounding_loss(result, [row['grounding']['boxes'] for row in chunk], multiple=multiple,
                         ignored=[row['grounding'].get('ignored', []) for row in chunk],
-                        quality_matched_only=cfg.quality_matched_only)
-                if not torch.isfinite(loss):
+                        quality_matched_only=cfg.quality_matched_only, collect_components=False)
+                loss_value = float(loss.detach())
+                if not math.isfinite(loss_value):
                     raise RuntimeError("nonfinite grounding loss")
                 (loss * len(chunk) / window_size).backward()
-                loss_sum += float(loss.detach()) * len(chunk)
+                loss_sum += loss_value * len(chunk)
                 positive_targets[int(multiple)] += sum(bool(row['grounding']['boxes']) for row in chunk)
             for row in local_rows:
                 if cfg.batch_decisions or not train_decisions or 'grounding' in row:
@@ -949,32 +819,34 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
                 target = torch.tensor(values, device=agent.device)
                 loss = -(target * F.log_softmax(logits[0].float(), -1)).sum()
                 if cfg.decision_ordinal_weight or cfg.decision_brier_weight:
-                    from .common import QTYPES
-                    from .multimodal_objectives import decision_loss
+                    from .decisions.questions import QTYPES
+                    from .training.objectives import decision_loss
                     loss,_=decision_loss(logits,target.unsqueeze(0),torch.ones_like(logits,dtype=torch.bool),
-                        torch.tensor([QTYPES[q['t']]],device=agent.device),objective='soft-ce',
-                        ordinal_weight=cfg.decision_ordinal_weight,brier_weight=cfg.decision_brier_weight)
+                        torch.tensor([QTYPES[q['t']]],device=agent.device),
+                        ordinal_weight=cfg.decision_ordinal_weight, brier_weight=cfg.decision_brier_weight,
+                        collect_components=False)
                 if row.get('replay_reference') is not None and cfg.replay_kl_weight:
-                    from .multimodal_train import example_hash
                     if row.get('replay_reference_identity') != example_hash(row, qid, qdef):
                         raise ValueError('replay reference input/options changed')
                     reference = torch.tensor(row['replay_reference'], device=agent.device, dtype=torch.float32)
                     if reference.shape != target.shape:raise ValueError('replay reference option order/size mismatch')
                     if int(reference.argmax()) == int(target.argmax()) and float(reference.max()) >= .5:
                         loss = loss + cfg.replay_kl_weight * F.kl_div(F.log_softmax(logits[0].float(), -1), reference, reduction='sum')
-                if not torch.isfinite(loss):
-                    raise RuntimeError("nonfinite grounding loss")
+                loss_value = float(loss.detach())
+                if not math.isfinite(loss_value):
+                    raise RuntimeError("nonfinite decision loss")
                 (loss / window_size).backward()
-                loss_sum += float(loss.detach())
+                loss_sum += loss_value
             if cfg.batch_decisions and train_decisions:
                 for chunk, inputs in _decision_microbatches(agent, local_rows, cfg, option_rng=option_rng):
                     with _activation_context(inputs, cfg):
                         loss = _decision_batch_loss(agent, chunk, inputs, cfg)
                         decision_forwards += 1
-                    if not torch.isfinite(loss):
+                    loss_value = float(loss.detach())
+                    if not math.isfinite(loss_value):
                         raise RuntimeError('nonfinite decision micro-batch loss')
                     (loss * len(chunk) / window_size).backward()
-                    loss_sum += float(loss.detach()) * len(chunk)
+                    loss_sum += loss_value * len(chunk)
             ctx.sum_gradients(params)
             grad_norm = torch.nn.utils.clip_grad_norm_(params, 1., error_if_nonfinite=True)
             factor = learning_rate_factor(steps + 1, total, cfg.warmup_ratio, cfg.min_lr_ratio)
@@ -995,8 +867,8 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
                 elapsed = time.perf_counter() - start
                 loss = total_loss / window_size
                 if log_step:
-                    print('grounding step=%d loss=%.5f elapsed=%.1fs ranks=%d' %
-                          (steps, loss, elapsed, ctx.world_size), flush=True)
+                    log_training_event("TRAIN", "step=%d loss=%.5f elapsed=%.1fs ranks=%d" %
+                                        (steps, loss, elapsed, ctx.world_size))
                 if reporter is not None:
                     rates = {group['name']: group['lr'] for group in optimizer.param_groups}
                     reporter.training_step(steps, loss, elapsed, float(grad_norm.detach()), window_size, rates)
@@ -1014,7 +886,7 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
                     geometry_ok = cfg.max_grounding_regression is None or grounding_retained(
                         metrics, before, cfg.max_grounding_regression)
                     record['grounding_retention_passed'] = geometry_ok
-                    print('GROUNDING DEV', json.dumps(record), flush=True)
+                    log_training_event("DEV", json.dumps(record))
                     selected = decision_ok and geometry_ok and score > best
                     if selected:
                         best = score
@@ -1067,3 +939,144 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
             reporter.evaluation(steps, metrics, score=final_score, selected=selected, final=True)
     ctx.barrier()
     return agent
+
+
+def _visual_row_validator(model, max_len, require_admission):
+    # Never silently drop the audio part of a trajectory to make a VLM fit.
+    expected_processor = Path(model).resolve()
+    verified_processors = set()
+
+    def validate(split, row):
+        state = row['state']
+        if isinstance(state, dict) and (state.get('audio') is not None or
+                (state.get('video') is not None and state.get('video_audio') is not False)):
+            raise ValueError('Qwen3.5 requires an admitted visual-only view; audio cannot be discarded: ' + str(row.get('id')))
+        admission = row.get('training_admission', {})
+        if not isinstance(admission, dict):
+            raise ValueError('training_admission must be an object')
+        admitted = admission.get('processor')
+        if split == 'train' and not admitted and require_admission:
+            raise ValueError('Qwen3.5 training requires native processor admission for every training row')
+        if admitted and admitted not in verified_processors:
+            if Path(admitted).resolve() != expected_processor:
+                raise ValueError('Training view was admitted using a different backbone processor: ' + str(admitted))
+            verified_processors.add(admitted)
+        if max_len is not None and admitted and admission.get('max_len') != max_len:
+            raise ValueError('Native admission and training context budgets must match')
+
+    return validate
+
+
+def validate_visual_training(root, model, max_len=None, require_admission=True, *, train_split='train'):
+    validate = _visual_row_validator(model, max_len, require_admission)
+    for split in (train_split, 'dev', 'decision_dev'):
+        for row in read_records(root / (split + '.jsonl'), verify_media=False):
+            validate('train' if split == train_split else split, row)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog="laya-multimodal train", description=__doc__)
+    parser.add_argument('--model', required=True, help='Local backbone or native checkpoint directory')
+    parser.add_argument('--data', required=True, help='Directory with the prepared JSONL splits')
+    parser.add_argument('--out', required=True, help='Run and checkpoint directory')
+    parser.add_argument('--config', required=True, help='Joint training settings in JSON')
+    parser.add_argument('--train-split', choices=['train', 'warmup'], default='train')
+    parser.add_argument('--require-original-base', action='store_true')
+    parser.add_argument('--visual-only', action='store_true')
+    parser.add_argument('--allow-unadmitted', action='store_true',
+        help='Allow local JSONL without stored processor receipts; native media and context checks still apply')
+    parser.add_argument('--qwen-training-delta', action='store_true',
+        help='Use the local PyTorch chunk scan for Qwen3.5 gradient computation')
+    parser.add_argument('--resume', help='Run directory or optimizer snapshot to resume with the original model and data')
+    parser.add_argument('--deterministic', action='store_true', help='Use deterministic PyTorch training operations')
+    parser.add_argument('--text-attention', choices=['sdpa', 'flex_attention'], default='sdpa')
+    parser.add_argument('--swanlab', choices=('local', 'online'), help='Record training metrics with SwanLab on rank zero')
+    parser.add_argument('--swanlab-project', default='laya-multimodal', help='SwanLab project name')
+    parser.add_argument('--swanlab-name', help='Override the SwanLab experiment name derived from --out')
+    args = parser.parse_args(argv)
+    if args.swanlab and (find_spec('swanlab') is None or (args.swanlab == 'local' and find_spec('swanboard') is None)):
+        parser.error("--swanlab requires installing the SwanLab extra: pip install -e '.[multimodal,swanlab]'")
+    if args.deterministic:
+        os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+        torch.use_deterministic_algorithms(True)
+    values = json.loads(Path(args.config).read_text(encoding="utf-8"))
+    if set(values) - {field.name for field in fields(GroundingTrainConfig)}:
+        raise ValueError('unknown training fields')
+    config = GroundingTrainConfig(**values)
+    config.validate()
+    ctx = distributed_context()
+
+    model_dir = Path(args.model).expanduser()
+    checkpoint = model_dir / 'multimodal_config.json'
+    if args.require_original_base and (checkpoint.exists() or (model_dir / 'adapter_config.json').exists()):
+        raise ValueError('fresh-base training must not load a decision checkpoint or adapter')
+    saved = json.loads(checkpoint.read_text(encoding="utf-8")) if checkpoint.exists() else {}
+    source = saved.get('backbone', args.model)
+    config_dir = model_dir / 'backbone_config' if saved.get('mode') == 'full' else Path(source).expanduser()
+    model_type = json.loads((config_dir / 'config.json').read_text(encoding="utf-8"))['model_type']
+    if model_type not in {'gemma4', 'qwen3_5'}:
+        raise ValueError('joint training requires Gemma 4 or Qwen3.5')
+    if args.visual_only != (model_type == 'qwen3_5'):
+        raise ValueError('Qwen3.5 requires --visual-only; Gemma4 keeps the full-omni recipe')
+    if args.qwen_training_delta and model_type != 'qwen3_5':
+        raise ValueError('--qwen-training-delta requires Qwen3.5')
+    root = Path(args.data)
+    row_validator = (_visual_row_validator(source, config.max_len, not args.allow_unadmitted)
+                     if args.visual_only else None)
+    # Construct the model with the same seed that will be used for training.
+    torch.manual_seed(config.seed)
+    agent = MultimodalAgent(
+        args.model, device=ctx.device, max_len=config.max_len, frames=4, max_audio_seconds=30.,
+        use_audio_in_video=not args.visual_only, readout='candidate', prompt_version='v2', grounding_slots=1,
+    )
+    agent._training_variant = {
+        "text_attention": args.text_attention,
+        "qwen_training_delta": args.qwen_training_delta,
+        "deterministic": torch.are_deterministic_algorithms_enabled(),
+    }
+    if args.text_attention != 'sdpa':
+        if model_type != 'gemma4':
+            raise ValueError('Experimental text attention currently validated for Gemma only')
+        agent.model.set_attn_implementation({
+            '': 'sdpa', 'text_config': args.text_attention, 'vision_config': 'sdpa', 'audio_config': 'eager',
+        })
+    inherited_adapters = hasattr(agent.model, 'peft_config')
+    base = agent.model.get_base_model() if inherited_adapters else agent.model
+    if base.grounding_head.architecture != 'single-v1':
+        raise ValueError('expected compact single-box head')
+    if args.require_original_base and inherited_adapters:
+        raise ValueError('inherited adapters forbidden')
+    if ctx.main:
+        out = Path(args.out)
+        out.mkdir(parents=True, exist_ok=True)
+        initialization = {
+            'model': str(model_dir.resolve()),
+            'seed_before_head_construction': config.seed,
+            'original_base': args.require_original_base,
+            'readout': agent.readout,
+            'prompt_version': agent.prompt_version,
+            'grounding_architecture': 'single-v1',
+            'inherited_adapters': inherited_adapters,
+            'fresh_optimizer': args.resume is None,
+            'world_size': ctx.world_size,
+            **agent._training_variant,
+        }
+        (out / 'initialization.json').write_text(json.dumps(initialization, indent=2) + '\n')
+    reporter = None
+    if ctx.main and args.swanlab:
+        from .training.reporting import SwanLabReporter
+
+        reporter = SwanLabReporter(args.out, mode=args.swanlab, project=args.swanlab_project, name=args.swanlab_name)
+    with (
+        reporter if reporter is not None else nullcontext(),
+        qwen_training_delta() if args.qwen_training_delta else nullcontext(),
+    ):
+        finetune_grounding(
+            root / (args.train_split + '.jsonl'), root / 'dev.jsonl', args.out, model=args.model,
+            decision_dev_data=root / 'decision_dev.jsonl', config=config, agent=agent,
+            row_validator=row_validator, resume_from=args.resume, reporter=reporter,
+        )
+
+
+if __name__ == '__main__':
+    main()

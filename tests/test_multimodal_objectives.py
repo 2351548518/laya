@@ -4,24 +4,7 @@ import json
 import pytest
 import torch
 
-from laya_multimodal.multimodal_objectives import decision_loss, grow_lora, learning_rate_factor
-
-
-def test_policy_gradient_is_invariant_to_microbatch_partition_with_fixed_noise(monkeypatch):
-    noise = torch.randn((8, 4, 3), generator=torch.Generator().manual_seed(101))
-    logits = torch.tensor([[4., 0., -2.], [.05, 0., -.05], [.5, .4, .3], [1., 0., -1.]], requires_grad=True)
-    target = torch.eye(3)[torch.tensor([0, 2, 1, 2])]
-    mask, qt = torch.ones_like(logits, dtype=torch.bool), torch.tensor([0, 0, 0, 0])
-    monkeypatch.setattr(torch, "randn", lambda *args, **kwargs: noise)
-    full, _ = decision_loss(logits, target, mask, qt, objective="rlcd", rl_samples=8, rl_weight=.1)
-    expected = torch.autograd.grad(full, logits)[0]
-    pieces = []
-    for i in range(4):
-        monkeypatch.setattr(torch, "randn", lambda *args, i=i, **kwargs: noise[:, i:i + 1])
-        loss, _ = decision_loss(logits[i:i + 1], target[i:i + 1], mask[i:i + 1], qt[i:i + 1],
-                                objective="rlcd", rl_samples=8, rl_weight=.1)
-        pieces.append(loss / 4)
-    torch.testing.assert_close(torch.autograd.grad(sum(pieces), logits)[0], expected)
+from laya_multimodal.training.objectives import decision_loss, grow_lora, learning_rate_factor
 
 
 def test_ranked_probability_loss_penalizes_farther_ordinal_errors_and_has_gradients():
@@ -36,19 +19,18 @@ def test_ranked_probability_loss_penalizes_farther_ordinal_errors_and_has_gradie
     assert torch.isfinite(far.grad).all() and far.grad.abs().sum() > 0
 
 
-def test_filtered_distillation_and_anchor_have_finite_masked_gradients():
+def test_reference_kl_has_finite_masked_gradients():
     logits = torch.tensor([[0.5, -0.2, 1.], [0., 0., -10000.]], requires_grad=True)
     mask = torch.tensor([[True, True, True], [True, True, False]])
     target = torch.tensor([[1., 0., 0.], [0., 1., 0.]])
-    teacher = torch.tensor([[0.8, 0.1, 0.1], [float("nan"), 0., 0.]])
     reference = target.clone()
     reference[1, 0] = float("nan")
     accepted = torch.tensor([True, False])
-    loss, parts = decision_loss(logits, target, mask, torch.tensor([0, 2]), teacher=teacher,
-        teacher_mask=accepted, distill_weight=0.2, reference=reference, reference_mask=accepted, kl_weight=0.01)
+    loss, parts = decision_loss(logits, target, mask, torch.tensor([0, 2]),
+        reference=reference, reference_mask=accepted, kl_weight=0.01)
     loss.backward()
     assert torch.isfinite(loss) and torch.isfinite(logits.grad).all() and logits.grad[1, 2] == 0
-    assert parts["distillation_kl"] > 0 and parts["reference_kl"] > 0
+    assert parts["reference_kl"] > 0
 
 
 def test_lr_warmup_and_cosine_reach_requested_floor():
@@ -57,32 +39,19 @@ def test_lr_warmup_and_cosine_reach_requested_floor():
     assert learning_rate_factor(100, 100, 0.1) == pytest.approx(0.1)
 
 
-def test_noisy_policy_objective_adds_a_real_finite_policy_gradient():
-    logits = torch.tensor([[1., -.2, .3], [-.2, .8, .1]], requires_grad=True)
-    target = torch.tensor([[0., 1., 0.], [1., 0., 0.]])
-    mask, qt = torch.ones_like(logits, dtype=torch.bool), torch.tensor([0, 1])
-    ordinary, _ = decision_loss(logits, target, mask, qt)
-    supervised_gradient = torch.autograd.grad(ordinary, logits)[0]
-    torch.manual_seed(42)
-    reinforced, parts = decision_loss(logits, target, mask, qt, objective="rlcd", rl_samples=8)
-    gradient = torch.autograd.grad(reinforced, logits)[0]
-    assert torch.isfinite(gradient).all()
-    assert not torch.allclose(gradient, supervised_gradient)
-    assert "policy_gradient" in parts
-
-
-def test_variable_micro_batches_preserve_supervised_ordinal_and_distillation_gradients():
+def test_variable_micro_batches_preserve_supervised_ordinal_and_reference_gradients():
     logits = torch.randn(5, 3, requires_grad=True)
     y = torch.eye(3)[torch.tensor([0, 1, 2, 1, 0])]
     mask, qt = torch.ones_like(logits, dtype=torch.bool), torch.tensor([0, 1, 2, 1, 0])
-    teacher = y * .8 + .2 / 3
-    kwargs = dict(ordinal_weight=.25, brier_weight=.025, distill_weight=.2)
-    complete, _ = decision_loss(logits, y, mask, qt, teacher=teacher, **kwargs)
+    reference = y * .8 + .2 / 3
+    kwargs = dict(ordinal_weight=.25, brier_weight=.025, kl_weight=.2)
+    complete, _ = decision_loss(logits, y, mask, qt, reference=reference, **kwargs)
     expected = torch.autograd.grad(complete, logits)[0]
     pieces = []
     for start, end in ((0, 1), (1, 4), (4, 5)):
-        loss, _ = decision_loss(logits[start:end], y[start:end], mask[start:end], qt[start:end],
-                                teacher=teacher[start:end], **kwargs)
+        loss, parts = decision_loss(logits[start:end], y[start:end], mask[start:end], qt[start:end],
+                                    reference=reference[start:end], collect_components=False, **kwargs)
+        assert parts == {}
         pieces.append(loss * (end - start) / 5)
     actual = torch.autograd.grad(sum(pieces), logits)[0]
     torch.testing.assert_close(expected, actual)
@@ -104,7 +73,7 @@ def test_growing_lora_preserves_predictions_and_saved_shapes(tmp_path):
 
 def test_media_hash_cache_revalidates_same_size_file_changes(tmp_path):
     import os
-    from laya_multimodal.multimodal_train import _media_hash
+    from laya_multimodal.data import _media_hash
     path=tmp_path/'media';path.write_bytes(b'first')
     before=path.stat();one=_media_hash(str(path),before.st_mtime_ns,before.st_size)
     path.write_bytes(b'other');os.utime(path,ns=(before.st_atime_ns,before.st_mtime_ns+1000000))
