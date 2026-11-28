@@ -185,6 +185,19 @@ def _is_adapter_model(model):
     return hasattr(model, "peft_config") and callable(getattr(model, "get_base_model", None))
 
 
+def _full_checkpoint_model(factory, config, device, *, attention, dtype):
+    options = {"attn_implementation": attention, "dtype": dtype}
+    if device.type == "cuda":
+        try:
+            # CUDA construction avoids a full CPU initialization before loading the weights.
+            with device:
+                return factory.from_config(config, **options)
+        except torch.OutOfMemoryError:
+            # The temporary vocabulary head can be larger than the restored decision head.
+            pass
+    return factory.from_config(config, **options)
+
+
 class MultimodalAgent(DecisionAgent):
     """A general multimodal reader converted into a local typed decision model.
 
@@ -242,9 +255,9 @@ class MultimodalAgent(DecisionAgent):
         factory = _model_class(transformers, self.model_type)
         model_config = config.thinker_config if self.model_type == "qwen2_5_omni" else config
         if saved and saved["mode"] == "full":
-            self.model = factory.from_config(model_config, attn_implementation=attention, torch_dtype=self.dtype)
+            self.model = _full_checkpoint_model(factory, model_config, self.device, attention=attention, dtype=self.dtype)
         else:
-            self.model = factory.from_pretrained(self.model_id, config=model_config, torch_dtype=self.dtype,
+            self.model = factory.from_pretrained(self.model_id, config=model_config, dtype=self.dtype,
                                                  attn_implementation=attention, use_safetensors=True, **options)
         forward_options = {"logits_to_keep": 1} if "logits_to_keep" in inspect.signature(self.model.forward).parameters else {}
         self.symbols = install_decision_head(self.model, self.tok, saved.get("symbols") if saved else None)
