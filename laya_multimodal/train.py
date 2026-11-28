@@ -23,6 +23,7 @@ from .training.checkpoint import load_checkpoint, save_checkpoint
 from .training.distributed import distributed_context
 from .training.qwen_delta import qwen_training_delta
 from .training.reporting import log_training_event
+from .decisions.questions import QTYPES
 from .evaluation.evaluator import file_fingerprint
 from .models.grounding import box_iou, crowd_overlap, grounding_loss, validate_boxes
 from .models.multimodal import MultimodalAgent, _active_head, _is_adapter_model
@@ -32,7 +33,7 @@ from .data import (
     target_from_expected as target_from_expected, target_from_gold as target_from_gold,
 )
 from .evaluation.native_metrics import _evaluation_video_key, collect_records, metrics as decision_metrics
-from .training.objectives import configure_training, learning_rate_factor, optimizer_groups
+from .training.objectives import configure_training, decision_loss, learning_rate_factor, optimizer_groups
 
 
 @dataclass
@@ -482,32 +483,44 @@ def _activation_context(inputs, config):
     return torch.autograd.graph.save_on_cpu(pin_memory=inputs['input_ids'].device.type == 'cuda')
 
 
-def _decision_batch_loss(agent,chunk,inputs,config):
+def _decision_batch_loss(agent, chunk, inputs, config):
     """Use the same per-example CE/RPS/Brier/KL objective as the scalar replay path."""
-    from .decisions.questions import QTYPES
-    from .training.objectives import decision_loss
-    width=max(len(item[4]) for item in chunk);raw=agent._logits(inputs,width);aligned=[];targets=[];references=[];accepted=[]
-    for index,(row,qid,qdef,q,values) in enumerate(chunk):
-        k=len(values);logits=raw[index,:k]
+    width = max(len(item[4]) for item in chunk)
+    raw = agent._logits(inputs, width)
+    aligned, targets, references, accepted = [], [], [], []
+    for index, (row, qid, qdef, q, values) in enumerate(chunk):
+        k = len(values)
+        logits = raw[index, :k]
         if q.get('option_order') is not None:
-            logits=logits[torch.argsort(torch.as_tensor(q['option_order'],device=agent.device))]
-        aligned.append(F.pad(logits,(0,width-k),value=-1e4));targets.append(list(values)+[0.]*(width-k))
+            order = torch.as_tensor(q['option_order'], device=agent.device)
+            logits = logits[torch.argsort(order)]
+        padding = width - k
+        aligned.append(F.pad(logits, (0, padding), value=-1e4) if padding else logits)
+        targets.append(list(values) + [0.] * padding)
         if not config.replay_kl_weight:
             continue
-        reference=row.get('replay_reference');valid=False
+        reference = row.get('replay_reference')
+        valid = False
         if reference is not None:
-            if row.get('replay_reference_identity')!=example_hash(row,qid,qdef):raise ValueError('replay reference input/options changed')
-            if len(reference)!=k:raise ValueError('replay reference option order/size mismatch')
-            valid=int(max(range(k),key=lambda i:reference[i]))==int(max(range(k),key=lambda i:values[i])) and max(reference)>=.5
-        references.append((list(reference) if reference is not None else [0.]*k)+[0.]*(width-k));accepted.append(valid)
+            if row.get('replay_reference_identity') != example_hash(row, qid, qdef):
+                raise ValueError('replay reference input/options changed')
+            if len(reference) != k:
+                raise ValueError('replay reference option order/size mismatch')
+            reference_choice = max(range(k), key=reference.__getitem__)
+            target_choice = max(range(k), key=values.__getitem__)
+            valid = reference_choice == target_choice and reference[reference_choice] >= .5
+        references.append((list(reference) if reference is not None else [0.] * k) + [0.] * padding)
+        accepted.append(valid)
     use_reference = any(accepted)
-    mask=torch.tensor([[i<len(item[4]) for i in range(width)] for item in chunk],device=agent.device)
-    loss,_=decision_loss(torch.stack(aligned),torch.tensor(targets,device=agent.device,dtype=torch.float32),mask,
-        torch.tensor([QTYPES[item[3]['t']] for item in chunk],device=agent.device),
-        ordinal_weight=config.decision_ordinal_weight,brier_weight=config.decision_brier_weight,
-        reference=torch.tensor(references,device=agent.device,dtype=torch.float32) if use_reference else None,
-        reference_mask=torch.tensor(accepted,device=agent.device) if use_reference else None,
-        kl_weight=config.replay_kl_weight, collect_components=False)
+    mask = torch.tensor([[i < len(item[4]) for i in range(width)] for item in chunk], device=agent.device)
+    loss, _ = decision_loss(
+        torch.stack(aligned), torch.tensor(targets, device=agent.device, dtype=torch.float32), mask,
+        torch.tensor([QTYPES[item[3]['t']] for item in chunk], device=agent.device),
+        ordinal_weight=config.decision_ordinal_weight, brier_weight=config.decision_brier_weight,
+        reference=torch.tensor(references, device=agent.device, dtype=torch.float32) if use_reference else None,
+        reference_mask=torch.tensor(accepted, device=agent.device) if use_reference else None,
+        kl_weight=config.replay_kl_weight, collect_components=False,
+    )
     return loss
 
 
@@ -817,19 +830,21 @@ def finetune_grounding(train_data, dev_data, output, *, model="google/gemma-4-E2
                     option_order = torch.as_tensor(q['option_order'], device=agent.device)
                     logits = logits[:, torch.argsort(option_order)]
                 target = torch.tensor(values, device=agent.device)
-                loss = -(target * F.log_softmax(logits[0].float(), -1)).sum()
                 if cfg.decision_ordinal_weight or cfg.decision_brier_weight:
-                    from .decisions.questions import QTYPES
-                    from .training.objectives import decision_loss
-                    loss,_=decision_loss(logits,target.unsqueeze(0),torch.ones_like(logits,dtype=torch.bool),
-                        torch.tensor([QTYPES[q['t']]],device=agent.device),
+                    loss, _ = decision_loss(
+                        logits, target.unsqueeze(0), torch.ones_like(logits, dtype=torch.bool),
+                        torch.tensor([QTYPES[q['t']]], device=agent.device),
                         ordinal_weight=cfg.decision_ordinal_weight, brier_weight=cfg.decision_brier_weight,
-                        collect_components=False)
+                        collect_components=False,
+                    )
+                else:
+                    loss = -(target * F.log_softmax(logits[0].float(), -1)).sum()
                 if row.get('replay_reference') is not None and cfg.replay_kl_weight:
                     if row.get('replay_reference_identity') != example_hash(row, qid, qdef):
                         raise ValueError('replay reference input/options changed')
                     reference = torch.tensor(row['replay_reference'], device=agent.device, dtype=torch.float32)
-                    if reference.shape != target.shape:raise ValueError('replay reference option order/size mismatch')
+                    if reference.shape != target.shape:
+                        raise ValueError('replay reference option order/size mismatch')
                     if int(reference.argmax()) == int(target.argmax()) and float(reference.max()) >= .5:
                         loss = loss + cfg.replay_kl_weight * F.kl_div(F.log_softmax(logits[0].float(), -1), reference, reduction='sum')
                 loss_value = float(loss.detach())

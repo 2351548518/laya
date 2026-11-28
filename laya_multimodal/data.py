@@ -293,7 +293,7 @@ def target_from_expected(q: Dict[str, Any], expected_val: Any,
     t, crit = q["t"], q["crit"]
     k = len(render_options(q))
     idx = None
-    target = None
+    fraction = 0.0
 
     if t == "choice":
         keys = list(crit.keys())
@@ -324,42 +324,31 @@ def target_from_expected(q: Dict[str, Any], expected_val: Any,
         if idx is None:
             raise ValueError("expected answer %r cannot be parsed as a noul boolean" % (expected_val,))
     else:  # score
-        keys = list(crit.keys()) if isinstance(crit, dict) else [str(i) for i in range(len(crit))]
-        K = len(keys)
-        target = None
+        keys = list(crit) if isinstance(crit, dict) else [str(i) for i in range(k)]
         if isinstance(expected_val, str) and expected_val in keys:
             idx = keys.index(expected_val)
-            target = [1.0 if i == idx else 0.0 for i in range(K)]
         else:
-            try:
-                if not isinstance(expected_val, bool):
-                    val = float(expected_val)
-                    if 0.0 <= val <= float(K - 1):
-                        low = int(math.floor(val))
-                        if low == K - 1 or val == float(low):
-                            target = [1.0 if i == low else 0.0 for i in range(K)]
-                        else:
-                            frac = val - float(low)
-                            target = [0.0] * K
-                            target[low] = 1.0 - frac
-                            target[low + 1] = frac
-                    else:
-                        raise ValueError("expected score %r out of bounds [0, %d]" % (expected_val, K - 1))
-            except (ValueError, TypeError) as exc:
-                if isinstance(exc, ValueError) and "out of bounds" in str(exc):
-                    raise
-                pass
-        if target is None:
-            str_val = str(expected_val)
-            for i, key in enumerate(keys):
-                if str(key) == str_val:
-                    target = [1.0 if j == i else 0.0 for j in range(K)]
-                    break
-        if target is None:
-            raise ValueError("expected answer %r not found in score levels %r" % (expected_val, keys))
+            level = None
+            if not isinstance(expected_val, bool):
+                try:
+                    level = float(expected_val)
+                except (ValueError, TypeError):
+                    pass
+            if level is None:
+                label = str(expected_val)
+                idx = next((i for i, key in enumerate(keys) if str(key) == label), None)
+                if idx is None:
+                    raise ValueError("expected answer %r not found in score levels %r" % (expected_val, keys))
+            else:
+                if not 0.0 <= level <= k - 1:
+                    raise ValueError("expected score %r out of bounds [0, %d]" % (expected_val, k - 1))
+                idx = int(level)
+                fraction = level - idx
 
-    if target is None:
-        target = [1.0 if i == idx else 0.0 for i in range(k)]
+    target = [0.0] * k
+    target[idx] = 1.0 - fraction
+    if fraction:
+        target[idx + 1] = fraction
     if label_smoothing > 0.0:
         smooth_val = label_smoothing / k
         target = [(1.0 - label_smoothing) * v + smooth_val for v in target]

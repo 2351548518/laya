@@ -13,9 +13,11 @@ from tempfile import TemporaryDirectory
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from laya_multimodal.models.multimodal import MultimodalAgent
-from laya_multimodal.data import BOX_EDGES, MEDIA_CONTROLS, MEDIA_FIELDS, can_shuffle_choice, normalize_record
+from laya_multimodal.data import (
+    BOX_EDGES, MEDIA_CONTROLS, MEDIA_FIELDS, can_shuffle_choice, decision_target, normalize_record,
+)
 from laya_multimodal.decisions.systemone import MAX_CHOICE_OPTIONS, MAX_SCORE_LEVELS
-from laya_multimodal.train import _validate_grounding_row, decision_target
+from laya_multimodal.train import _validate_grounding_row
 
 try:
     from orjson import dumps as encode_json, loads

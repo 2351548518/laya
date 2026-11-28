@@ -70,6 +70,9 @@ class TargetTests(unittest.TestCase):
         self.assertAlmostEqual(res_frac2[0], 0.8)
         self.assertAlmostEqual(res_frac2[1], 0.2)
         self.assertAlmostEqual(res_frac2[2], 0.0)
+        named = {"t": "score", "crit": {"low": "low", "0": "medium", "high": "high"}}
+        self.assertEqual(target_from_expected(named, "0"), [0.0, 1.0, 0.0])
+        self.assertEqual(target_from_expected(named, 0), [1.0, 0.0, 0.0])
 
     def test_target_from_expected_label_smoothing(self):
         res = target_from_expected(MultimodalAgent._to_internal(DEPARTMENT), "billing", label_smoothing=0.1)
